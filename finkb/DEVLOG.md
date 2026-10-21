@@ -429,25 +429,43 @@ reporting/               ← git 仓库根
 L2 知识层的审计机制（`git diff` 追溯知识变更）依赖此仓库，所以这件事必须在
 Phase 2 之前完成——现已完成。
 
-### 9.4 参考资料（`_ref/`）
+### 9.4 参考资料（已移除，保留恢复方式）
 
-第三方资料，**只读参考，不是本项目代码**。
+**当前工作区没有第三方参考材料。** 此前 `_ref/` 下曾有一份快照，已按项目所有者
+要求于 2026-10-21 移除。
 
-| 目录 | 内容 | 与本项目的关系 |
+**恢复方式**（只读参考，不是本项目代码）：
+
+```bash
+cd /home/generalblack/code/works/reporting
+git show 57f9fed --stat -- _ref            # 查看清单
+git checkout 57f9fed -- _ref               # 恢复到工作区
+```
+
+曾收录的两份材料，供判断是否值得恢复：
+
+| 目录 | 内容 | 状态 |
 |---|---|---|
-| `_ref/openkb_src/` | **OpenKB**（PageIndex / Vectify AI 团队），Apache-2.0，13 个 Python 文件约 5521 行 | **L2 知识层的直接参考实现**。含 `openkb_lint.py`、`openkb_frontmatter.py`、`openkb_indexer.py`、`openkb_api_graph.py`、`openkb_tree_renderer.py`、`openkb_visualize.py`、`openkb_mutation.py`（原子写）、`openkb_schema.py`、`openkb_agent_compiler.py`，以及 `docs_golden-principles.md` |
-| `_ref/fibo_src/` | FIBO 金融业务本体 RDF（FND 会计/现金流/货币金额、IND 指标） | L1 `metric_dict` 的口径建模可参考其术语体系 |
-| `_ref/fibo_README.md` | FIBO 说明 | — |
+| `_ref/openkb_src/` | **OpenKB**（PageIndex / Vectify AI 团队），Apache-2.0，13 个 Python 文件约 5521 行 | ⚠️ **不完整、不可运行**的部分快照 |
+| `_ref/fibo_src/` | FIBO 金融业务本体 RDF | 仅 4 个抽样文件，非完整本体 |
 
-**给后续 agent 的提示**：
+**关于 OpenKB 的准确认知（重要，避免误解）**：
 
-- 做 L2（lint / frontmatter / draft 流转 / 索引 / 可视化）时，**先读 `_ref/openkb_src/`**，
-  不要从零设计。它的 `docs_golden-principles.md` 里有关于「边界校验」「原子写入」
-  「共享工具优先」的机械规则，与本项目 AGENTS.md 的约束思路一致。
-- 注意 OpenKB 的检索底座是 **PageIndex**（无向量结构树推理），与本项目
-  「FTS5 为主 + 向量兜底」不同。**参考它的知识层组织方式，不要照搬它的检索层。**
-- `_ref/` 为第三方 Apache-2.0 代码，**不得直接 copy 进 `src/`**；需要复用逻辑时
-  重写并在此处记录来源。
+- 它是被**拍平**的包：源码 `openkb/*.py` 被复制成 `openkb_src/openkb_*.py`，
+  但文件内仍是 `from openkb.config import ...` 的包内绝对导入 → **import 必然失败**。
+- **缺 `locks.py`（被 6 个文件引用）、`README.md`、`log.py`、`__init__.py`、
+  `tests/`、`LICENSE`**，以及 `api_helpers` / `api_models` / `agent/tools` 等被引用模块。
+- 因此它**只能当代码阅读**，不能运行、不能直接复用。
+- 若将来真要复用 OpenKB 能力（例如它的 lint 或 indexer），应重新获取**完整仓库**，
+  而不是依赖这份快照。
+
+**若后续恢复了快照，使用时的三条约束**：
+
+1. 做 L2（lint / frontmatter / draft 流转 / 索引 / 可视化）时可以参考其**组织方式**，
+   但不要照搬代码。
+2. OpenKB 的检索底座是 **PageIndex**（无向量结构树推理），与本项目
+   「FTS5 为主 + 向量兜底」不同——**参考知识层，不参考检索层**。
+3. 第三方 Apache-2.0 代码**不得直接 copy 进 `src/`**；复用逻辑须重写并在此记录来源。
 
 ---
 
@@ -477,15 +495,19 @@ Phase 2 之前完成——现已完成。
 
 > 时间线：2026-10-21 之后的条目来自 git 提交历史，之前的是**重建**的。
 
+### 2026-10-21（当日第三段）
+- **移除 `_ref/`**（22 个文件）：项目所有者确认不需要本地保留。
+  已从工作区与索引删除，可从 `57f9fed` 用 `git checkout 57f9fed -- _ref` 恢复
+- 核查发现该快照**不完整且不可运行**（缺 `locks.py` / `README.md` / `__init__.py` /
+  `tests/` / `LICENSE`，且包被拍平但内部仍是包内绝对导入），
+  据此重写 §9.4，避免后续 agent 误以为它是可用的完整实现
+
 ### 2026-10-21（当日第二段）
 - **建立 git 仓库**（根目录 `reporting/`，`main` 分支），首次提交 `57f9fed`：
   50 文件 / 12422 行；`.venv` 与 40MB PDF 已忽略，仓库体积 744K
 - 建立 `.gitignore`：忽略 `raw/*.pdf` 但保留 `manifest.csv` 与抓取脚本，
   保证任何环境都能凭清单重建语料
-- **发现 `_ref/` 参考资料**并入库，补充 §9.4：
-  - `openkb_src/` —— PageIndex 团队的 LLM 知识库实现（Apache-2.0，5521 行），
-    是 L2 层的直接参考
-  - `fibo_src/` —— FIBO 金融本体 RDF，可参考指标口径建模
+- 发现 `_ref/` 参考资料并入库（**已于当日第三段移除**，见上）
 
 ### 2026-10-21（当日第一段）
 - 建立本日志体系（`DEVLOG.md` + `AGENTS.md`）
