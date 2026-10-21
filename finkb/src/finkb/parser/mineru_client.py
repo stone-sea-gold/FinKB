@@ -374,6 +374,34 @@ def _safe_extract(archive: zipfile.ZipFile, target: Path) -> None:
 # --------------------------------------------------------------------------- #
 _HEADING_TYPES = {"title", "heading"}
 
+#: MinerU 显式标记的版面噪音类型。
+#: 实测 pipeline 后端**不会过滤**页眉页脚，而是把它们作为独立块输出并打上类型标签
+#: （VLM 后端还会额外产出 footer / aside_text / page_footnote 等）。
+#: 有了类型标签就不必依赖统计推断——这是比 ``noise_filter`` 更可靠的信号。
+_NOISE_TYPES = {"header", "footer", "page_number", "aside_text", "page_footnote"}
+
+
+def _build_page_number_map(content_list: list[dict[str, Any]]) -> dict[int, int]:
+    """建立 ``page_idx → 物理页码`` 映射。
+
+    **为什么必须这么做**：使用 ``page_ranges`` 只解析部分页时，MinerU 返回的
+    ``page_idx`` **会从 0 重新编号**，导致 ``page_idx + 1`` 得到的是「第 1 页」
+    而不是真实物理页码。若不修正，所有 ``[Ref: doc#P1]`` 锚点都会指错页——
+    这对「物理页码强溯源」是致命错误。
+
+    MinerU 会为每页输出 ``type="page_number"`` 的块，其 ``text`` 就是**真实物理
+    页码**，用它来修正。缺失该块时退回 ``page_idx + 1``。
+    """
+    mapping: dict[int, int] = {}
+    for item in content_list:
+        if str(item.get("type", "")) != "page_number":
+            continue
+        text = str(item.get("text") or "").strip()
+        if not text.isdigit():
+            continue
+        mapping[int(item.get("page_idx", 0))] = int(text)
+    return mapping
+
 
 def _is_heading(item: dict[str, Any]) -> bool:
     """标题判定（按第三方实测规范修正）。
@@ -394,17 +422,22 @@ def content_list_to_pages(
 ) -> list[Page]:
     """把 MinerU 的 ``content_list.json`` 转成按页组织的 ``Page``。
 
-    MinerU 的 ``page_idx`` 是 **0-based**，这里统一转成 1-based 物理页码，
-    与方案 §9.3 的锚点约定一致。
+    **物理页码优先取 ``page_number`` 块的真实值**，其次才退回 ``page_idx + 1``。
+    原因见 :func:`_build_page_number_map`——分页解析时 ``page_idx`` 会从 0 重编号。
+
+    页眉/页脚/页码块按 MinerU 的类型标签**直接标记为 ``is_noise=True``**，
+    不需要统计推断。
 
     章节标题会被解析为 ``heading`` 块，并作为后续块的 ``section`` 继承下去，
     这样 L1 抽取时能拿到「第三节 管理层讨论与分析」这类上下文。
     """
     pages: dict[int, Page] = {}
     current_section: str | None = None
+    page_map = _build_page_number_map(content_list)
 
     for item in content_list:
-        page_no = int(item.get("page_idx", 0)) + 1
+        raw_page_idx = int(item.get("page_idx", 0))
+        page_no = page_map.get(raw_page_idx, raw_page_idx + 1)
         item_type = str(item.get("type", "text"))
         text = _item_text(item)
         if not text.strip():
@@ -442,6 +475,9 @@ def content_list_to_pages(
                 lines=text.strip().splitlines(),
                 block_index=block_index,
                 table=table,
+                # MinerU 直接用类型标签告诉我们这是页眉/页脚/页码，
+                # 不必等 noise_filter 去做统计推断。
+                is_noise=item_type in _NOISE_TYPES,
             )
         )
 

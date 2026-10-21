@@ -220,20 +220,31 @@ class _HTMLTableExtractor(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.rows: list[list[str]] = []
         self.row_has_th: list[bool] = []
+        self.row_spans: list[list[int]] = []
         self._in_cell = False
         self._buffer: list[str] = []
         self._row: list[str] = []
         self._row_had_th = False
+        self._cell_spans: list[int] = []
 
     def handle_starttag(self, tag: str, attrs) -> None:
         if tag == "tr":
             self._row = []
             self._row_had_th = False
+            self._cell_spans = []
         elif tag in ("td", "th"):
             self._in_cell = True
             self._buffer = []
             if tag == "th":
                 self._row_had_th = True
+            span = 1
+            for name, value in attrs:
+                if name == "rowspan" and value:
+                    try:
+                        span = int(str(value).strip().strip('"'))
+                    except ValueError:
+                        span = 1
+            self._cell_spans.append(max(span, 1))
         elif tag == "br" and self._in_cell:
             self._buffer.append(" ")
 
@@ -245,6 +256,7 @@ class _HTMLTableExtractor(HTMLParser):
             if self._row:
                 self.rows.append(self._row)
                 self.row_has_th.append(self._row_had_th)
+                self.row_spans.append(self._cell_spans)
             self._row = []
 
     def handle_data(self, data: str) -> None:
@@ -255,9 +267,15 @@ class _HTMLTableExtractor(HTMLParser):
 def html_table_to_rows(html: str) -> tuple[list[list[str]], bool]:
     """把 HTML 表格转成 ``(rows, first_row_is_header)``。
 
-    ``first_row_is_header`` 依据首行是否使用 ``<th>`` 判断。这一信息很关键：
-    MinerU 对**跨页续接表**输出的 HTML 没有 ``<th>``，若强行当成表头，下游缝合
-    会把续接行误判成「新表自带表头」而拒绝拼接。
+    ``first_row_is_header`` 依据首行是否使用 ``<th>`` 判断。
+
+    **实测修正**：MinerU 的表头**不用 ``<th>``**，而是 ``<td rowspan="2">``。
+    因此这里额外采用一条兼容判据——首行单元格全部带 ``rowspan≥2`` 时，
+    也认定它是表头（合并表头行）。
+
+    **全空行会被剔除**：``rowspan`` 未被展开时，后续行会退化成「1 个空单元格」的
+    垃圾行（实测 P43 证券投资表就有一条）。这类行若保留，会在缝合时污染数据，
+    也会让 L1 抽到空记录。
     """
     extractor = _HTMLTableExtractor()
     extractor.feed(html)
@@ -265,9 +283,29 @@ def html_table_to_rows(html: str) -> tuple[list[list[str]], bool]:
     if not extractor.rows:
         return [], False
 
-    width = max(len(row) for row in extractor.rows)
-    rows = [row + [""] * (width - len(row)) for row in extractor.rows]
-    return rows, bool(extractor.row_has_th and extractor.row_has_th[0])
+    keep = [
+        index
+        for index, row in enumerate(extractor.rows)
+        if any(cell.strip() for cell in row)
+    ]
+    if not keep:
+        return [], False
+
+    kept_rows = [extractor.rows[index] for index in keep]
+    kept_th = [extractor.row_has_th[index] for index in keep]
+    kept_spans = [extractor.row_spans[index] for index in keep]
+
+    width = max(len(row) for row in kept_rows)
+    rows = [row + [""] * (width - len(row)) for row in kept_rows]
+
+    first_is_header = bool(kept_th and kept_th[0])
+    if not first_is_header and kept_spans:
+        first_spans = kept_spans[0]
+        # MinerU 的合并表头：首行所有单元格 rowspan≥2（实测 P43 证券投资表）
+        if len(first_spans) >= 2 and all(span >= 2 for span in first_spans):
+            first_is_header = True
+
+    return rows, first_is_header
 
 
 def html_table_to_markdown(html: str) -> str:

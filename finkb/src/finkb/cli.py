@@ -187,6 +187,10 @@ def run_parse(args: argparse.Namespace) -> int:
             {"pages": record.pages, "ncols": record.ncols, "reason": record.reason}
             for record in stitch.records
         ],
+        "stitch_rejections": [
+            {"pages": record.pages, "ncols": record.ncols, "reason": record.reason}
+            for record in stitch.rejections
+        ],
     }
     (output_dir / "report.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -201,7 +205,13 @@ def run_parse(args: argparse.Namespace) -> int:
             pages = "→".join(f"P{p}" for p in record.pages)
             print(f"  {pages}  {record.ncols} 列  ({record.reason})")
     else:
-        print("\n未发现跨页表格。若预期存在，请检查页眉是否阻断了判据（见 DEVLOG 坑-04/05）。")
+        print("\n未发生跨页缝合。")
+
+    if stitch.rejections:
+        print("\n⚠️ 疑似跨页续接但被判据拒绝（请人工核对）：")
+        for record in stitch.rejections:
+            pages = "→".join(f"P{p}" for p in record.pages)
+            print(f"  {pages}  {record.reason}")
 
     return 0
 

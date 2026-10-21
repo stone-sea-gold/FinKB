@@ -188,6 +188,17 @@ def stitch_tables(
 
                 can, reason = _can_merge(stitched, next_block.table, opts)
                 if not can:
+                    # 走到这里说明「页末表格 + 次页页首表格」两个位置条件都成立，
+                    # 是被内容判据（列数 / 表头）拒掉的。静默 break 会让用户无从
+                    # 判断为什么没缝上，因此记一条拒绝审计。
+                    result.rejections.append(
+                        StitchRecord(
+                            doc_id=first.meta.doc_id,
+                            pages=[stitched.page_start, next_block.table.page],
+                            ncols=next_block.table.ncols,
+                            reason=f"{reason}（起始表 {stitched.ncols} 列）",
+                        )
+                    )
                     break
 
                 stitched.rows.extend(list(row) for row in next_block.table.rows)

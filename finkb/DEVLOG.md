@@ -29,7 +29,7 @@
 | 项 | 值 |
 |---|---|
 | 阶段 | **Phase 0 完成**；Phase 1（DuckDB + 两段式抽取）未开始 |
-| 测试 | **87 项全部通过**，离线，约 0.5 秒 |
+| 测试 | **93 项全部通过**，离线，约 0.5 秒 |
 | 源码规模 | `src/` 1518 行（含 `__init__`），`tests/` 1331 行 |
 | 真实数据验证 | 有（pypdf 路径，268 页年报） |
 | MinerU 真实联调 | **未做**（无 token） |
@@ -240,7 +240,9 @@ noise_filter, table_stitcher → models
 ### ADR-012 表格表头按 `<th>` 判定，不走 Markdown 往返
 
 - **决策**：从 MinerU 的 `table_body`（HTML）直接构造 `TableBlock`，
-  首行有 `<th>` 才是表头，否则 `header=None`。
+  首行有 `<th>` **或首行单元格全部 `rowspan≥2`** 才是表头，否则 `header=None`。
+  （2026-10-21 实测修订：MinerU 用 `<td rowspan="2">` 做表头，没有 `<th>`，
+  原判据在真实数据上失效，见坑-12。）
 - **理由**：Markdown 管道表**语法上必须有表头**。若走「HTML → Markdown → 再解析」，
   无表头的跨页续接表会被强行套上表头，缝合时被判为「自带表头的新表」而拒绝拼接。
 - **影响**：`html_table_to_markdown` 仍存在（用于落盘与人工核对），
@@ -262,6 +264,22 @@ noise_filter, table_stitcher → models
 - **理由**：用户明确要求用已有数据。
 - **影响**：跨期对比只能靠 ① 2025 年报内的「上年同期」列；② 2025 vs 2026 半年报。
   **重述场景因此变成必然而非边缘**，ADR-007 从防御性设计升级为必需项。
+
+### ADR-015 MinerU 的类型标签优先于统计推断（实测新增）
+
+- **决策**：解析 `content_list.json` 时，`type ∈ {header, footer, page_number,
+  aside_text, page_footnote}` 的块**直接标记 `is_noise=True`**；
+  `noise_filter` 的统计式清洗降级为**兜底路径**（服务 pypdf）。
+- **背景**：此前假设「MinerU 会把页眉页脚丢进 `discarded_blocks`、不进 `content_list`」。
+  **实测发现恰恰相反**——pipeline 后端不过滤，而是输出独立块并打上类型标签
+  （`type="header"`、`type="page_number"`）。VLM 后端类型更全。
+- **理由**：类型标签是**确定性信号**，统计签名是**推断**。有确定信号时不应使用推断。
+- **影响**：
+  - MinerU 路径上 `noise_filter` 报「剥离 0 行」是**正常现象**，不代表清洗失效
+  - pypdf 路径仍必须走统计清洗（没有类型标签）
+  - 两条路径的清洗机制不同，测试须分别覆盖
+- **失效条件**：若换成不输出类型标签的解析器（或 VLM 后端类型发生变化），
+  必须退回统计清洗并重新验证。
 
 ---
 
@@ -347,6 +365,35 @@ noise_filter, table_stitcher → models
 - **根因**：OSS 预签名校验要求 **PUT 不带任何请求头**（含 `Content-Type`）。
 - **修复**：`upload_file()` 显式不传 headers。
 
+### 坑-11 分页解析时物理页码全错
+- **症状**：`--pages 43-44` 解析出的表，`parent_id` 是 `#P1_T02` / `#P2_T03`。
+- **根因**：MinerU 在只解析部分页时，返回的 `page_idx` **从 0 重新编号**；
+  我们按 `page_idx + 1` 计算物理页码，得到的是「第 1 页」而不是第 43 页。
+- **后果**：若不修正，**所有 `[Ref: doc#P1]` 锚点都会指错页**——对
+  「物理页码强溯源」是致命错误。
+- **修复**：MinerU 会输出 `type="page_number"` 的块，其 `text` 就是真实物理页码。
+  `_build_page_number_map()` 建立 `page_idx → 物理页码` 映射，优先使用它；
+  缺该块时才退回 `page_idx + 1`。
+- **测试**：`test_page_number_type_overrides_renumbered_page_idx`、
+  `test_page_idx_used_when_page_number_missing`
+
+### 坑-12 MinerU 用 `<td rowspan>` 做表头，不用 `<th>`
+- **症状**：P43 证券投资表明明有表头，却报 `header=无`。
+- **根因**：ADR-012 当初假设「首行有 `<th>` 才是表头」。**实测 MinerU 的表头是
+  `<td rowspan="2">`**，全表没有一个 `<th>` —— 该判据在真实数据上完全失效。
+- **修复**：增加兼容判据——首行所有单元格 `rowspan≥2` 时也认定为表头。
+- **测试**：`test_rowspan_merged_header_is_detected`
+- **教训**：ADR-012 的「不走 Markdown 往返」结论仍然正确，但「按 `<th>` 判定」
+  这一半是**错的**。设计决策要标注验证来源，未实测的假设必须显式标记。
+
+### 坑-13 `rowspan` 未展开时留下全空垃圾行
+- **症状**：P43 表多出一条全空行，`rows_count` 比实际多 1。
+- **根因**：`<td rowspan="2">` 占两行，但 MinerU 在第二行仍输出 1 个空 `<td>`。
+  解析器不展开 rowspan，于是这条空行被当成数据行。
+- **修复**：`html_table_to_rows()` 剔除全空行，并同步维护 `row_has_th` /
+  `row_spans` 的下标映射。
+- **测试**：`test_rowspan_artifact_empty_row_is_dropped`
+
 ---
 
 ## 8. 未验证项与风险
@@ -355,14 +402,15 @@ noise_filter, table_stitcher → models
 
 | 项 | 状态 | 影响 |
 |---|---|---|
-| **MinerU 真实联调** | ❌ 从未跑过（无 token） | 端点与字段来自第三方实测规范，可能与当前版本不符 |
-| **真实年报表格结构缝合** | ❌ 未验证 | P43→P44 的结论来自 pypdf **文本层**观察，表格从未以 `TableBlock` 形式经过缝合器 |
+| **MinerU 真实联调** | ✅ **已完成**（2026-10-21，P43-44，pipeline 后端） | 端点、上传链路、字段全部跑通；发现三处与文档不符的实情（见坑-11/12/13） |
+| **真实年报表格结构缝合** | ⚠️ **验证了「缝不上」，但原因在上游** | P43 表 14 列 / P44 表 12 列，MinerU 把 2 对单元格合并了；判据正确拒绝并留下审计记录 |
+| MinerU 全量 268 页 | ❌ 未跑 | 只验证了 2 页，全量会暴露更多版面变异 |
 | 页眉清洗（pypdf 路径） | ✅ 已验证 | 268 页，剥离 534 行，签名命中 268/268 |
 | 缝合算法（构造数据） | ✅ 已验证 | 15 项测试覆盖两页/三页/列数/重复表头/页首非表格 |
-| 清洗（MinerU 路径） | ⚠️ 仅构造数据 | `test_mineru_noise_path.py` 用人工构造的 content_list |
+| 清洗（MinerU 路径） | ✅ 已验证 | 实测 MinerU 对页眉/页码**打类型标签**，直接标记 `is_noise`，无需统计推断 |
 | 硅基流动 API | ❌ 未接入 | 向量兜底（P3）无代码 |
 | 中文 FTS 分词 | ❌ 未开始 | `jieba` 未安装 |
-| `rowspan`/`colspan` | ⚠️ 已知不支持 | 合并表头会被压平 |
+| `rowspan`/`colspan` | ⚠️ 部分支持 | 表头 `rowspan` 可识别；`colspan` 仍不展开，会压平列（P44 列数丢失的直接原因） |
 
 ### 8.1 一个容易误判的点
 
@@ -518,6 +566,18 @@ git checkout 57f9fed -- _ref               # 恢复到工作区
 
 > 时间线：2026-10-21 之后的条目来自 git 提交历史，之前的是**重建**的。
 
+### 2026-10-21（当日第五段）—— MinerU 首次真实联调
+- **跑通 MinerU 在线解析**（pipeline 后端，`--pages 43-44`，2 页）
+- 实测推翻两处假设，修复三个缺陷（详见坑-11/12/13、ADR-012 修订、ADR-015）：
+  - 物理页码错位：分页解析时 `page_idx` 从 0 重编号 → 用 `page_number` 块修正
+  - MinerU 用 `<td rowspan>` 做表头而非 `<th>` → 增加合并表头判据
+  - `rowspan` 未展开产生全空垃圾行 → 剔除
+- 新增 `StitchResult.rejections`：被拒绝的疑似续接必须可见（CLI 与 report.json 均输出）
+- **P43→P44 仍未缝合**，原因已定位：MinerU 把 P44 的 2 对单元格合并
+  （`债券`+`019742`、`24 特国 01`+`113,357,000.00`），14 列变 12 列。
+  判据正确拒绝并留下审计记录，**不是本项目 bug**
+- 测试数 87 → **93**
+
 ### 2026-10-21（当日第四段）
 - **新增配置通路**，为 MinerU 真实联调做准备：
   - `config/.env.example` 模板 + `config/.env`（gitignore）
@@ -603,7 +663,7 @@ git checkout 57f9fed -- _ref               # 恢复到工作区
 
 ```bash
 cd finkb
-../.venv/bin/python -m pytest -q      # 应答：87 passed
+../.venv/bin/python -m pytest -q      # 应答：93 passed
 ```
 
 1. 读 §1、§2 —— 知道边界

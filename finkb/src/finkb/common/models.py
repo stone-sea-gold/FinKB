@@ -178,6 +178,9 @@ class StitchResult:
 
     tables: list[StitchedTable] = field(default_factory=list)
     records: list[StitchRecord] = field(default_factory=list)
+    #: 疑似续接但被判据拒绝的记录。**必须可见**——静默拒绝会让
+    #: 「为什么没缝上」变成无法排查的谜题（实测 P43→P44 就是这种情况）。
+    rejections: list[StitchRecord] = field(default_factory=list)
 
     @property
     def stitched_count(self) -> int:
