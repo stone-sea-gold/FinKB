@@ -38,6 +38,7 @@ from finkb.parser.mineru_client import (
     render_page_anchored_markdown,
 )
 from finkb.parser.noise_filter import strip_running_noise
+from finkb.parser.section_splitter import SplitOptions, split_all
 from finkb.parser.table_stitcher import stitch_tables
 
 FINKB_ROOT = Path(__file__).resolve().parents[2]
@@ -178,6 +179,27 @@ def run_parse(args: argparse.Namespace) -> int:
             json.dumps(document.content_list, ensure_ascii=False, indent=2), encoding="utf-8"
         )
 
+    logical_tables = []
+    if getattr(args, "split_sections", False):
+        logical_tables = split_all(stitch.tables, SplitOptions())
+        print(f"逻辑表   : {len(logical_tables)} 张"
+              f"（物理表 {len(stitch.tables)} → 切分净增 {len(logical_tables) - len(stitch.tables)}）")
+        from collections import Counter
+        print(f"  类型分布: {dict(Counter(t.kind for t in logical_tables))}")
+        print(f"  继承表头: {sum(1 for t in logical_tables if t.header_source == 'inherited' and t.header)} 张")
+        logical_dir = output_dir / "logical_tables"
+        logical_dir.mkdir(exist_ok=True)
+        for seq, logical in enumerate(logical_tables, start=1):
+            # 序号前缀避免不同物理表的 S01 互相覆盖
+            name = f"{seq:04d}_{logical.logical_id.split('#')[-1]}"
+            (logical_dir / f"{name}.md").write_text(
+                f"<!-- {logical.logical_id}  kind={logical.kind}  "
+                f"header_source={logical.header_source}  "
+                f"section={'/'.join(logical.section_path) or '—'} -->\n"
+                f"{logical.to_markdown()}\n",
+                encoding="utf-8",
+            )
+
     tables_dir = output_dir / "tables"
     tables_dir.mkdir(exist_ok=True)
     for index, table in enumerate(stitch.tables, start=1):
@@ -201,6 +223,19 @@ def run_parse(args: argparse.Namespace) -> int:
         "stitch_records": [
             {"pages": record.pages, "ncols": record.ncols, "reason": record.reason}
             for record in stitch.records
+        ],
+        "logical_tables": [
+            {
+                "logical_id": t.logical_id,
+                "parent_id": t.parent_id,
+                "kind": t.kind,
+                "header_source": t.header_source,
+                "section_path": t.section_path,
+                "header": t.header,
+                "row_count": len(t.rows),
+                "row_range": list(t.row_range),
+            }
+            for t in logical_tables
         ],
         "stitch_rejections": [
             {"pages": record.pages, "ncols": record.ncols, "reason": record.reason}
@@ -244,6 +279,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parse_cmd.add_argument(
         "--offline", action="store_true", help="离线模式（pypdf 兜底，不调用 MinerU）"
+    )
+    parse_cmd.add_argument(
+        "--split-sections",
+        dest="split_sections",
+        action="store_true",
+        help="在物理表基础上切分出逻辑表（含表头继承），输出到 logical_tables/",
     )
     parse_cmd.add_argument(
         "--reuse-content-list",

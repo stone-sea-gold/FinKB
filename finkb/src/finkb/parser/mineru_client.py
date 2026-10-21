@@ -499,7 +499,7 @@ def _table_block_from_item(
     if not isinstance(body, str) or not body.strip():
         return None
 
-    rows, first_is_header = html_table_to_rows(body)
+    rows, first_is_header, section_rows = html_table_to_rows(body)
     if not rows:
         return None
 
@@ -512,6 +512,7 @@ def _table_block_from_item(
         has_separator=first_is_header,
         block_index=block_index,
         raw_lines=[],
+        section_rows=list(section_rows),
     )
 
 

@@ -218,6 +218,7 @@ def stitch_tables(
                 parent_id=parent_id,
                 table_id=table_id,
                 section=first.meta.section,
+                section_rows=list(first.section_rows),
             )
 
             pages_touched = [first.page]
@@ -263,7 +264,11 @@ def stitch_tables(
                     )
                     break
 
+                offset = len(stitched.rows)
                 stitched.rows.extend(list(row) for row in next_block.table.rows)
+                stitched.section_rows.extend(
+                    (index + offset, text) for index, text in next_block.table.section_rows
+                )
                 stitched.page_end = next_block.table.page
                 stitched.source_tables += 1
                 pages_touched.append(next_block.table.page)

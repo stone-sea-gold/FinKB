@@ -227,11 +227,13 @@ class _HTMLTableExtractor(HTMLParser):
         self.rows: list[list[str]] = []
         self.row_has_th: list[bool] = []
         self.row_spans: list[list[int]] = []
+        self.row_colspans: list[list[int]] = []
         self._in_cell = False
         self._buffer: list[str] = []
         self._row: list[str] = []
         self._row_had_th = False
         self._cell_spans: list[int] = []
+        self._cell_colspans: list[int] = []
         self._cell_colspan = 1
 
     def handle_starttag(self, tag: str, attrs) -> None:
@@ -239,6 +241,7 @@ class _HTMLTableExtractor(HTMLParser):
             self._row = []
             self._row_had_th = False
             self._cell_spans = []
+            self._cell_colspans = []
         elif tag in ("td", "th"):
             self._in_cell = True
             self._buffer = []
@@ -258,6 +261,7 @@ class _HTMLTableExtractor(HTMLParser):
                     colspan = parsed
             self._cell_spans.append(max(rowspan, 1))
             self._cell_colspan = max(colspan, 1)
+            self._cell_colspans.append(self._cell_colspan)
         elif tag == "br" and self._in_cell:
             self._buffer.append(" ")
 
@@ -272,6 +276,7 @@ class _HTMLTableExtractor(HTMLParser):
                 self.rows.append(self._row)
                 self.row_has_th.append(self._row_had_th)
                 self.row_spans.append(self._cell_spans)
+                self.row_colspans.append(self._cell_colspans)
             self._row = []
 
     def handle_data(self, data: str) -> None:
@@ -290,24 +295,39 @@ def _is_pure_number(text: str) -> bool:
     return bool(_PURE_NUMBER_RE.match(stripped))
 
 
-def html_table_to_rows(html: str) -> tuple[list[list[str]], bool]:
-    """把 HTML 表格转成 ``(rows, first_row_is_header)``。
+#: 表头推断的向前探测行数。用于「期间表头 + 小计行」形态：
+#: P137 首行是 ``['', '2025年', '2024年']``，紧邻的第二行却是分类标签
+#: ``一、经营活动产生的现金流量:``（纯文本、无数值）。只看第二行会漏判，
+#: 必须向后看几行才能确认「这是一张以期间为列的表」。
+HEADER_LOOKAHEAD_ROWS = 3
 
-    ``first_row_is_header`` 依据首行是否使用 ``<th>`` 判断。
 
-    **实测修正**：MinerU 的表头**不用 ``<th>``**，而是 ``<td rowspan="2">``。
-    因此这里额外采用一条兼容判据——首行单元格全部带 ``rowspan≥2`` 时，
-    也认定它是表头（合并表头行）。
+def html_table_to_rows(
+    html: str,
+) -> tuple[list[list[str]], bool, list[tuple[int, str]]]:
+    """把 HTML 表格转成 ``(rows, first_row_is_header, section_rows)``。
 
-    **全空行会被剔除**：``rowspan`` 未被展开时，后续行会退化成「1 个空单元格」的
-    垃圾行（实测 P43 证券投资表就有一条）。这类行若保留，会在缝合时污染数据，
-    也会让 L1 抽到空记录。
+    ``first_row_is_header`` 判定依次尝试三条判据：
+
+    1. 首行使用 ``<th>``；
+    2. 首行单元格全部带 ``rowspan≥2``（MinerU 的合并表头）；
+    3. **纯数值分布推断**（vlm 后端无任何表头标记）：
+       首行没有纯数值 + 首行至少 2 个非空单元格 + 其后 ``HEADER_LOOKAHEAD_ROWS``
+       行内至少有一行含纯数值。
+
+    ``section_rows`` 是「全宽合并行」清单 ``[(数据行下标, 文本), ...]``。
+    这些行在展开 ``colspan`` 后会退化成「首列有值、其余全空」的形态，
+    单看数据无法与「恰好多列为空的数据行」区分，因此**必须在解析阶段显式记录**。
+    它们是物理表内部的潜在分节点（嵌入式小标题 / 子栏标注 / 行内值），
+    交给 :mod:`finkb.parser.section_splitter` 做语义归类。
+
+    全空行会被剔除（``rowspan`` 未展开时的垃圾行）。
     """
     extractor = _HTMLTableExtractor()
     extractor.feed(html)
     extractor.close()
     if not extractor.rows:
-        return [], False
+        return [], False, []
 
     keep = [
         index
@@ -315,12 +335,14 @@ def html_table_to_rows(html: str) -> tuple[list[list[str]], bool]:
         if any(cell.strip() for cell in row)
     ]
     if not keep:
-        return [], False
+        return [], False, []
 
     kept_rows = [extractor.rows[index] for index in keep]
     kept_th = [extractor.row_has_th[index] for index in keep]
     kept_spans = [extractor.row_spans[index] for index in keep]
+    kept_colspans = [extractor.row_colspans[index] for index in keep]
 
+    # colspan 展开后行长度已经等于逻辑列数，直接取最大长度即可
     width = max(len(row) for row in kept_rows)
     rows = [row + [""] * (width - len(row)) for row in kept_rows]
 
@@ -331,18 +353,47 @@ def html_table_to_rows(html: str) -> tuple[list[list[str]], bool]:
         if len(first_spans) >= 2 and all(span >= 2 for span in first_spans):
             first_is_header = True
 
-    # 兜底推断：vlm 后端对表头**不做任何标记**（全是普通 <td>，无 th 无 rowspan）。
-    # 用一条保守的统计判据：首行没有任何「纯数值」单元格，而第二行至少有一个。
-    # 实测校验：P43 表首行是 14 个中文列名（0 个纯数值）→ 判为表头；
-    #           P44 续接表首行是「债券/019742/113,357,000.00…」（多个纯数值）→ 不判表头。
-    # 注意「2025年」这类带数字但非纯数值的表头不会误伤本判据。
+    # 纯数值分布推断（vlm 后端）。
+    # 三条护栏缺一不可：
+    #   ① 首行至少 2 个非空单元格 —— 全宽单格是「表标题」而不是表头（实测 P89）；
+    #   ② 首行没有纯数值 —— 有数值说明是数据行；
+    #   ③ 向后看 HEADER_LOOKAHEAD_ROWS 行内有数值 —— 兜住「期间表头 + 小计行」形态。
     if not first_is_header and len(rows) >= 2:
+        first_non_empty = sum(1 for cell in rows[0] if cell.strip())
         first_numeric = sum(1 for cell in rows[0] if _is_pure_number(cell))
-        second_numeric = sum(1 for cell in rows[1] if _is_pure_number(cell))
-        if first_numeric == 0 and second_numeric >= 1:
+        lookahead_numeric = any(
+            _is_pure_number(cell)
+            for row in rows[1 : 1 + HEADER_LOOKAHEAD_ROWS]
+            for cell in row
+        )
+        if first_non_empty >= 2 and first_numeric == 0 and lookahead_numeric:
             first_is_header = True
 
-    return rows, first_is_header
+    # 纯文本表兜底：整表没有任何数值（如「关键审计事项」表）时，上一条判据失效。
+    # 此时若首行所有非空单元格都以冒号结尾，按列名处理。
+    # 实测 P118：首行 ['关键审计事项:', '该事项在审计中是如何应对:'] → 表头。
+    if not first_is_header and len(rows) >= 2:
+        first_cells = [cell.strip() for cell in rows[0] if cell.strip()]
+        if len(first_cells) >= 2 and all(
+            cell.endswith((":", "：")) for cell in first_cells
+        ):
+            first_is_header = True
+
+    # 记录「全宽合并行」：原始 HTML 里只有一个单元格且跨满整行。
+    # 下标是相对「数据行」（不含表头）的位置，与 TableBlock.rows 对齐。
+    section_rows: list[tuple[int, str]] = []
+    header_offset = 1 if first_is_header else 0
+    for pos, colspans in enumerate(kept_colspans):
+        data_index = pos - header_offset
+        if data_index < 0:
+            continue
+        # 全宽合并行：原始 HTML 里只有一个单元格且跨满整行
+        if len(colspans) == 1 and colspans[0] == width:
+            text = kept_rows[pos][0].strip()
+            if text:
+                section_rows.append((data_index, text))
+
+    return rows, first_is_header, section_rows
 
 
 def html_table_to_markdown(html: str) -> str:
@@ -355,7 +406,7 @@ def html_table_to_markdown(html: str) -> str:
     注意：Markdown 管道表在语法上必须有表头，本函数**总是**把首行当表头。
     需要保留「无表头」语义时请改用 :func:`html_table_to_rows`。
     """
-    normalized, _ = html_table_to_rows(html)
+    normalized, _, _ = html_table_to_rows(html)
     if not normalized:
         return ""
 

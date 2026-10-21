@@ -52,6 +52,9 @@ class TableBlock:
             保留该标记是为了区分「MinerU 输出自带表头」与「我们推断的表头」。
         block_index: 在所在页内的块序号（0-based），缝合时需要判断是否为页末/页首。
         raw_lines: 原始 Markdown 行，便于调试与回溯。
+        section_rows: 「全宽合并行」清单 ``[(数据行下标, 文本), ...]``。
+            这些行在展开 ``colspan`` 后退化为「首列有值、其余全空」，
+            仅看数据无法与普通数据行区分，必须在解析阶段显式记录。
     """
 
     meta: DocMeta
@@ -60,6 +63,7 @@ class TableBlock:
     has_separator: bool = False
     block_index: int = 0
     raw_lines: list[str] = field(default_factory=list)
+    section_rows: list[tuple[int, str]] = field(default_factory=list)
 
     @property
     def ncols(self) -> int:
@@ -135,6 +139,8 @@ class StitchedTable:
     parent_id: str
     table_id: str
     section: str | None = None
+    #: 跨页拼接后累计的「全宽合并行」，下标相对 ``rows``。
+    section_rows: list[tuple[int, str]] = field(default_factory=list)
 
     @property
     def ncols(self) -> int:
@@ -160,6 +166,70 @@ class StitchedTable:
 def _render_row(cells: list[str]) -> str:
     escaped = [cell.replace("|", "\\|") for cell in cells]
     return "| " + " | ".join(escaped) + " |"
+
+
+SectionKind = Literal["data", "summary", "kv", "footnote"]
+
+
+@dataclass
+class LogicalTable:
+    """**逻辑数据表** —— 物理表按内部小标题切分后的语义单元。
+
+    与 :class:`StitchedTable` 的区别：后者是「版面事实」（MinerU 眼里的一个
+    ``<table>``，可能横跨多页），前者是「语义事实」（一个标题 + 一套表头 + 一段数据）。
+
+    实测依据（比亚迪 2025 年报 P89–P91）：一个 11 列 85 行的物理表内部实际是
+    **3 张数据表 + 1 个汇总块**，靠 ``colspan`` 全宽行分隔。
+
+    Attributes:
+        logical_id: 逻辑表主键，形如 ``{parent_id}#S01``。
+        parent_id: 指向物理表，保留版面溯源。
+        header: 列名。**切分不产生无表头的子表**——无自有表头时继承父表表头，
+            这是本模型存在的核心原因（见 ``header_source``）。
+        header_source: ``self`` 表示该段自带表头（表头行已从 rows 中剥离）；
+            ``inherited`` 表示继承自父表，rows 里不含表头行。
+        section_path: 分节路径。记录切分点上的全宽行文本（如
+            ``["三、筹资活动产生的现金流量:"]``），供 L1 拼接完整科目路径。
+        rows: 该段的数据行（含切分点那一行本身，避免信息丢失）。
+        page_start / page_end: 覆盖的物理页码。
+        row_range: 在父表 ``rows`` 中的区间 ``[start, end)``。
+        kind: ``data`` 常规表格 / ``summary`` 汇总块 / ``kv`` 键值对段落 /
+            ``footnote`` 注释段。
+    """
+
+    logical_id: str
+    parent_id: str
+    header: list[str] | None
+    header_source: Literal["self", "inherited"]
+    section_path: list[str]
+    rows: list[list[str]]
+    page_start: int
+    page_end: int
+    row_range: tuple[int, int]
+    kind: SectionKind = "data"
+
+    @property
+    def ncols(self) -> int:
+        if self.header is not None:
+            return len(self.header)
+        return len(self.rows[0]) if self.rows else 0
+
+    @property
+    def title(self) -> str | None:
+        """该段的小标题（分节路径最后一段）。"""
+        return self.section_path[-1] if self.section_path else None
+
+    def to_markdown(self) -> str:
+        """渲染为 Markdown；有标题时先输出标题行。"""
+        lines: list[str] = []
+        for label in self.section_path:
+            lines.append(f"**{label}**")
+        if self.header is not None:
+            lines.append(_render_row(self.header))
+            lines.append(_render_row(["---"] * len(self.header)))
+        for row in self.rows:
+            lines.append(_render_row(row))
+        return "\n".join(lines)
 
 
 @dataclass
