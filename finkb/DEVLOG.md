@@ -33,7 +33,7 @@
 | 源码规模 | `src/` 1518 行（含 `__init__`），`tests/` 1331 行 |
 | 真实数据验证 | 有（pypdf 路径，268 页年报） |
 | MinerU 真实联调 | **未做**（无 token） |
-| 版本控制 | **不是 git 仓库**——没有历史可追溯，这也正是本文档存在的原因 |
+| 版本控制 | ✅ **已建 git 仓库**（根目录 `/home/generalblack/code/works/reporting`，分支 `main`）。首次提交 `57f9fed` 覆盖 50 个文件 |
 
 ### 2.1 已完成
 
@@ -402,8 +402,52 @@ P43→P44 那张证券投资表（14 列）在 pypdf 文本层能清楚看到首
 
 ### 9.3 版本控制
 
-**当前不是 git 仓库。** 方案要求 `wiki_vault/` 用 git 追踪知识变更（L2 的审计机制
-依赖 `git diff`），所以**建立 git 仓库是 Phase 1 之前的待办**。
+**已建 git 仓库**，仓库根在 `/home/generalblack/code/works/reporting`（**不是** `finkb/`）。
+
+```
+reporting/               ← git 仓库根
+├── .gitignore
+├── FinKB-方案v2.md      ← 方案文档
+├── CLAUDE.md            ← 早期工作约定
+├── raw/                 ← 原始 PDF（PDF 被 ignore，manifest.csv 入库）
+├── scrape-cninfo*.mjs   ← 年报抓取脚本（数据获取链路，入库）
+├── _ref/                ← 参考资料（见 9.4）
+└── finkb/               ← 项目代码
+```
+
+选根目录而非 `finkb/` 的理由：年报抓取脚本、语料清单、方案文档都属于本项目，
+分仓会导致引用断裂（DEVLOG 里写的是 `../FinKB-方案v2.md`）。
+
+**约定**：
+
+- 分支 `main`；本地身份 `FinKB Dev <dev@finkb.local>`（占位，可改 `git config user.name`）
+- 忽略项：`.venv/`、`raw/*.pdf`（约 40MB）、`*.duckdb`、`*.npy`、`__pycache__`、
+  `.pytest_cache`、`.env`、`*:Zone.Identifier`
+- **入库项**：源码、测试、文档、`raw/manifest.csv`、抓取脚本、`_ref/`
+- 提交后仓库体积约 744K
+
+L2 知识层的审计机制（`git diff` 追溯知识变更）依赖此仓库，所以这件事必须在
+Phase 2 之前完成——现已完成。
+
+### 9.4 参考资料（`_ref/`）
+
+第三方资料，**只读参考，不是本项目代码**。
+
+| 目录 | 内容 | 与本项目的关系 |
+|---|---|---|
+| `_ref/openkb_src/` | **OpenKB**（PageIndex / Vectify AI 团队），Apache-2.0，13 个 Python 文件约 5521 行 | **L2 知识层的直接参考实现**。含 `openkb_lint.py`、`openkb_frontmatter.py`、`openkb_indexer.py`、`openkb_api_graph.py`、`openkb_tree_renderer.py`、`openkb_visualize.py`、`openkb_mutation.py`（原子写）、`openkb_schema.py`、`openkb_agent_compiler.py`，以及 `docs_golden-principles.md` |
+| `_ref/fibo_src/` | FIBO 金融业务本体 RDF（FND 会计/现金流/货币金额、IND 指标） | L1 `metric_dict` 的口径建模可参考其术语体系 |
+| `_ref/fibo_README.md` | FIBO 说明 | — |
+
+**给后续 agent 的提示**：
+
+- 做 L2（lint / frontmatter / draft 流转 / 索引 / 可视化）时，**先读 `_ref/openkb_src/`**，
+  不要从零设计。它的 `docs_golden-principles.md` 里有关于「边界校验」「原子写入」
+  「共享工具优先」的机械规则，与本项目 AGENTS.md 的约束思路一致。
+- 注意 OpenKB 的检索底座是 **PageIndex**（无向量结构树推理），与本项目
+  「FTS5 为主 + 向量兜底」不同。**参考它的知识层组织方式，不要照搬它的检索层。**
+- `_ref/` 为第三方 Apache-2.0 代码，**不得直接 copy 进 `src/`**；需要复用逻辑时
+  重写并在此处记录来源。
 
 ---
 
@@ -431,10 +475,20 @@ P43→P44 那张证券投资表（14 列）在 pypdf 文本层能清楚看到首
 
 ## 11. 变更记录
 
-> 时间线是**重建**的（无 git 历史），只保证当前状态准确。
+> 时间线：2026-10-21 之后的条目来自 git 提交历史，之前的是**重建**的。
 
-### 2026-10-21（本次）
-- 建立本日志体系
+### 2026-10-21（当日第二段）
+- **建立 git 仓库**（根目录 `reporting/`，`main` 分支），首次提交 `57f9fed`：
+  50 文件 / 12422 行；`.venv` 与 40MB PDF 已忽略，仓库体积 744K
+- 建立 `.gitignore`：忽略 `raw/*.pdf` 但保留 `manifest.csv` 与抓取脚本，
+  保证任何环境都能凭清单重建语料
+- **发现 `_ref/` 参考资料**并入库，补充 §9.4：
+  - `openkb_src/` —— PageIndex 团队的 LLM 知识库实现（Apache-2.0，5521 行），
+    是 L2 层的直接参考
+  - `fibo_src/` —— FIBO 金融本体 RDF，可参考指标口径建模
+
+### 2026-10-21（当日第一段）
+- 建立本日志体系（`DEVLOG.md` + `AGENTS.md`）
 - 按 MinerU 实测规范修正三处：标题检测（`text_level`）、本地文件上传链路
   （预签名 URL + 裸 PUT）、表头判定（按 `<th>`）
 - 新增 `test_mineru_noise_path.py`（7 项），覆盖 MinerU 块粒度下的清洗与缝合
