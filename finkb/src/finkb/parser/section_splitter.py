@@ -225,11 +225,26 @@ def _section_kind(
     own_header: bool,
     cut_kind: SectionKind,
     rows: list[list[str]],
+    parent_header: list[str] | None = None,
 ) -> SectionKind:
-    """结合段内内容细化类型。"""
+    """结合段内内容细化类型。
+
+    ``kv_row`` 的守卫是**结构事实**而非内容猜测：父表已经有表头时，
+    该表的每一行都是「按列取值」的数据行，不可能再是并排的键值对。
+
+    早期版本只看「单元格是否含数字」来判断键/值，实测会出错——
+    实测 P186_T134：``房屋及建筑物 | 41,744,687 | 尚未办完所有手续``
+    三格全是**值**（项目/账面价值/未办妥原因），但「尚未办完所有手续」
+    不含数字，会被误判成「键」，从而凑成 ``键|值|键`` 的假交替。
+    """
     if cut_kind == "summary" and not own_header:
         return "summary"
-    if not own_header and len(rows) == 1 and parse_kv_row(rows[0]) is not None:
+    if (
+        not own_header
+        and parent_header is None
+        and len(rows) == 1
+        and parse_kv_row(rows[0]) is not None
+    ):
         return "kv_row"
     if not own_header and len(rows) <= 2 and all(_numeric_count(row) == 0 for row in rows):
         # 纯文本的短段 —— 典型是「关键审计事项」这类标签 + 长文
@@ -308,7 +323,7 @@ def split_sections(
         segment = rows[start:end]
         if not segment:
             return
-        kind = _section_kind(header_source == "self", cut_kind, segment)
+        kind = _section_kind(header_source == "self", cut_kind, segment, header)
         seq += 1
         result.tables.append(
             _finalize(LogicalTable(

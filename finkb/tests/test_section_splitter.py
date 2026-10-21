@@ -341,3 +341,32 @@ def test_kv_row_markdown_renders_pairs() -> None:
 
     assert "| 键 | 值 |" in md
     assert "报告期末普通股股东总数" in md
+
+
+def test_table_with_header_is_never_kv_row() -> None:
+    """父表已有表头 → 单行即使凑成「键|值|键|值」也是数据行（P186_T134 情形）。
+
+    实测反例：``房屋及建筑物 | 41,744,687 | 尚未办完所有手续`` 三格全是**值**
+    （项目/账面价值/未办妥原因），但「尚未办完所有手续」不含数字，
+    会被 `_cell_kind` 误判成「键」，凑出假交替。
+    """
+    table = make_table(
+        rows=[["房屋及建筑物", "41,744,687", "尚未办完所有手续", "2025年"]],
+        header=["", "账面价值", "未办妥产权证书的原因", "年度"],
+    )
+    logical = split_sections(table).tables[0]
+
+    assert logical.kind == "data"
+    assert logical.pairs == []
+    assert logical.orphan_values == []
+
+
+def test_same_row_without_header_is_kv_row() -> None:
+    """同样的行，父表无表头时才会被判为横表——证明守卫是唯一差异。"""
+    table = make_table(
+        rows=[["房屋及建筑物", "41,744,687", "尚未办完所有手续", "2025年"]],
+        header=None,
+    )
+    logical = split_sections(table).tables[0]
+
+    assert logical.kind == "kv_row"
