@@ -1,0 +1,37 @@
+# ── 虚拟环境 ────────────────────────────────────────────────
+.venv/
+
+# ── Windows 残留元数据 ──────────────────────────────────────
+*:Zone.Identifier
+*.Zone.Identifier
+Thumbs.db
+desktop.ini
+
+# ── Python ─────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+.coverage
+htmlcov/
+
+# ── 数据资产 ────────────────────────────────────────────────
+# 原始年报 PDF 共约 40MB，不入库；抓取脚本与清单（manifest.csv）入库，
+# 任何环境都能凭清单重新拉取
+raw/*.pdf
+
+# 派生数据：可由 parse 流程重建
+finkb/data/parsed/
+finkb/data/parent_store/
+*.duckdb
+*.npy
+*.zip
+
+# ── 配置与密钥 ──────────────────────────────────────────────
+.env
+*.env
+!.env.example
+
+# ── 日志与临时文件 ──────────────────────────────────────────
+*.log
+tmp/
