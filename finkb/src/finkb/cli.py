@@ -30,6 +30,7 @@ from pathlib import Path
 from finkb.common.models import StitchedTable
 from finkb.parser.mineru_client import (
     MineruClient,
+    content_list_to_pages,
     MineruConfig,
     MineruError,
     OfflinePdfParser,
@@ -124,7 +125,21 @@ def run_parse(args: argparse.Namespace) -> int:
     print(f"配置文件 : {env_file} ({'存在' if env_file.exists() else '不存在'})")
 
     # ── 1. 解析 ────────────────────────────────────────────────
-    if args.offline:
+    reuse_path = getattr(args, "reuse_content_list", None)
+    if reuse_path:
+        # 复用已保存的 content_list.json 重跑后处理：改清洗/缝合逻辑时
+        # 不必重新调用 MinerU，既省额度又能快速验证修复效果。
+        reuse_file = Path(reuse_path).expanduser().resolve()
+        content_list = json.loads(reuse_file.read_text(encoding="utf-8"))
+        document = ParsedDocument(
+            doc_id=doc_id,
+            pages=content_list_to_pages(content_list, doc_id),
+            markdown="",
+            content_list=content_list,
+            source="mineru-reuse",
+        )
+        print(f"模式     : 复用已有解析结果 {reuse_file}")
+    elif args.offline:
         print("模式     : 离线（pypdf 兜底，无表格结构）")
         document: ParsedDocument = OfflinePdfParser(doc_id).parse(pdf_path)
     else:
@@ -229,6 +244,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parse_cmd.add_argument(
         "--offline", action="store_true", help="离线模式（pypdf 兜底，不调用 MinerU）"
+    )
+    parse_cmd.add_argument(
+        "--reuse-content-list",
+        dest="reuse_content_list",
+        help="复用已保存的 content_list.json，只重跑清洗与缝合（不消耗 MinerU 额度）",
     )
     parse_cmd.add_argument(
         "--env-file", default=str(DEFAULT_ENV_FILE), help="配置文件路径"

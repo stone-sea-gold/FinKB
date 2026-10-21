@@ -214,7 +214,13 @@ def load_page_anchored_markdown(path: str, default_doc: str = "unknown") -> list
 # MinerU 的 table_body 是 HTML，需要先转成管道表才能进入缝合流程
 # --------------------------------------------------------------------------- #
 class _HTMLTableExtractor(HTMLParser):
-    """把 HTML ``<table>`` 转成二维文本网格（忽略 rowspan/colspan）。"""
+    """把 HTML ``<table>`` 转成二维文本网格。
+
+    **``colspan`` 会被展开**（占位补空字符串），``rowspan`` 只记录不展开。
+    展开 ``colspan`` 是必须的：vlm 后端用 ``colspan="3"`` 表示「这一格横跨三列」
+    （实测 P44 的「期末持有的其他证券投资」行）。若不展开，后续数值会整体左移，
+    缝合后的表格列就错位了——这比「缝不上」更危险，因为它会静默产出错误数据。
+    """
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
@@ -226,6 +232,7 @@ class _HTMLTableExtractor(HTMLParser):
         self._row: list[str] = []
         self._row_had_th = False
         self._cell_spans: list[int] = []
+        self._cell_colspan = 1
 
     def handle_starttag(self, tag: str, attrs) -> None:
         if tag == "tr":
@@ -237,20 +244,28 @@ class _HTMLTableExtractor(HTMLParser):
             self._buffer = []
             if tag == "th":
                 self._row_had_th = True
-            span = 1
+            rowspan, colspan = 1, 1
             for name, value in attrs:
-                if name == "rowspan" and value:
-                    try:
-                        span = int(str(value).strip().strip('"'))
-                    except ValueError:
-                        span = 1
-            self._cell_spans.append(max(span, 1))
+                if not value:
+                    continue
+                try:
+                    parsed = int(str(value).strip().strip('"'))
+                except ValueError:
+                    continue
+                if name == "rowspan":
+                    rowspan = parsed
+                elif name == "colspan":
+                    colspan = parsed
+            self._cell_spans.append(max(rowspan, 1))
+            self._cell_colspan = max(colspan, 1)
         elif tag == "br" and self._in_cell:
             self._buffer.append(" ")
 
     def handle_endtag(self, tag: str) -> None:
         if tag in ("td", "th") and self._in_cell:
             self._row.append(" ".join("".join(self._buffer).split()))
+            # 展开 colspan：被跨越的列补空字符串，保持后续单元格列位不变
+            self._row.extend([""] * (self._cell_colspan - 1))
             self._in_cell = False
         elif tag == "tr":
             if self._row:
@@ -262,6 +277,17 @@ class _HTMLTableExtractor(HTMLParser):
     def handle_data(self, data: str) -> None:
         if self._in_cell:
             self._buffer.append(data)
+
+
+_PURE_NUMBER_RE = re.compile(r"^[+-]?\(?[\d,]+(?:\.\d+)?\)?%?$")
+
+
+def _is_pure_number(text: str) -> bool:
+    """判断单元格是否为「纯数值」（容忍千分位、百分号、括号负数、--）。"""
+    stripped = text.strip()
+    if not stripped or stripped in {"--", "—", "-", "/"}:
+        return False
+    return bool(_PURE_NUMBER_RE.match(stripped))
 
 
 def html_table_to_rows(html: str) -> tuple[list[list[str]], bool]:
@@ -303,6 +329,17 @@ def html_table_to_rows(html: str) -> tuple[list[list[str]], bool]:
         first_spans = kept_spans[0]
         # MinerU 的合并表头：首行所有单元格 rowspan≥2（实测 P43 证券投资表）
         if len(first_spans) >= 2 and all(span >= 2 for span in first_spans):
+            first_is_header = True
+
+    # 兜底推断：vlm 后端对表头**不做任何标记**（全是普通 <td>，无 th 无 rowspan）。
+    # 用一条保守的统计判据：首行没有任何「纯数值」单元格，而第二行至少有一个。
+    # 实测校验：P43 表首行是 14 个中文列名（0 个纯数值）→ 判为表头；
+    #           P44 续接表首行是「债券/019742/113,357,000.00…」（多个纯数值）→ 不判表头。
+    # 注意「2025年」这类带数字但非纯数值的表头不会误伤本判据。
+    if not first_is_header and len(rows) >= 2:
+        first_numeric = sum(1 for cell in rows[0] if _is_pure_number(cell))
+        second_numeric = sum(1 for cell in rows[1] if _is_pure_number(cell))
+        if first_numeric == 0 and second_numeric >= 1:
             first_is_header = True
 
     return rows, first_is_header

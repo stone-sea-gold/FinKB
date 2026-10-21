@@ -21,7 +21,9 @@
 | 格式解耦 | 只有 `mineru_client.py` 允许接触外部解析格式；`noise_filter` / `table_stitcher` 不得 import 它（ADR-008） |
 | 噪音块不删除 | 只打 `is_noise=True`（ADR-010） |
 | 缝合用页内位置 | 不用 `block_index` 做游标 |
-| 表头判定：`<th>` **或** 首行全 `rowspan≥2` | MinerU 用 `<td rowspan>` 做表头；不得走 HTML → Markdown → 再解析（ADR-012 修订版） |
+| 表头判定：`<th>` / 首行全 `rowspan≥2` / 纯数值分布推断 | vlm 无任何表头标记，必须靠分布推断；不得走 HTML → Markdown → 再解析（ADR-012 修订版） |
+| **必须展开 `colspan`** | 不展开会让合并表数值整体左移，静默产出错误数据（坑-14） |
+| 默认后端 `vlm` | vlm 用 colspan 保留合并信息可还原；pipeline 直接丢列不可逆（ADR-016） |
 | 物理页码优先取 `page_number` 块 | 分页解析时 MinerU 的 `page_idx` 会从 0 重编号（坑-11） |
 | MinerU 类型标签优先于统计推断 | `type=header/page_number` 直接标记噪音；统计清洗只服务 pypdf 兜底（ADR-015） |
 | 清洗必须在缝合之前 | 顺序不可颠倒 |
@@ -41,7 +43,7 @@
 
 ```bash
 cd finkb
-../.venv/bin/python -m pytest -q     # 当前基线：93 passed
+../.venv/bin/python -m pytest -q     # 当前基线：98 passed
 ```
 
 - 全部测试必须**离线可跑**，不得依赖网络或 API key

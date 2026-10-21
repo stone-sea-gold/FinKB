@@ -287,3 +287,112 @@ def test_stitch_rejection_is_recorded() -> None:
     assert result.stitched_count == 0
     assert len(result.rejections) == 1
     assert "列数不一致" in result.rejections[0].reason
+
+
+# --------------------------------------------------------------------------- #
+# vlm 后端实测（2026-10-21）：colspan 展开 与 无标记表头推断
+# --------------------------------------------------------------------------- #
+def test_colspan_is_expanded_to_keep_column_positions() -> None:
+    """vlm 用 colspan 表示合并；不展开会让后续数值整体左移。
+
+    实测样本（P44「期末持有的其他证券投资」行）：
+    首格 colspan=3 横跨「证券品种/证券代码/证券简称」，其后的
+    29,283,000.00 必须落在第 4 列（最初投资成本）。
+    """
+    html = (
+        "<table>"
+        '<tr><td>证券品种</td><td>证券代码</td><td>证券简称</td><td>最初投资成本</td></tr>'
+        '<tr><td colspan="3">期末持有的其他证券投资</td><td>29,283,000.00</td></tr>'
+        "</table>"
+    )
+    pages = content_list_to_pages(
+        [{"type": "table", "page_idx": 0, "table_body": html}], DOC
+    )
+    table = pages[0].blocks[0].table
+
+    assert table.header == ["证券品种", "证券代码", "证券简称", "最初投资成本"]
+    row = table.rows[0]
+    assert len(row) == 4
+    assert row[0] == "期末持有的其他证券投资"
+    assert row[1] == "" and row[2] == ""      # 被跨越的列补空
+    assert row[3] == "29,283,000.00"          # 数值仍在第 4 列
+
+
+def test_vlm_style_header_inferred_without_th_or_rowspan() -> None:
+    """vlm 的表头是普通 <td>，既无 th 也无 rowspan，靠数值分布推断。"""
+    html = (
+        "<table>"
+        "<tr><td>证券品种</td><td>证券代码</td><td>本期公允价值变动损益</td></tr>"
+        "<tr><td>境内外股票</td><td>301358</td><td>0.00</td></tr>"
+        "</table>"
+    )
+    pages = content_list_to_pages(
+        [{"type": "table", "page_idx": 0, "table_body": html}], DOC
+    )
+    table = pages[0].blocks[0].table
+
+    assert table.header == ["证券品种", "证券代码", "本期公允价值变动损益"]
+    assert table.rows == [["境内外股票", "301358", "0.00"]]
+
+
+def test_data_row_is_not_inferred_as_header() -> None:
+    """首行含纯数值时不能判为表头（否则会吃掉一条数据）。"""
+    html = (
+        "<table>"
+        "<tr><td>债券</td><td>019742</td><td>113,357,000.00</td></tr>"
+        "<tr><td>股票</td><td>301358</td><td>74,694,000.00</td></tr>"
+        "</table>"
+    )
+    pages = content_list_to_pages(
+        [{"type": "table", "page_idx": 0, "table_body": html}], DOC
+    )
+    table = pages[0].blocks[0].table
+
+    assert table.header is None
+    assert len(table.rows) == 2
+
+
+def test_header_with_year_label_is_still_header() -> None:
+    """「2025年」带数字但不是纯数值，不应破坏表头判定。"""
+    html = (
+        "<table>"
+        "<tr><td>项目</td><td>2025年</td><td>2024年</td></tr>"
+        "<tr><td>营业收入</td><td>1,000.00</td><td>900.00</td></tr>"
+        "</table>"
+    )
+    pages = content_list_to_pages(
+        [{"type": "table", "page_idx": 0, "table_body": html}], DOC
+    )
+    table = pages[0].blocks[0].table
+
+    assert table.header == ["项目", "2025年", "2024年"]
+
+
+def test_stitched_rows_have_uniform_width() -> None:
+    """缝合后每行列数必须一致，否则 L1 解析会错位。"""
+    pages = content_list_to_pages(
+        [
+            {
+                "type": "table",
+                "page_idx": 0,
+                "table_body": html_table(
+                    [["品种", "代码", "金额"], ["股票", "301358", "1.00"]], True
+                ),
+            },
+            {
+                "type": "table",
+                "page_idx": 1,
+                "table_body": (
+                    "<table>"
+                    '<tr><td colspan="2">其他</td><td>2.00</td></tr>'
+                    "</table>"
+                ),
+            },
+        ],
+        DOC,
+    )
+    result = stitch_tables(pages)
+
+    assert result.stitched_count == 1
+    rows = result.tables[0].rows
+    assert {len(row) for row in rows} == {3}
