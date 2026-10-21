@@ -168,7 +168,7 @@ def _render_row(cells: list[str]) -> str:
     return "| " + " | ".join(escaped) + " |"
 
 
-SectionKind = Literal["data", "summary", "kv", "footnote"]
+SectionKind = Literal["data", "summary", "kv", "kv_row", "footnote"]
 
 
 @dataclass
@@ -194,7 +194,15 @@ class LogicalTable:
         page_start / page_end: 覆盖的物理页码。
         row_range: 在父表 ``rows`` 中的区间 ``[start, end)``。
         kind: ``data`` 常规表格 / ``summary`` 汇总块 / ``kv`` 键值对段落 /
-            ``footnote`` 注释段。
+            ``kv_row`` 单行横表 / ``footnote`` 注释段。
+        pairs: **仅 ``kv_row`` 使用**。「单行横表」解析出的 ``(键, 值)`` 列表。
+            这类行不是「一行数据」，而是同一行里并排的多组键值对，例如
+            ``报告期末普通股股东总数 | 642,600 | 报告期末表决权恢复的优先股股东总数 | 0``。
+        orphan_values: **仅 ``kv_row`` 使用**。无法配对的单元格。
+            实测 P109：首格标签在 MinerU 输出里丢失（HTML 里是空 ``<td>``），
+            导致该行呈 ``值|键|值|键|值|键|值`` 的奇数形态；剥离首个孤儿值后，
+            其余 6 格恰好配成 3 组正确语义的键值对。
+            孤儿值**不放进 rows**（避免被当作数据行），但保留在此以防信息丢失。
     """
 
     logical_id: str
@@ -207,6 +215,8 @@ class LogicalTable:
     page_end: int
     row_range: tuple[int, int]
     kind: SectionKind = "data"
+    pairs: list[tuple[str, str]] = field(default_factory=list)
+    orphan_values: list[str] = field(default_factory=list)
 
     @property
     def ncols(self) -> int:
@@ -224,6 +234,16 @@ class LogicalTable:
         lines: list[str] = []
         for label in self.section_path:
             lines.append(f"**{label}**")
+
+        if self.kind == "kv_row" and self.pairs:
+            lines.append(_render_row(["键", "值"]))
+            lines.append(_render_row(["---", "---"]))
+            for key, value in self.pairs:
+                lines.append(_render_row([key, value]))
+            for orphan in self.orphan_values:
+                lines.append(f"> 未配对值（原标签丢失）：`{orphan}`")
+            return "\n".join(lines)
+
         if self.header is not None:
             lines.append(_render_row(self.header))
             lines.append(_render_row(["---"] * len(self.header)))

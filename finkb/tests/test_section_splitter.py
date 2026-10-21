@@ -254,3 +254,90 @@ def test_looks_like_heading_variants() -> None:
     assert _looks_like_heading("列示为:")
     assert not _looks_like_heading("收入确认")
     assert not _looks_like_heading("销售商品、提供劳务收到的现金")
+
+
+# --------------------------------------------------------------------------- #
+# 单行横表（kv_row）
+# --------------------------------------------------------------------------- #
+def test_kv_row_key_first() -> None:
+    """三季报 P4_T06：键|值|键|值，两组完整配对。"""
+    from finkb.parser.section_splitter import parse_kv_row
+
+    row = [
+        "报告期末普通股股东总数",
+        "642,600(其中A股股东为642,496户,H股股东为104户)",
+        "报告期末表决权恢复的优先股股东总数",
+        "0",
+    ]
+    pairs, orphans = parse_kv_row(row)  # type: ignore[misc]
+
+    assert pairs == [
+        ("报告期末普通股股东总数", "642,600(其中A股股东为642,496户,H股股东为104户)"),
+        ("报告期末表决权恢复的优先股股东总数", "0"),
+    ]
+    assert orphans == []
+
+
+def test_kv_row_with_leading_orphan_value() -> None:
+    """年报 P109：首格标签丢失 → 值|键|值|键|值|键|值，剥离首个孤儿值后恰好 3 对。"""
+    from finkb.parser.section_splitter import parse_kv_row
+
+    row = [
+        "685,147(其中A股股东为685,034户,H股股东为113户)",
+        "年度报告披露日前上一月末普通股股东总数",
+        "732,853(其中A股股东为732,736户,H股股东为117户)",
+        "报告期末表决权恢复的优先股股东总数",
+        "0",
+        "年度报告披露日前上一月末表决权恢复的优先股股东总数",
+        "0",
+    ]
+    pairs, orphans = parse_kv_row(row)  # type: ignore[misc]
+
+    assert len(pairs) == 3
+    assert pairs[0] == ("年度报告披露日前上一月末普通股股东总数", "732,853(其中A股股东为732,736户,H股股东为117户)")
+    assert pairs[1] == ("报告期末表决权恢复的优先股股东总数", "0")
+    assert pairs[2] == ("年度报告披露日前上一月末表决权恢复的优先股股东总数", "0")
+    assert orphans == ["685,147(其中A股股东为685,034户,H股股东为113户)"]
+
+
+def test_three_cell_row_is_not_kv_row() -> None:
+    """反例：3 格「键|值|键」是普通数据行（只有 1 组配对），不得判为横表。"""
+    from finkb.parser.section_splitter import parse_kv_row
+
+    assert parse_kv_row(["房屋及建筑物", "41,744,687", "尚未办完所有手续"]) is None
+
+
+def test_kv_row_is_labelled_and_parsed_end_to_end() -> None:
+    table = make_table(
+        rows=[
+            ["报告期末普通股股东总数", "642,600", "报告期末表决权恢复的优先股股东总数", "0"],
+            ["前10名股东持股情况", "", "", ""],
+            ["股东名称", "股东性质", "持股比例", "持股数量"],
+            ["甲", "境内自然人", "10.00%", "1,000"],
+        ],
+        header=None,
+        section_rows=[(1, "前10名股东持股情况")],
+    )
+    result = split_sections(table)
+
+    first = result.tables[0]
+    assert first.kind == "kv_row"
+    assert first.pairs == [
+        ("报告期末普通股股东总数", "642,600"),
+        ("报告期末表决权恢复的优先股股东总数", "0"),
+    ]
+    assert first.orphan_values == []
+    # 孤儿值不进入 rows
+    assert first.rows == [["报告期末普通股股东总数", "642,600", "报告期末表决权恢复的优先股股东总数", "0"]]
+
+
+def test_kv_row_markdown_renders_pairs() -> None:
+    table = make_table(
+        rows=[["报告期末普通股股东总数", "642,600", "报告期末表决权恢复的优先股股东总数", "0"]],
+        header=None,
+    )
+    logical = split_sections(table).tables[0]
+    md = logical.to_markdown()
+
+    assert "| 键 | 值 |" in md
+    assert "报告期末普通股股东总数" in md

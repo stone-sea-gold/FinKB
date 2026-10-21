@@ -115,6 +115,55 @@ def _header_similarity(candidate: list[str], reference: list[str] | None) -> flo
     return len(a & b) / len(a | b)
 
 
+def _cell_kind(cell: str) -> str:
+    """单元格语义：``key`` 纯文本 / ``value`` 含数字 / ``empty`` 空。"""
+    text = cell.strip()
+    if not text:
+        return "empty"
+    if _is_pure_number(text):
+        return "value"
+    return "value" if any(ch.isdigit() for ch in text) else "key"
+
+
+def parse_kv_row(row: list[str]) -> tuple[list[tuple[str, str]], list[str]] | None:
+    """尝试把「单行横表」解析成键值对。
+
+    单行横表：同一行里并排多组键值对，例如三季报 P4_T06 的首行
+    ``报告期末普通股股东总数 | 642,600 | 报告期末表决权恢复的优先股股东总数 | 0``。
+    它不是「一行数据」，因此不能按列取值。
+
+    两种形态：
+
+    ① ``键|值|键|值`` —— 全部配对；
+    ② ``值|键|值|键|…|值`` —— 首格是**孤儿值**（实测 P109：首格标签在 MinerU
+       输出里丢失，HTML 里是空 ``<td>``），剥离后其余恰好配对。
+
+    **完整配对数必须 ≥2**：只有 1 组配对的 3 格行（如
+    ``房屋及建筑物 | 41,744,687 | 尚未办完所有手续``）是普通数据行，不是横表。
+
+    Returns:
+        ``(pairs, orphan_values)``；不是横表时返回 ``None``。
+    """
+    cells = [cell.strip() for cell in row if cell.strip()]
+    if len(cells) < 4:
+        return None
+    kinds = [_cell_kind(cell) for cell in cells]
+
+    # ① 键|值|键|值 …
+    if all(kind == ("key" if i % 2 == 0 else "value") for i, kind in enumerate(kinds)):
+        pairs = list(zip(cells[0::2], cells[1::2]))
+        return (pairs, []) if len(pairs) >= 2 else None
+
+    # ② 首格孤儿值 + 键|值|…
+    if kinds[0] == "value" and all(
+        kind == ("value" if i % 2 == 0 else "key") for i, kind in enumerate(kinds)
+    ):
+        pairs = list(zip(cells[1::2], cells[2::2]))
+        return (pairs, [cells[0]]) if len(pairs) >= 2 else None
+
+    return None
+
+
 def _looks_like_heading(text: str) -> bool:
     stripped = text.strip()
     return stripped.endswith((":", "：")) or bool(_HEADING_PREFIX_RE.match(stripped))
@@ -180,6 +229,8 @@ def _section_kind(
     """结合段内内容细化类型。"""
     if cut_kind == "summary" and not own_header:
         return "summary"
+    if not own_header and len(rows) == 1 and parse_kv_row(rows[0]) is not None:
+        return "kv_row"
     if not own_header and len(rows) <= 2 and all(_numeric_count(row) == 0 for row in rows):
         # 纯文本的短段 —— 典型是「关键审计事项」这类标签 + 长文
         return "kv"
@@ -260,7 +311,7 @@ def split_sections(
         kind = _section_kind(header_source == "self", cut_kind, segment)
         seq += 1
         result.tables.append(
-            LogicalTable(
+            _finalize(LogicalTable(
                 logical_id=f"{table.parent_id}#S{seq:02d}",
                 parent_id=table.parent_id,
                 header=header,
@@ -271,7 +322,7 @@ def split_sections(
                 page_end=table.page_end,
                 row_range=(start, end),
                 kind=kind,
-            )
+            ))
         )
 
     # 首个分节点若在第 0 行，它是整张表的标题
@@ -316,6 +367,16 @@ def split_sections(
     return result
 
 
+def _finalize(logical: LogicalTable) -> LogicalTable:
+    """为 ``kv_row`` 填充 ``pairs`` / ``orphan_values``。"""
+    if logical.kind != "kv_row" or len(logical.rows) != 1:
+        return logical
+    parsed = parse_kv_row(logical.rows[0])
+    if parsed is not None:
+        logical.pairs, logical.orphan_values = parsed
+    return logical
+
+
 def _build_one(
     table: StitchedTable,
     header: list[str] | None,
@@ -326,7 +387,7 @@ def _build_one(
     kind: SectionKind,
     seq: int,
 ) -> LogicalTable:
-    return LogicalTable(
+    return _finalize(LogicalTable(
         logical_id=f"{table.parent_id}#S{seq:02d}",
         parent_id=table.parent_id,
         header=header,
@@ -337,7 +398,7 @@ def _build_one(
         page_end=table.page_end,
         row_range=row_range,
         kind=kind,
-    )
+    ))
 
 
 def split_all(
