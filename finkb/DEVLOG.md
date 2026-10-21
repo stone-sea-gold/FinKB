@@ -29,7 +29,7 @@
 | 项 | 值 |
 |---|---|
 | 阶段 | **Phase 0 完成**；Phase 1（DuckDB + 两段式抽取）未开始 |
-| 测试 | **74 项全部通过**，离线，约 0.5 秒 |
+| 测试 | **87 项全部通过**，离线，约 0.5 秒 |
 | 源码规模 | `src/` 1518 行（含 `__init__`），`tests/` 1331 行 |
 | 真实数据验证 | 有（pypdf 路径，268 页年报） |
 | MinerU 真实联调 | **未做**（无 token） |
@@ -125,6 +125,7 @@ PDF
 | `parser/table_stitcher.py` | 220 | 跨页缝合四条件判定 + 链式续接 | 不改写单元格内容 |
 | `parser/mineru_client.py` | 483 | MinerU API + `content_list` 适配 + pypdf 兜底 | **唯一**允许接触外部格式的文件 |
 | `parser/pipeline.py` | 77 | 串「解析 → 清洗 → 缝合」 | 不承载业务规则 |
+| `cli.py` | 236 | 命令行入口；`.env` 解析与注入；产物落盘 | 不做解析算法 |
 
 **依赖方向**（单向，禁止反向）：
 
@@ -392,6 +393,7 @@ P43→P44 那张证券投资表（14 列）在 pypdf 文本层能清楚看到首
 |---|---|
 | Python | 3.12.3（系统 Python，PEP 668 externally-managed） |
 | 虚拟环境 | `../.venv`（`--system-site-packages` 创建） |
+| 安装项目 | `cd finkb && ../.venv/bin/pip install --no-build-isolation -e .`（装后可用 `finkb` 命令） |
 | 跑测试 | `cd finkb && ../.venv/bin/python -m pytest` |
 | 继承的系统包 | duckdb 1.5.3、pytest 9.0.3、pydantic 2.13.4、numpy、pandas、requests |
 | 额外安装 | **pypdf 6.21.1**（唯一需要手动装的） |
@@ -399,6 +401,27 @@ P43→P44 那张证券投资表（14 列）在 pypdf 文本层能清楚看到首
 
 > 为什么用 `--system-site-packages`：系统 Python 受 PEP 668 保护，直接 `pip install`
 > 会被拒绝；从零装全套媒体包又太慢。继承系统包 + 只补 pypdf 是最省时的组合。
+
+### 9.2.1 配置（`config/.env`）
+
+真实解析需要 MinerU token，通过 `config/.env` 注入。
+
+| 项 | 值 |
+|---|---|
+| 配置文件 | `finkb/config/.env`（**已被 .gitignore 忽略**） |
+| 模板 | `finkb/config/.env.example`（**会提交**） |
+| 注入方式 | `finkb/cli.py` 的 `apply_env_file()` 写入 `os.environ`，再由 `MineruConfig.from_env()` 读取 |
+| 优先级 | 已存在的环境变量**优先**，`.env` 不覆盖它们 → 支持 `MINERU_API_TOKEN=xxx <cmd>` 临时覆盖 |
+
+支持的变量：`MINERU_API_TOKEN`（必填）、`MINERU_BASE_URL`、`MINERU_MODEL_VERSION`、
+`MINERU_LANGUAGE`、`MINERU_POLL_INTERVAL`、`MINERU_POLL_TIMEOUT`。
+
+**刻意不引入 python-dotenv**：格式足够简单，自带 20 行解析器（支持 `#` 注释、
+`export` 前缀、引号），少一个依赖就少一处离线风险。若将来 `.env` 格式变复杂
+（多行值、变量插值）再考虑换。
+
+> 缺 token 时 `MineruConfig.from_env()` **立即抛错**，而不是带着空 token 发请求——
+> 那样只会得到难以理解的 401。
 
 ### 9.3 版本控制
 
@@ -495,6 +518,22 @@ git checkout 57f9fed -- _ref               # 恢复到工作区
 
 > 时间线：2026-10-21 之后的条目来自 git 提交历史，之前的是**重建**的。
 
+### 2026-10-21（当日第四段）
+- **新增配置通路**，为 MinerU 真实联调做准备：
+  - `config/.env.example` 模板 + `config/.env`（gitignore）
+  - `MineruConfig.from_env()`：读环境变量，缺 token 立即失败（不再发空 token 请求）
+  - `cli.py` 内置 `.env` 解析器（**不引入 python-dotenv**）
+- **新增 `cli.py`**（236 行）命令行入口：
+  - `parse` 子命令，产物落 `data/parsed/<doc_id>/`（page_anchored.md / content_list.json /
+    tables/*.md / report.json）
+  - `--pages 43-44` 分页参数透传到 MinerU `page_ranges`，用于**低成本验证**跨页表
+  - `--offline` 用 pypdf 验证链路；退出码 0/2/3/4 区分失败原因
+- `request_upload_urls` / `parse_pdf` 增加 `page_ranges` 参数
+- 新增 `tests/test_cli_and_config.py`（13 项），测试数 74 → **87**
+- `pyproject.toml` 增加 build-system 与 `[project.scripts] finkb`，`pip install -e .` 后
+  可直接用 `finkb parse ...`；此前 `python -m finkb.cli` 因 `src/` 不在路径上而失败
+- 离线全流程实测通过：真实年报 268 页、剥离 534 行噪音、产物落 `data/parsed/`
+
 ### 2026-10-21（当日第三段）
 - **移除 `_ref/`**（22 个文件）：项目所有者确认不需要本地保留。
   已从工作区与索引删除，可从 `57f9fed` 用 `git checkout 57f9fed -- _ref` 恢复
@@ -564,7 +603,7 @@ git checkout 57f9fed -- _ref               # 恢复到工作区
 
 ```bash
 cd finkb
-../.venv/bin/python -m pytest -q      # 应答：74 passed
+../.venv/bin/python -m pytest -q      # 应答：87 passed
 ```
 
 1. 读 §1、§2 —— 知道边界

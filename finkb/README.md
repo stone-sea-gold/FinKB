@@ -64,6 +64,67 @@ cd finkb
 
 无需网络、无需任何 API key。
 
+## 安装
+
+```bash
+cd finkb
+../.venv/bin/pip install --no-build-isolation -e .
+```
+
+安装后可用 `finkb` 命令（也可用 `../.venv/bin/python -m finkb.cli`，需 `PYTHONPATH=src`）。
+
+## 配置 MinerU（真实解析需要）
+
+```bash
+cd finkb
+cp config/.env.example config/.env
+# 编辑 config/.env，填入 MINERU_API_TOKEN
+```
+
+Token 从 <https://mineru.net/apiManage/token> 获取。
+`config/.env` 已被 `.gitignore` 覆盖，不会提交；`config/.env.example` 会提交。
+
+支持的变量：
+
+| 变量 | 必填 | 默认 | 说明 |
+|---|---|---|---|
+| `MINERU_API_TOKEN` | ✅ | — | Bearer token |
+| `MINERU_BASE_URL` | | `https://mineru.net` | API 根地址 |
+| `MINERU_MODEL_VERSION` | | `pipeline` | `pipeline` / `vlm` / `MinerU-HTML` |
+| `MINERU_LANGUAGE` | | `ch` | PaddleOCR 语言码，中文是 `ch` 不是 `zh` |
+| `MINERU_POLL_INTERVAL` | | `3` | 轮询间隔（秒） |
+| `MINERU_POLL_TIMEOUT` | | `900` | 轮询总超时（秒） |
+
+临时覆盖（不写文件）：
+
+```bash
+MINERU_API_TOKEN=xxx ../.venv/bin/python -m finkb.cli parse ...
+```
+
+## 命令行用法
+
+```bash
+# ① 先做小范围联调（强烈建议）：只解析 P43-P44，验证真实跨页表
+finkb parse "../raw/002594_2025_年报.pdf" --pages 43-44
+
+# ② 全量解析（268 页，消耗较多额度）
+finkb parse "../raw/002594_2025_年报.pdf"
+
+# ③ 离线模式：不调用 MinerU，用 pypdf 验证链路是否通
+finkb parse "../raw/002594_2025_年报.pdf" --offline
+```
+
+产物落在 `data/parsed/<doc_id>/`：
+
+| 文件 | 内容 |
+|---|---|
+| `page_anchored.md` | 页码锚定 Markdown（L0 落盘格式） |
+| `content_list.json` | MinerU 原始输出（在线模式才有） |
+| `tables/T001.md` | 每张逻辑表一个文件，便于人工核对 |
+| `report.json` | 统计、噪音签名、缝合审计记录 |
+
+退出码：`0` 成功 / `2` PDF 不存在 / `3` 未配置 token / `4` MinerU 调用失败。
+
 ## 流水线顺序
 
 ```python

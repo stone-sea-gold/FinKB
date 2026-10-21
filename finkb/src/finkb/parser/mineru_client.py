@@ -23,9 +23,11 @@ MinerU 在线 API 的路径与参数**尚未在本项目中实测**（当前环�
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import time
 import zipfile
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
@@ -77,6 +79,42 @@ class MineruConfig:
             "Content-Type": "application/json",
             "Accept": "*/*",
         }
+
+    @classmethod
+    def from_env(cls, env: Mapping[str, str] | None = None) -> "MineruConfig":
+        """从环境变量构造配置。
+
+        变量名与默认值见 ``config/.env.example``。**不依赖 python-dotenv**：
+        ``.env`` 文件由 :mod:`finkb.cli` 先行读入 ``os.environ``，此处只读环境变量，
+        这样构造函数保持纯粹、可测试。
+
+        Raises:
+            MineruError: 未配置 token。缺 token 时应当立即失败，而不是带着空 token
+                去发请求——那会得到难以理解的 401。
+        """
+        source: Mapping[str, str] = os.environ if env is None else env
+        token = (source.get("MINERU_API_TOKEN") or source.get("MINERU_TOKEN") or "").strip()
+        if not token:
+            raise MineruError(
+                "未找到 MINERU_API_TOKEN。请在 finkb/config/.env 中配置，"
+                "模板见 finkb/config/.env.example"
+            )
+
+        def _num(key: str, default: float) -> float:
+            raw = (source.get(key) or "").strip()
+            try:
+                return float(raw) if raw else default
+            except ValueError:
+                return default
+
+        return cls(
+            token=token,
+            base_url=(source.get("MINERU_BASE_URL") or DEFAULT_BASE_URL).strip(),
+            model_version=(source.get("MINERU_MODEL_VERSION") or "pipeline").strip(),
+            language=(source.get("MINERU_LANGUAGE") or "ch").strip(),
+            poll_interval=_num("MINERU_POLL_INTERVAL", cls.poll_interval),
+            poll_timeout=_num("MINERU_POLL_TIMEOUT", cls.poll_timeout),
+        )
 
 
 @dataclass
@@ -167,11 +205,26 @@ class MineruClient:
 
     # -- 本地文件上传路径（主路径） ---------------------------------------- #
     def request_upload_urls(
-        self, file_name: str, data_id: str = "", **extra: Any
+        self,
+        file_name: str,
+        data_id: str = "",
+        page_ranges: str | None = None,
+        **extra: Any,
     ) -> tuple[str, str]:
-        """申请预签名上传 URL，返回 ``(batch_id, upload_url)``。"""
+        """申请预签名上传 URL，返回 ``(batch_id, upload_url)``。
+
+        Args:
+            page_ranges: 只解析指定页码，如 ``"43-44"`` / ``"2,4-6"``。
+                用于**低成本验证**——不必为 268 页的年报烧掉全部额度。
+        """
+        file_entry: dict[str, Any] = {"name": file_name}
+        if data_id:
+            file_entry["data_id"] = data_id
+        if page_ranges:
+            file_entry["page_ranges"] = page_ranges
+
         payload = {
-            "files": [{"name": file_name, **({"data_id": data_id} if data_id else {})}],
+            "files": [file_entry],
             "model_version": self.config.model_version,
             "enable_table": True,
             "enable_formula": True,
@@ -283,10 +336,16 @@ class MineruClient:
             source="mineru",
         )
 
-    def parse_pdf(self, pdf_path: Path, doc_id: str, workdir: Path) -> ParsedDocument:
+    def parse_pdf(
+        self,
+        pdf_path: Path,
+        doc_id: str,
+        workdir: Path,
+        page_ranges: str | None = None,
+    ) -> ParsedDocument:
         """端到端（本地文件）：申请预签名 URL → 裸 PUT 上传 → 轮询 → 下载 → 解析。"""
         batch_id, upload_url = self.request_upload_urls(
-            pdf_path.name, data_id=doc_id
+            pdf_path.name, data_id=doc_id, page_ranges=page_ranges
         )
         self.upload_file(upload_url, pdf_path)
         zip_url = self.wait_for_batch(batch_id)

@@ -39,7 +39,7 @@
 
 ```bash
 cd finkb
-../.venv/bin/python -m pytest -q     # 当前基线：74 passed
+../.venv/bin/python -m pytest -q     # 当前基线：87 passed
 ```
 
 - 全部测试必须**离线可跑**，不得依赖网络或 API key
