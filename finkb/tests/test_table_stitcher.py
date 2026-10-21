@@ -270,3 +270,121 @@ def test_no_tables_returns_empty_result(markdown: str) -> None:
     result = stitch(markdown)
     assert result.tables == []
     assert result.stitched_count == 0
+
+
+# --------------------------------------------------------------------------- #
+# P0：先判表头性质，再比列数（避免「新表」被误报成「列数不符」）
+# --------------------------------------------------------------------------- #
+def test_new_table_reason_is_not_column_mismatch() -> None:
+    """续接表自带表头且列数也不同时，理由必须是「新表」，不是「列数不一致」。"""
+    markdown = f"""{meta(42)}
+| 项目 | 2025年 | 2024年 |
+| --- | --- | --- |
+| A | 1 | 2 |
+
+{meta(43)}
+| 姓名 | 职务 |
+| --- | --- |
+| 张三 | 董事 |
+"""
+    result = stitch(markdown)
+
+    assert result.stitched_count == 0
+    # 自带表头 → 确认新表 → 静默，不产生拒绝告警
+    assert result.rejections == []
+
+
+def test_headerless_column_mismatch_is_still_reported() -> None:
+    """无表头但列数不符才是真正的「无法确定」，必须留审计。"""
+    markdown = f"""{meta(42)}
+| 项目 | 2025年 | 2024年 |
+| --- | --- | --- |
+| A | 1 | 2 |
+
+{meta(43)}
+| 说明 | 内容 |
+"""
+    result = stitch(markdown)
+
+    assert result.stitched_count == 0
+    assert len(result.rejections) == 1
+    assert "列数不一致" in result.rejections[0].reason
+    assert "3 列" in result.rejections[0].reason
+    assert "2 列" in result.rejections[0].reason
+
+
+# --------------------------------------------------------------------------- #
+# P1：起始表以合计行收尾 → 表已完整，不再尝试续接
+# --------------------------------------------------------------------------- #
+def test_table_ending_with_total_is_not_stitched() -> None:
+    markdown = f"""{meta(42)}
+| 项目 | 金额 |
+| --- | --- |
+| A | 1 |
+| 合计 | 1 |
+
+{meta(43)}
+| 说明 | 内容 |
+"""
+    result = stitch(markdown)
+
+    assert result.stitched_count == 0
+    # 表已完整属正常情况，不应产生拒绝告警
+    assert result.rejections == []
+
+
+def test_total_marker_variants_all_stop_stitching() -> None:
+    for marker in ("合计", "总计", "小计", "资产总计", "上述三项担保金额合计(D+E+F)"):
+        markdown = f"""{meta(42)}
+| 项目 | 金额 |
+| --- | --- |
+| A | 1 |
+| {marker} | 1 |
+
+{meta(43)}
+| B | 2 |
+"""
+        result = stitch(markdown)
+        assert result.stitched_count == 0, f"{marker} 应判定表已结束"
+        assert result.rejections == [], f"{marker} 不应产生告警"
+
+
+def test_stop_on_total_row_can_be_disabled() -> None:
+    markdown = f"""{meta(42)}
+| 项目 | 金额 |
+| --- | --- |
+| A | 1 |
+| 合计 | 1 |
+
+{meta(43)}
+| B | 2 |
+"""
+    result = stitch(markdown, StitchOptions(stop_on_total_row=False))
+
+    # 关掉后恢复旧行为：续接表无表头且列数一致 → 缝合
+    assert result.stitched_count == 1
+
+
+def test_total_row_only_counts_last_row() -> None:
+    """合计行出现在中间不影响判定——只有末行才算表结束。"""
+    markdown = f"""{meta(42)}
+| 项目 | 金额 |
+| --- | --- |
+| 合计 | 1 |
+| A | 2 |
+
+{meta(43)}
+| B | 3 |
+"""
+    result = stitch(markdown)
+
+    assert result.stitched_count == 1
+
+
+def test_is_total_row_helper() -> None:
+    from finkb.parser.table_stitcher import is_total_row, _TOTAL_MARKERS
+
+    assert is_total_row(["合计", "1"], _TOTAL_MARKERS)
+    assert is_total_row(["资产总计", "", "164,831,252"], _TOTAL_MARKERS)
+    assert not is_total_row(["营业收入", "1"], _TOTAL_MARKERS)
+    assert not is_total_row([], _TOTAL_MARKERS)

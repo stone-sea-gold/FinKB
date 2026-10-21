@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Sequence
+from typing import Literal, Sequence
 
 from finkb.common.models import (
     Page,
@@ -42,6 +42,25 @@ from finkb.common.models import (
 )
 
 _NUMERIC_RE = re.compile(r"^[+-]?\(?[\d,]+(?:\.\d+)?\)?%?$")
+
+#: 财务表的「表结束」标志词。出现在最后一行首列即认定该表已完整。
+#: 实测依据：P65 董监高薪酬表、P214 所得税费用表、P229 合计表、P132 资产负债表
+#: 均以合计/总计行收尾，之后的内容都是**新表**，不该尝试续接。
+_TOTAL_MARKERS: tuple[str, ...] = (
+    "合计",
+    "总计",
+    "小计",
+    "累计",
+    "总 计",
+    "合 计",
+    "小 计",
+)
+
+#: ``_merge_verdict`` 的三种结论。
+#: - ``merge``：确认续接，执行拼接
+#: - ``new``：确认是另一张表（如自带表头），**静默放弃**，不产生告警
+#: - ``reject``：无法确定，记录为待人工核对的拒绝项
+Verdict = Literal["merge", "new", "reject"]
 
 
 @dataclass(frozen=True)
@@ -56,11 +75,16 @@ class StitchOptions:
         require_numeric_first_row: 是否要求续接表首行至少含一个数值单元格。
             默认关闭：财报续接行的首列常是行标签（如「其中：…」），强制数值
             会漏缝。仅在能确认数据源格式干净时开启。
+        stop_on_total_row: 起始表末行是「合计/总计…」时直接判定表已完整，
+            不再尝试续接。**不会产生拒绝告警**——这是正常情况，不是异常。
+        total_row_markers: 表结束标志词，按「首列包含」匹配。
     """
 
     require_equal_columns: bool = True
     allow_duplicate_header: bool = True
     require_numeric_first_row: bool = False
+    stop_on_total_row: bool = True
+    total_row_markers: tuple[str, ...] = _TOTAL_MARKERS
 
 
 def is_numeric_like(cell: str) -> bool:
@@ -69,6 +93,23 @@ def is_numeric_like(cell: str) -> bool:
     if not text or text in {"-", "—", "－", "/"}:
         return False
     return bool(_NUMERIC_RE.match(text))
+
+
+def is_total_row(row: list[str], markers: tuple[str, ...]) -> bool:
+    """判断某行是否为合计/总计/小计行（只看首列）。"""
+    if not row:
+        return False
+    first = row[0].strip()
+    if not first:
+        return False
+    return any(marker in first for marker in markers)
+
+
+def table_ends_with_total(table: StitchedTable, options: StitchOptions) -> bool:
+    """起始表末行是否为合计行 —— 是则说明该表已完整，无需续接。"""
+    if not options.stop_on_total_row or not table.rows:
+        return False
+    return is_total_row(table.rows[-1], options.total_row_markers)
 
 
 def _table_ids(doc_id: str, page_start: int, page_end: int, seq: int) -> tuple[str, str]:
@@ -96,29 +137,44 @@ def last_content_index(page: Page) -> int | None:
     return None
 
 
+def _merge_verdict(
+    head: StitchedTable,
+    tail: TableBlock,
+    options: StitchOptions,
+) -> tuple[Verdict, str]:
+    """判断 ``tail`` 是否为 ``head`` 的续接，返回 (结论, 理由)。
+
+    判据顺序（P0 修订）：**先看表头性质，再比列数**。
+    早期版本先比列数，导致「续接表自带表头」被误报成「列数不一致」，
+    把排查方向引偏了。自带表头是**确定性的新表信号**，优先级最高。
+    """
+    if not tail.rows:
+        return "new", "续接表没有数据行"
+
+    if tail.header is not None:
+        if options.allow_duplicate_header and tail.header == head.header:
+            return "merge", "重复表头，丢弃后拼接"
+        return "new", "续接表带独立表头，判定为新表"
+
+    if options.require_equal_columns and tail.ncols != head.ncols:
+        return "reject", f"列数不一致（起始表 {head.ncols} 列 / 续接表 {tail.ncols} 列）"
+
+    if options.require_numeric_first_row and not any(
+        is_numeric_like(cell) for cell in tail.rows[0]
+    ):
+        return "reject", "续接表首行无数值单元格"
+
+    return "merge", "无表头续接"
+
+
 def _can_merge(
     head: StitchedTable,
     tail: TableBlock,
     options: StitchOptions,
 ) -> tuple[bool, str]:
-    """判断 ``tail`` 是否为 ``head`` 的续接，返回 (结论, 理由)。"""
-    if not tail.rows:
-        return False, "续接表没有数据行"
-
-    if options.require_equal_columns and tail.ncols != head.ncols:
-        return False, f"列数不一致（{head.ncols} vs {tail.ncols}）"
-
-    if tail.header is None:
-        if options.require_numeric_first_row and not any(
-            is_numeric_like(cell) for cell in tail.rows[0]
-        ):
-            return False, "首行无数值单元格"
-        return True, "无表头续接"
-
-    if options.allow_duplicate_header and tail.header == head.header:
-        return True, "重复表头，已丢弃后拼接"
-
-    return False, "带独立表头，判定为新表"
+    """兼容旧接口：仅返回是否缝合与理由。"""
+    verdict, reason = _merge_verdict(head, tail, options)
+    return verdict == "merge", reason
 
 
 def stitch_tables(
@@ -186,17 +242,23 @@ def stitch_tables(
                 if (next_pos, first_index) in consumed:
                     break
 
-                can, reason = _can_merge(stitched, next_block.table, opts)
-                if not can:
-                    # 走到这里说明「页末表格 + 次页页首表格」两个位置条件都成立，
-                    # 是被内容判据（列数 / 表头）拒掉的。静默 break 会让用户无从
-                    # 判断为什么没缝上，因此记一条拒绝审计。
+                # P1：起始表以「合计/总计」收尾 → 表已完整，静默结束。
+                # 这是正常情况，不记拒绝——记了只会制造噪声，掩盖真正的异常。
+                if table_ends_with_total(stitched, opts):
+                    break
+
+                verdict, reason = _merge_verdict(stitched, next_block.table, opts)
+                if verdict == "new":
+                    # 确认是另一张表（例如自带表头），正常情况，静默结束。
+                    break
+                if verdict == "reject":
+                    # 无法确定是否为续接（典型：列数不符），留待人工核对。
                     result.rejections.append(
                         StitchRecord(
                             doc_id=first.meta.doc_id,
                             pages=[stitched.page_start, next_block.table.page],
                             ncols=next_block.table.ncols,
-                            reason=f"{reason}（起始表 {stitched.ncols} 列）",
+                            reason=reason,
                         )
                     )
                     break

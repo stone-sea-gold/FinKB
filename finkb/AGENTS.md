@@ -27,6 +27,8 @@
 | 物理页码优先取 `page_number` 块 | 分页解析时 MinerU 的 `page_idx` 会从 0 重编号（坑-11） |
 | MinerU 类型标签优先于统计推断 | `type=header/page_number` 直接标记噪音；统计清洗只服务 pypdf 兜底（ADR-015） |
 | 清洗必须在缝合之前 | 顺序不可颠倒 |
+| 缝合判据先判表头、再判列数 | 顺序颠倒会让「新表」被误报成「列数不符」（坑-17） |
+| 合计行即表结束，且不告警 | 正常情况不该制造告警噪声（坑-18 / ADR-017） |
 
 ## 完工前（强制）
 
@@ -43,7 +45,7 @@
 
 ```bash
 cd finkb
-../.venv/bin/python -m pytest -q     # 当前基线：98 passed
+../.venv/bin/python -m pytest -q     # 当前基线：105 passed
 ```
 
 - 全部测试必须**离线可跑**，不得依赖网络或 API key
