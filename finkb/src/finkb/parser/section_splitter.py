@@ -53,6 +53,11 @@ class SplitOptions:
         footnote_prefix: 脚注行前缀（命中即不切分）。
         footnote_min_length: 超过该长度视为脚注（实测 P109 的「注1:…」长达 200+ 字）。
         summary_max_nonempty: 判定为汇总块时，后继行允许的最大非空单元格数。
+        summary_max_rows: 判定为汇总块时，段内允许的最大行数。
+            只看「非空格数」会漏判空列多的宽表：财务报表附注的
+            「附注七」列大量留空，10–21 行的数据表每行也只有 3 个非空格，
+            会被误判成汇总块（实测 7 张核心报表中招）。**行数**才是有区分度的维度：
+            真汇总块 0–3 行，误判的 ≥8 行。
         summary_min_width: 只在 **≥ 该列数** 的表上启用汇总块判据。
             窄表（2–3 列）里任何行都满足「非空 ≤4」，该判据恒真、没有区分力。
         narrow_heading_only: 窄表是否只按「冒号/中文序号」切分（保守模式）。
@@ -62,6 +67,7 @@ class SplitOptions:
     footnote_prefix: str = "注"
     footnote_min_length: int = 40
     summary_max_nonempty: int = 4
+    summary_max_rows: int = 3
     summary_min_width: int = 4
     narrow_heading_only: bool = True
 
@@ -226,6 +232,7 @@ def _section_kind(
     cut_kind: SectionKind,
     rows: list[list[str]],
     parent_header: list[str] | None = None,
+    options: SplitOptions | None = None,
 ) -> SectionKind:
     """结合段内内容细化类型。
 
@@ -237,7 +244,7 @@ def _section_kind(
     三格全是**值**（项目/账面价值/未办妥原因），但「尚未办完所有手续」
     不含数字，会被误判成「键」，从而凑成 ``键|值|键`` 的假交替。
     """
-    if cut_kind == "summary" and not own_header:
+    if cut_kind == "summary" and not own_header and _is_short_summary(rows, options):
         return "summary"
     if (
         not own_header
@@ -250,6 +257,19 @@ def _section_kind(
         # 纯文本的短段 —— 典型是「关键审计事项」这类标签 + 长文
         return "kv"
     return "data"
+
+
+def _is_short_summary(rows: list[list[str]], options: SplitOptions | None) -> bool:
+    """汇总块必须又短又稀。
+
+    「稀」是切分时的必要条件（``summary_max_nonempty``），「短」是分段后
+    才能确认的充分条件——两者都满足才认。只判「稀」会把空列多的宽表
+    整张吞成 summary（实测 P130_T77 现金流量表 12/15/21 行）。
+    """
+    opts = options or SplitOptions()
+    if len(rows) > opts.summary_max_rows:
+        return False
+    return all(len(_non_empty(row)) <= opts.summary_max_nonempty for row in rows)
 
 
 def _collect_cut_candidates(
@@ -318,12 +338,19 @@ def split_sections(
     seq = 0
 
     def emit(start: int, end: int, path: list[str], header: list[str] | None,
-             header_source: str, cut_kind: SectionKind) -> None:
+             header_source: str, cut: SectionCut | None) -> None:
         nonlocal seq
         segment = rows[start:end]
         if not segment:
             return
-        kind = _section_kind(header_source == "self", cut_kind, segment, header)
+        cut_kind: SectionKind = cut.kind if cut is not None else "data"
+        kind = _section_kind(
+            header_source == "self", cut_kind, segment, header, opts
+        )
+        if cut is not None and cut_kind == "summary" and kind != "summary":
+            # 切分时只看到「后继行稀」，分段后才发现它并不短 —— 改判并留痕
+            cut.kind = "data"
+            cut.reason += f"；但段内 {len(segment)} 行，降级为 data"
         seq += 1
         result.tables.append(
             _finalize(LogicalTable(
@@ -345,7 +372,7 @@ def split_sections(
     path: list[str] = []
     current_header = parent_header
     current_source = "inherited"
-    pending_kind: SectionKind = "data"
+    pending_cut: SectionCut | None = None
 
     if cuts and cuts[0].row == 0:
         first = cuts[0]
@@ -357,11 +384,11 @@ def split_sections(
         else:
             current_source = "inherited"
             cursor = 1
-        pending_kind = first.kind
+        pending_cut = first
         cuts = cuts[1:]
 
     for cut in cuts:
-        emit(cursor, cut.row, path, current_header, current_source, pending_kind)
+        emit(cursor, cut.row, path, current_header, current_source, pending_cut)
         path = [cut.text]
         if cut.own_header and cut.row + 1 < len(rows):
             current_header = rows[cut.row + 1]
@@ -371,9 +398,9 @@ def split_sections(
             current_header = parent_header
             current_source = "inherited"
             cursor = cut.row + 1
-        pending_kind = cut.kind
+        pending_cut = cut
 
-    emit(cursor, len(rows), path, current_header, current_source, pending_kind)
+    emit(cursor, len(rows), path, current_header, current_source, pending_cut)
 
     if not result.tables:
         result.tables.append(

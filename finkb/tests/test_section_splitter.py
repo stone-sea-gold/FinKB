@@ -370,3 +370,55 @@ def test_same_row_without_header_is_kv_row() -> None:
     logical = split_sections(table).tables[0]
 
     assert logical.kind == "kv_row"
+
+
+# --------------------------------------------------------------------------- #
+# 步骤 1 修订：汇总块必须「又短又稀」
+# --------------------------------------------------------------------------- #
+HEADER_4 = ["项目", "附注七", "2025年", "2024年"]
+
+
+def _sparse_rows(count: int, start: int = 0) -> list[list[str]]:
+    """空列多的宽表行：4 列只有 3 个非空格（附注列留空）。"""
+    return [[f"项目{start + i}", "", str(i), str(i)] for i in range(count)]
+
+
+def test_long_sparse_segment_is_not_summary() -> None:
+    """P130_T77 形态：后继行很稀，但整段有 9 行 —— 是数据表不是汇总块。"""
+    label = "一、经营活动产生的现金流量"
+    table = make_table(
+        [[label, "", "", ""]] + _sparse_rows(9),
+        header=HEADER_4,
+        section_rows=[(0, label)],
+    )
+    result = split_sections(table)
+
+    assert [t.kind for t in result.tables] == ["data"]
+    assert "降级为 data" in result.cuts[0].reason
+    assert result.cuts[0].kind == "data"
+
+
+def test_short_sparse_segment_is_still_summary() -> None:
+    """真汇总块：2 行，每行 3 个非空格 —— 必须仍然判 summary。"""
+    label = "三、筹资活动产生的现金流量"
+    table = make_table(
+        [[label, "", "", ""]] + _sparse_rows(2),
+        header=HEADER_4,
+        section_rows=[(0, label)],
+    )
+    result = split_sections(table)
+
+    assert [t.kind for t in result.tables] == ["summary"]
+    assert "降级" not in result.cuts[0].reason
+
+
+def test_dense_long_segment_is_data() -> None:
+    """行数够多且每行非空格也多 —— 两个条件都不满足，当然是数据表。"""
+    label = "二、投资活动产生的现金流量"
+    table = make_table(
+        [[label, "", "", ""]] + [[f"项目{i}", "附注", str(i), str(i)] for i in range(6)],
+        header=HEADER_4,
+        section_rows=[(0, label)],
+    )
+    result = split_sections(table)
+    assert [t.kind for t in result.tables] == ["data"]
