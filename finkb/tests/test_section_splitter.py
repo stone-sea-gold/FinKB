@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from finkb.common.models import DocMeta, StitchedTable, TableBlock
-from finkb.parser.markdown_blocks import html_table_to_rows
+from finkb.parser.markdown_blocks import html_table_layout, html_table_to_rows
 from finkb.parser.section_splitter import (
     SplitOptions,
     _looks_like_heading,
@@ -61,10 +61,12 @@ def test_fullwidth_single_cell_is_not_a_header() -> None:
         "<tr><td>比亚迪汽车工业</td><td>1,240,000</td></tr>"
         "</table>"
     )
-    rows, is_header, _ = html_table_to_rows(html)
+    layout = html_table_layout(html)
 
-    assert is_header is False
-    assert rows[0][0] == "公司及其子公司对外担保情况"
+    # 标题行被单独抽走，不是表头；真正的表头是紧随其后的那一行。
+    assert layout.table_title == "公司及其子公司对外担保情况"
+    assert layout.header == ["担保对象名称", "担保额度"]
+    assert layout.rows == [["比亚迪汽车工业", "1,240,000"]]
 
 
 def test_colon_terminated_first_row_is_header() -> None:

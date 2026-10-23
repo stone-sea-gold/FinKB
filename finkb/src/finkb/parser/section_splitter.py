@@ -440,6 +440,12 @@ def _build_one(
         page_end=table.page_end,
         row_range=row_range,
         kind=kind,
+        # 只有继承父表表头的段才拿到父表的多层表头原貌；段自带表头时
+        # 那一行已经被切进 rows（切分点后一行），层数信息在这里没有意义。
+        header_rows=[list(row) for row in table.header_rows]
+        if header_source == "inherited"
+        else [],
+        table_title=table.table_title if header_source == "inherited" else None,
     ))
 
 

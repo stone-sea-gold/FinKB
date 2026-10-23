@@ -55,6 +55,10 @@ class TableBlock:
         section_rows: 「全宽合并行」清单 ``[(数据行下标, 文本), ...]``。
             这些行在展开 ``colspan`` 后退化为「首列有值、其余全空」，
             仅看数据无法与普通数据行区分，必须在解析阶段显式记录。
+        header_rows: 表头各层原貌（已展开合并单元格）。空表示无表头。
+            ``header`` 是它的压平视图，供只需要一行列名的下游使用。
+        table_title: 表标题。MinerU 会把「公司及其子公司对外担保情况」这类
+            标题塞进表格第一行并跨满全宽，它不是表头，抽出来单独保存。
     """
 
     meta: DocMeta
@@ -64,6 +68,8 @@ class TableBlock:
     block_index: int = 0
     raw_lines: list[str] = field(default_factory=list)
     section_rows: list[tuple[int, str]] = field(default_factory=list)
+    header_rows: list[list[str]] = field(default_factory=list)
+    table_title: str | None = None
 
     @property
     def ncols(self) -> int:
@@ -217,6 +223,8 @@ class LogicalTable:
     kind: SectionKind = "data"
     pairs: list[tuple[str, str]] = field(default_factory=list)
     orphan_values: list[str] = field(default_factory=list)
+    header_rows: list[list[str]] = field(default_factory=list)
+    table_title: str | None = None
 
     @property
     def ncols(self) -> int:

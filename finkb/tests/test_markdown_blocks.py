@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from finkb.parser.markdown_blocks import (
+    html_table_layout,
     html_table_to_markdown,
     html_table_to_rows,
     is_separator_row,
@@ -171,20 +172,34 @@ def test_rowspan_is_expanded_into_following_rows() -> None:
         "<tr><td>-乘用车</td><td>4,479,392</td><td>4,281,084</td><td>4.63%</td>"
         "<td>4,545,423</td><td>4,250,370</td><td>6.94%</td></tr></table>"
     )
-    rows, is_header, _ = html_table_to_rows(html)
+    layout = html_table_layout(html)
 
-    assert is_header is True
-    assert rows[0] == ["", "快报产量", "", "", "快报销量", "", ""]
-    assert rows[1] == [
-        "",
-        "本报告期",
-        "上年同期",
-        "与上年同比增减",
-        "本报告期",
-        "上年同期",
-        "与上年同比增减",
+    assert layout.header_layers == 2
+    assert layout.header_rows == [
+        ["", "快报产量", "", "", "快报销量", "", ""],
+        [
+            "",
+            "本报告期",
+            "上年同期",
+            "与上年同比增减",
+            "本报告期",
+            "上年同期",
+            "与上年同比增减",
+        ],
     ]
-    assert len({len(row) for row in rows}) == 1
+    # 压平后每个列名都要带上它所属的分组，否则「本报告期」在两组里无法区分。
+    assert layout.header == [
+        "",
+        "快报产量/本报告期",
+        "快报产量/上年同期",
+        "快报产量/与上年同比增减",
+        "快报销量/本报告期",
+        "快报销量/上年同期",
+        "快报销量/与上年同比增减",
+    ]
+    assert layout.rows[0][0] == "-乘用车"
+    assert layout.rows[0][1] == "4,479,392"
+    assert len({len(row) for row in layout.rows}) == 1
 
 
 def test_rowspan_placeholder_row_without_own_cells_is_dropped() -> None:

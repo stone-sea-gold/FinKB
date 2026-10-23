@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass
 from html.parser import HTMLParser
 
 from finkb.common.models import Block, DocMeta, Page, TableBlock
@@ -335,35 +336,208 @@ def _is_pure_number(text: str) -> bool:
 HEADER_LOOKAHEAD_ROWS = 3
 
 
-def html_table_to_rows(
-    html: str,
-) -> tuple[list[list[str]], bool, list[tuple[int, str]]]:
-    """把 HTML 表格转成 ``(rows, first_row_is_header, section_rows)``。
+@dataclass(frozen=True)
+class TableLayout:
+    """一张 HTML 表格的结构化视图。
 
-    ``rows`` 是**已展开合并单元格**的等宽网格：``colspan`` 补空占位，``rowspan``
-    把首格内容下发给被覆盖的每一行（见 :func:`_expand_merged_cells`）。
+    ``rows`` **不含**标题行与表头行——标题进 ``table_title``，表头进
+    ``header``（``header_rows`` 保留各层原貌）。下游因此不必再记「表头占几行」。
+    """
 
-    ``first_row_is_header`` 判定依次尝试三条判据：
+    rows: list[list[str]]
+    header: list[str]
+    header_rows: list[list[str]]
+    table_title: str | None
+    section_rows: list[tuple[int, str]]
+    width: int
 
-    1. 首行使用 ``<th>``；
-    2. 首行单元格全部带 ``rowspan≥2``（MinerU 的合并表头）；
-    3. **纯数值分布推断**（vlm 后端无任何表头标记）：
-       首行没有纯数值 + 首行至少 2 个非空单元格 + 其后 ``HEADER_LOOKAHEAD_ROWS``
-       行内至少有一行含纯数值。
+    @property
+    def header_layers(self) -> int:
+        return len(self.header_rows)
 
-    ``section_rows`` 是「全宽合并行」清单 ``[(数据行下标, 文本), ...]``。
-    这些行在展开 ``colspan`` 后会退化成「首列有值、其余全空」的形态，
-    单看数据无法与「恰好多列为空的数据行」区分，因此**必须在解析阶段显式记录**。
-    它们是物理表内部的潜在分节点（嵌入式小标题 / 子栏标注 / 行内值），
-    交给 :mod:`finkb.parser.section_splitter` 做语义归类。
 
-    全空行会被剔除（``rowspan`` 未展开时的垃圾行）。
+def _cell_columns(raw_row: list[tuple[str, int, int]]) -> list[tuple[int, int, str]]:
+    """把一行原始单元格摊成 ``(起始列, 结束列, 文本)``，列号左闭右开。"""
+    spans: list[tuple[int, int, str]] = []
+    column = 0
+    for text, _, colspan in raw_row:
+        spans.append((column, column + colspan, text))
+        column += colspan
+    return spans
+
+
+def _looks_like_header_row(
+    rows: list[list[str]],
+    has_th: list[bool],
+    raw_rows: list[list[tuple[str, int, int]]],
+    index: int,
+) -> bool:
+    """判断第 ``index`` 行是否为表头行。四条判据依次尝试，命中即停。"""
+    if has_th[index]:
+        return True
+
+    # MinerU 的合并表头：整行单元格都 rowspan≥2（实测 P43 证券投资表）
+    spans = [rowspan for _, rowspan, _ in raw_rows[index]]
+    if len(spans) >= 2 and all(span >= 2 for span in spans):
+        return True
+
+    row = rows[index]
+    # 纯数值分布推断（vlm 后端无任何表头标记）。三条护栏缺一不可：
+    #   ① 至少 2 个非空单元格 —— 全宽单格是「表标题」而不是表头（实测 P89）；
+    #   ② 本行没有纯数值 —— 有数值说明是数据行；
+    #   ③ 向后看 HEADER_LOOKAHEAD_ROWS 行内有数值 —— 兜住「期间表头 + 小计行」。
+    first_non_empty = sum(1 for cell in row if cell.strip())
+    first_numeric = sum(1 for cell in row if _is_pure_number(cell))
+    lookahead_numeric = any(
+        _is_pure_number(cell)
+        for following in rows[index + 1 : index + 1 + HEADER_LOOKAHEAD_ROWS]
+        for cell in following
+    )
+    if first_non_empty >= 2 and first_numeric == 0 and lookahead_numeric:
+        return True
+
+    # 纯文本表兜底：整表没有任何数值时上一条失效。此时若首行所有非空单元格
+    # 都以冒号结尾，按列名处理（实测 P118「关键审计事项」）。
+    cells = [cell.strip() for cell in row if cell.strip()]
+    return len(cells) >= 2 and all(cell.endswith((":", "：")) for cell in cells)
+
+
+def _carried_columns(raw_rows: list[list[tuple[str, int, int]]], target: int) -> set[int]:
+    """第 ``target`` 行里，哪些列的内容是**上一行 rowspan 下发**过来的。
+
+    走一遍与 :func:`_expand_merged_cells` 完全相同的列游标，因此两者不会失步。
+    判断「下一层表头是否在细分」时必须排除这些列——它们不是下一层自己的列名。
+    """
+    carried: set[int] = set()
+    pending: dict[tuple[int, int], str] = {}
+    for index in range(target + 1):
+        queue = list(raw_rows[index])
+        column = 0
+        while True:
+            if (index, column) in pending:
+                if index == target:
+                    carried.add(column)
+                pending.pop((index, column))
+                column += 1
+            elif queue:
+                _, rowspan, colspan = queue.pop(0)
+                for down in range(1, rowspan):
+                    for across in range(colspan):
+                        pending[(index + down, column + across)] = ""
+                column += colspan
+            else:
+                break
+    return carried
+
+
+def _extra_header_layers(
+    raw_rows: list[list[tuple[str, int, int]]],
+    rows: list[list[str]],
+    start: int,
+    width: int,
+    limit: int = 2,
+) -> int:
+    """数出表头在 ``start`` 之外还有几层。
+
+    判据（全部是 HTML 结构事实，不含任何经验阈值）：
+
+    * **R1** 当前层存在 ``colspan>1`` 的分组格，且不是「单格跨满全宽」；
+    * **R2** 下一层的每个自有单元格都落在这些分组格覆盖的列区间内；
+    * **R3** 下一层的自有单元格里没有纯数值。
+
+    R2 + R3 合起来表达的是「上一层在做分组，下一层在做细分」——这正是双层
+    表头的定义。任何一层不满足就停下，宁可不合并也不硬压。
+    """
+    layers = 0
+    index = start
+    while layers < limit and index + 1 < len(raw_rows):
+        groups = [cell for cell in _cell_columns(raw_rows[index]) if cell[1] - cell[0] > 1]
+        if not groups:
+            break
+        if len(groups) == 1 and groups[0][0] == 0 and groups[0][1] == width:
+            break
+        covered: set[int] = set()
+        for begin, end, _ in groups:
+            covered.update(range(begin, end))
+        # 用**展开后**的下一行判断：rowspan 会把上一层的文本下发到被覆盖的行，
+        # 那些列在这里是空串，自然不参与「是否落在分组列内」的比较。
+        following = rows[index + 1]
+        carried = _carried_columns(raw_rows, index + 1)
+        current = rows[index]
+        # 下一层「自有」的列：非空、不是上一行 rowspan 下发的、也不是原地重复上一层
+        # 列名（MinerU 对没有 rowspan 的 stub 列会把列名在两层都输出一遍）。
+        own_columns = {
+            column
+            for column, cell in enumerate(following)
+            if cell.strip()
+            and column not in carried
+            and not (
+                column < len(current) and current[column].strip() == cell.strip()
+            )
+        }
+        if not own_columns:
+            break
+        if not own_columns <= covered:
+            break
+        if any(_is_pure_number(following[column]) for column in own_columns):
+            break
+        layers += 1
+        index += 1
+    return layers
+
+
+def _header_cell(
+    raw_row: list[tuple[str, int, int]],
+    expanded: list[str],
+    column: int,
+) -> str:
+    """取某一层表头在第 ``column`` 列的文本。
+
+    含 ``colspan`` 的层按**原始单元格的列区间**取值——分组名要覆盖它跨的每一列，
+    否则 ``快报产量/本报告期`` 会退化成 ``本报告期``，分组信息整层丢失。
+    不含 ``colspan`` 的层直接读展开行（那里已经处理好 ``rowspan`` 进位）。
+    """
+    if any(colspan > 1 for _, _, colspan in raw_row):
+        for begin, end, text in _cell_columns(raw_row):
+            if begin <= column < end:
+                return text.strip()
+    return expanded[column].strip() if column < len(expanded) else ""
+
+
+def _flatten_header(
+    raw_rows: list[list[tuple[str, int, int]]],
+    rows: list[list[str]],
+    positions: list[int],
+    width: int,
+) -> list[str]:
+    """把多层表头压平成一行，用 ``/`` 连接。
+
+    首列为空时**保留空串**——财务报表的「项目」列在表头经常留空，这是排版
+    惯例而不是解析错误，凭空填一个「项目」会让 L1 拿到假列名。
+    """
+    flat: list[str] = []
+    for column in range(width):
+        parts: list[str] = []
+        for position in positions:
+            cell = _header_cell(raw_rows[position], rows[position], column)
+            # rowspan 会把同一文本下发到多行，压平时不能重复
+            if cell and (not parts or parts[-1] != cell):
+                parts.append(cell)
+        flat.append("/".join(parts))
+    return flat
+
+
+def html_table_layout(html: str) -> TableLayout:
+    """把 HTML 表格解析成 :class:`TableLayout`。
+
+    处理顺序：剔除占位行 → 展开 ``rowspan``/``colspan`` → 抽出全宽标题行 →
+    识别表头（可多层）→ 压平表头 → 剩余即数据行。
     """
     extractor = _HTMLTableExtractor()
     extractor.feed(html)
     extractor.close()
     if not extractor.raw_rows:
-        return [], False, []
+        return TableLayout([], [], [], None, [], 0)
 
     # 自身一格内容都没有的行，是 MinerU 给 ``rowspan`` 补的占位行（坑-13），必须剔除。
     # 判据必须是「本行自有单元格是否全空」，不能是「展开后是否全空」——
@@ -374,65 +548,69 @@ def html_table_to_rows(
         if any(text.strip() for text, _, _ in cells)
     ]
     if not keep:
-        return [], False, []
+        return TableLayout([], [], [], None, [], 0)
 
     grid = _expand_merged_cells(extractor.raw_rows)
     kept_rows = [grid[index] for index in keep]
     kept_th = [extractor.row_has_th[index] for index in keep]
     kept_raw = [extractor.raw_rows[index] for index in keep]
 
-    # rowspan / colspan 展开后行长度已经等于逻辑列数，直接取最大长度即可
     width = max(len(row) for row in kept_rows)
     rows = [row + [""] * (width - len(row)) for row in kept_rows]
 
-    first_is_header = bool(kept_th and kept_th[0])
-    if not first_is_header and kept_raw:
-        first_spans = [rowspan for _, rowspan, _ in kept_raw[0]]
-        # MinerU 的合并表头：首行所有单元格 rowspan≥2（实测 P43 证券投资表）
-        if len(first_spans) >= 2 and all(span >= 2 for span in first_spans):
-            first_is_header = True
+    # 全宽单格标题行：MinerU 把「公司及其子公司对外担保情况」这类表标题塞进
+    # 表格的第一行并跨满全宽。它不是表头（没有列名语义），抽出来单独保存。
+    table_title: str | None = None
+    start = 0
+    if len(kept_raw) >= 3:
+        first = kept_raw[0]
+        if len(first) == 1 and first[0][2] == width and first[0][0].strip():
+            table_title = first[0][0].strip()
+            start = 1
 
-    # 纯数值分布推断（vlm 后端）。
-    # 三条护栏缺一不可：
-    #   ① 首行至少 2 个非空单元格 —— 全宽单格是「表标题」而不是表头（实测 P89）；
-    #   ② 首行没有纯数值 —— 有数值说明是数据行；
-    #   ③ 向后看 HEADER_LOOKAHEAD_ROWS 行内有数值 —— 兜住「期间表头 + 小计行」形态。
-    if not first_is_header and len(rows) >= 2:
-        first_non_empty = sum(1 for cell in rows[0] if cell.strip())
-        first_numeric = sum(1 for cell in rows[0] if _is_pure_number(cell))
-        lookahead_numeric = any(
-            _is_pure_number(cell)
-            for row in rows[1 : 1 + HEADER_LOOKAHEAD_ROWS]
-            for cell in row
-        )
-        if first_non_empty >= 2 and first_numeric == 0 and lookahead_numeric:
-            first_is_header = True
+    header_rows: list[list[str]] = []
+    if start < len(rows) and _looks_like_header_row(rows, kept_th, kept_raw, start):
+        layers = 1 + _extra_header_layers(kept_raw, rows, start, width)
+        header_rows = [rows[start + offset] for offset in range(layers)]
 
-    # 纯文本表兜底：整表没有任何数值（如「关键审计事项」表）时，上一条判据失效。
-    # 此时若首行所有非空单元格都以冒号结尾，按列名处理。
-    # 实测 P118：首行 ['关键审计事项:', '该事项在审计中是如何应对:'] → 表头。
-    if not first_is_header and len(rows) >= 2:
-        first_cells = [cell.strip() for cell in rows[0] if cell.strip()]
-        if len(first_cells) >= 2 and all(
-            cell.endswith((":", "：")) for cell in first_cells
-        ):
-            first_is_header = True
+    data_start = start + len(header_rows)
+    data_rows = [list(row) for row in rows[data_start:]]
 
-    # 记录「全宽合并行」：原始 HTML 里只有一个单元格且跨满整行。
-    # 下标是相对「数据行」（不含表头）的位置，与 TableBlock.rows 对齐。
+    # 「全宽合并行」：原始 HTML 里只有一个单元格且跨满整行。下标相对数据行。
     section_rows: list[tuple[int, str]] = []
-    header_offset = 1 if first_is_header else 0
-    for pos, cells in enumerate(kept_raw):
-        data_index = pos - header_offset
-        if data_index < 0:
-            continue
-        # 全宽合并行：原始 HTML 里只有一个单元格且跨满整行
+    for position in range(data_start, len(kept_raw)):
+        cells = kept_raw[position]
         if len(cells) == 1 and cells[0][2] == width:
             text = cells[0][0].strip()
             if text:
-                section_rows.append((data_index, text))
+                section_rows.append((position - data_start, text))
 
-    return rows, first_is_header, section_rows
+    positions = list(range(start, start + len(header_rows)))
+    header = (
+        _flatten_header(kept_raw, rows, positions, width) if header_rows else []
+    )
+    return TableLayout(data_rows, header, header_rows, table_title, section_rows, width)
+
+
+def html_table_to_rows(
+    html: str,
+) -> tuple[list[list[str]], bool, list[tuple[int, str]]]:
+    """把 HTML 表格转成 ``(rows, first_row_is_header, section_rows)``。
+
+    这是 :func:`html_table_layout` 的**兼容视图**：``rows`` 里重新拼回标题行与
+    （压平后的）表头行，供只需要「一张表」的调用方使用。需要多层表头原貌时
+    请直接用 :func:`html_table_layout`。
+
+    全空行会被剔除（``rowspan`` 未展开时的垃圾行）。
+    """
+    layout = html_table_layout(html)
+    rows: list[list[str]] = []
+    if layout.table_title:
+        rows.append([layout.table_title] + [""] * (layout.width - 1))
+    if layout.header:
+        rows.append(list(layout.header))
+    rows.extend([list(row) for row in layout.rows])
+    return rows, bool(layout.header), list(layout.section_rows)
 
 
 def html_table_to_markdown(html: str) -> str:

@@ -63,7 +63,10 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from finkb.common.models import LogicalTable, Page, StitchedTable  # noqa: E402
-from finkb.parser.markdown_blocks import html_table_to_rows  # noqa: E402
+from finkb.parser.markdown_blocks import (  # noqa: E402
+    html_table_layout,
+    html_table_to_rows,
+)
 from finkb.parser.mineru_client import content_list_to_pages  # noqa: E402
 from finkb.parser.noise_filter import strip_running_noise  # noqa: E402
 from finkb.parser.section_splitter import SplitOptions, split_all  # noqa: E402
@@ -364,6 +367,28 @@ def _short(value: object, limit: int = 60) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
+#: 没有任何数值单元格时 ``numeric_digest`` 的取值。
+EMPTY_DIGEST = hashlib.sha256(b"").hexdigest()[:16]
+
+
+def parent_digests(snapshot: dict) -> dict[str, list[str]]:
+    """按**物理表**聚合非空数值指纹的多重集。
+
+    分节边界可能移动——多行表头被吃掉后，原本单独成段的表头行并入下一段，
+    逻辑表号随之改变，但同一张物理表里的数字一个也不会多、一个也不会少。
+    只按逻辑表号比指纹会把这种「搬家」误报成「数值变了」。
+    """
+    out: dict[str, list[str]] = {}
+    for key, entry in snapshot["tables"].items():
+        digest = entry["numeric_digest"]
+        if digest == EMPTY_DIGEST:
+            continue
+        out.setdefault(key.split("#")[0], []).append(digest)
+    for values in out.values():
+        values.sort()
+    return out
+
+
 def diff_snapshots(before: dict, after: dict) -> tuple[str, list[str]]:
     """生成 Markdown 对照报告。
 
@@ -413,7 +438,15 @@ def diff_snapshots(before: dict, after: dict) -> tuple[str, list[str]]:
         lines.append("")
 
     if removed:
-        lines += ["## 消失的表", "", "| 表号 | kind | 行数 |", "|---|---|---|"]
+        lines += [
+            "## 消失的表",
+            "",
+            "> 逻辑表号消失不等于数据丢失：分节边界移动会把两段并成一段。",
+            "> 判断依据看下一节「守恒律速查」——物理表的数值指纹守恒即说明数字还在。",
+            "",
+            "| 表号 | kind | 行数 |",
+            "|---|---|---|",
+        ]
         for key in removed:
             entry = b_tables[key]
             lines.append(f"| `{key}` | {entry['kind']} | {entry['row_count']} |")
@@ -425,9 +458,15 @@ def diff_snapshots(before: dict, after: dict) -> tuple[str, list[str]]:
         "| 表号 | 数值指纹 | 页码 | 结论 |",
         "|---|---|---|---|",
     ]
+    old_parents, new_parents = parent_digests(before), parent_digests(after)
     for key in touched:
         old, new = b_tables[key], a_tables[key]
-        digest_ok = old["numeric_digest"] == new["numeric_digest"]
+        parent = key.split("#")[0]
+        # 先看自己有没有变；变了不代表错——可能只是分节边界挪了位置，
+        # 所以再看同一张物理表的数字总量是否守恒。
+        digest_ok = old["numeric_digest"] == new["numeric_digest"] or (
+            old_parents.get(parent) == new_parents.get(parent)
+        )
         page_ok = (old["page_start"], old["page_end"]) == (new["page_start"], new["page_end"])
         verdict = []
         if not digest_ok:
@@ -896,6 +935,102 @@ def render_rowspan_report(parsed_dir: Path) -> str:
     return "\n".join(lines)
 
 
+def render_header_report(parsed_dir: Path) -> str:
+    """逐表列出「单行表头 → 多层表头压平」的前后对照。
+
+    「改前」= 第 0 行当表头、其余全部当数据（这正是改动前 ``html_table_to_rows``
+    的契约）；「改后」= 多层表头压平成一行、只把真正的数据行留下。两者行数之差
+    就是被多行表头吃掉的层数，可以逐张核对。
+    """
+    payload = json.loads((parsed_dir / "content_list.json").read_text(encoding="utf-8"))
+    doc_id = parsed_dir.name
+
+    total = with_header = 0
+    multi: list[str] = []
+    titles: list[str] = []
+    page_ordinal: dict[int, int] = {}
+
+    for block in payload:
+        if block.get("type") != "table":
+            continue
+        body = str(block.get("table_body") or "")
+        if not body.strip():
+            continue
+        total += 1
+        page = int(block.get("page_idx", 0)) + 1
+        page_ordinal[page] = page_ordinal.get(page, 0) + 1
+        layout = html_table_layout(body)
+        if layout.table_title:
+            titles.append(
+                f"- P{page} 表格#{page_ordinal[page]}：`{layout.table_title}`"
+                f"（原为首行全宽单格，已抽出为表标题，不再占数据行）"
+            )
+        if not layout.header:
+            continue
+        with_header += 1
+
+        if layout.header_layers < 2:
+            continue
+
+        # 改前只有第 0 行是表头，其余层全被当成数据行。
+        rows_before = len(layout.rows) + layout.header_layers - 1
+        multi.append(f"### P{page} 表格#{page_ordinal[page]}")
+        multi.append("")
+        multi.append(
+            f"- 表头层数：{layout.header_layers}　"
+            f"数据行数：改前 {rows_before} → 改后 {len(layout.rows)}"
+        )
+        multi.append(f"- 改前表头（只有第 0 行）：`{layout.header_rows[0]}`")
+        for extra in layout.header_rows[1:]:
+            multi.append(f"- 改前误当数据行：`{extra}`")
+        multi.append(f"- **改后表头**：`{layout.header}`")
+        multi.append("- 原始 HTML：")
+        multi.append("")
+        multi.append("```html")
+        multi.append(body[:400] + ("…" if len(body) > 400 else ""))
+        multi.append("```")
+        multi.append("")
+        multi.append("- [ ] 我核对过 PDF 这一处")
+        multi.append("")
+
+    lines = [
+        f"# 多层表头对照：{doc_id}",
+        "",
+        f"- 有表头的物理表：{with_header} 张（共解析 {total} 张非空表）",
+        f"- **识别出多层表头的：{sum(1 for line in multi if line.startswith('### '))} 张**",
+        f"- 抽出全宽表标题的：{len(titles)} 张",
+        "",
+        "> 判据（全部是 HTML 结构事实，不含任何「这份 PDF 数出来的」阈值）：",
+        "> R1 当前层有 `colspan>1` 且不是单格跨满全宽（那是表标题）；",
+        "> R2 下一层的自有列 ⊆ 本层分组覆盖的列；R3 下一层自有格无纯数值。",
+        "",
+        "## 一、多层表头压平",
+        "",
+    ]
+    if multi:
+        lines.extend(multi)
+    else:
+        lines.append("没有识别出多层表头。")
+        lines.append("")
+    lines.append("## 二、抽出的表标题")
+    lines.append("")
+    lines.extend(titles or ["（无）"])
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _cmd_headers(args: argparse.Namespace) -> int:
+    report = render_header_report(Path(args.doc).expanduser().resolve())
+    if args.out:
+        out = Path(args.out).expanduser()
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(report, encoding="utf-8")
+        print(f"表头对照已写入 {out}")
+    else:
+        print(report)
+    return 0
+
+
 def _cmd_rowspan(args: argparse.Namespace) -> int:
     report = render_rowspan_report(Path(args.doc).expanduser().resolve())
     if args.out:
@@ -1014,6 +1149,11 @@ def build_parser() -> argparse.ArgumentParser:
     rowspan.add_argument("--doc", required=True, help="已解析目录，如 data/parsed/002594_2025_年报")
     rowspan.add_argument("--out", help="报告输出路径（.md），省略则打印到标准输出")
     rowspan.set_defaults(func=_cmd_rowspan)
+
+    headers = sub.add_parser("headers", help="多层表头压平前后对照")
+    headers.add_argument("--doc", required=True)
+    headers.add_argument("--out")
+    headers.set_defaults(func=_cmd_headers)
 
     snapshot = sub.add_parser("snapshot", help="导出全量结论快照")
     snapshot.add_argument("--doc", required=True, help="已解析目录，如 data/parsed/002594_2025_年报")

@@ -37,6 +37,7 @@ import requests
 from finkb.common.models import Block, DocMeta, Page, TableBlock
 from finkb.parser.markdown_blocks import (
     html_table_to_markdown,
+    html_table_layout,
     html_table_to_rows,
     parse_page_anchored_markdown,
 )
@@ -499,20 +500,20 @@ def _table_block_from_item(
     if not isinstance(body, str) or not body.strip():
         return None
 
-    rows, first_is_header, section_rows = html_table_to_rows(body)
-    if not rows:
+    layout = html_table_layout(body)
+    if not layout.rows and not layout.header:
         return None
 
-    header = rows[0] if first_is_header else None
-    data_rows = rows[1:] if first_is_header else rows
     return TableBlock(
         meta=meta,
-        header=list(header) if header is not None else None,
-        rows=[list(row) for row in data_rows],
-        has_separator=first_is_header,
+        header=list(layout.header) if layout.header else None,
+        rows=[list(row) for row in layout.rows],
+        has_separator=bool(layout.header),
         block_index=block_index,
         raw_lines=[],
-        section_rows=list(section_rows),
+        section_rows=list(layout.section_rows),
+        header_rows=[list(row) for row in layout.header_rows],
+        table_title=layout.table_title,
     )
 
 
