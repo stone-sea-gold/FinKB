@@ -6,6 +6,7 @@ import json
 
 from finkb.parser.markdown_blocks import (
     html_table_to_markdown,
+    html_table_to_rows,
     is_separator_row,
     parse_markdown_table,
     parse_page_anchored_markdown,
@@ -153,3 +154,46 @@ def test_html_table_handles_ragged_rows() -> None:
 
 def test_html_table_empty_returns_empty_string() -> None:
     assert html_table_to_markdown("<p>no table</p>") == ""
+
+
+def test_rowspan_is_expanded_into_following_rows() -> None:
+    """``rowspan`` 进位格必须补进后续行，否则第二层表头整体左移一列。
+
+    实测 P13「快报产量/快报销量」：首格 ``rowspan="2"`` 占住第 0 列，
+    第 1 行只有 6 个单元格，若按顺序摆放就会从第 0 列开始，与上层的
+    ``快报产量``／``快报销量`` 分组错位。
+    """
+    html = (
+        '<table><tr><td rowspan="2"></td><td colspan="3">快报产量</td>'
+        '<td colspan="3">快报销量</td></tr>'
+        "<tr><td>本报告期</td><td>上年同期</td><td>与上年同比增减</td>"
+        "<td>本报告期</td><td>上年同期</td><td>与上年同比增减</td></tr>"
+        "<tr><td>-乘用车</td><td>4,479,392</td><td>4,281,084</td><td>4.63%</td>"
+        "<td>4,545,423</td><td>4,250,370</td><td>6.94%</td></tr></table>"
+    )
+    rows, is_header, _ = html_table_to_rows(html)
+
+    assert is_header is True
+    assert rows[0] == ["", "快报产量", "", "", "快报销量", "", ""]
+    assert rows[1] == [
+        "",
+        "本报告期",
+        "上年同期",
+        "与上年同比增减",
+        "本报告期",
+        "上年同期",
+        "与上年同比增减",
+    ]
+    assert len({len(row) for row in rows}) == 1
+
+
+def test_rowspan_placeholder_row_without_own_cells_is_dropped() -> None:
+    """自身一格内容都没有的 ``<tr>`` 是 MinerU 给 rowspan 补的占位行，必须剔除。"""
+    html = (
+        '<table><tr><td rowspan="2">A</td><td rowspan="2">B</td></tr>'
+        "<tr><td></td></tr>"
+        "<tr><td>1</td><td>2</td></tr></table>"
+    )
+    rows, _, _ = html_table_to_rows(html)
+
+    assert rows == [["A", "B"], ["1", "2"]]

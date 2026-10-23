@@ -56,12 +56,14 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import Collection
 
 SRC = Path(__file__).resolve().parents[1] / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from finkb.common.models import LogicalTable, Page, StitchedTable  # noqa: E402
+from finkb.parser.markdown_blocks import html_table_to_rows  # noqa: E402
 from finkb.parser.mineru_client import content_list_to_pages  # noqa: E402
 from finkb.parser.noise_filter import strip_running_noise  # noqa: E402
 from finkb.parser.section_splitter import SplitOptions, split_all  # noqa: E402
@@ -566,30 +568,39 @@ def check_balance_sheet(logical: list[LogicalTable]) -> list[Check]:
     ]
 
 
-def check_invariants(parsed_dir: Path, before: dict | None = None) -> list[Check]:
-    """跑全部守恒律。"""
+def check_invariants(
+    parsed_dir: Path,
+    before: dict | None = None,
+    allow_digest: Collection[str] = (),
+) -> list[Check]:
+    """跑全部守恒律。
+
+    ``allow_digest`` 是**已人工核对并认可**的数值指纹变化。行跨展开会把合并单元格
+    的内容复制到被覆盖的每一行，数值因此重复出现，指纹必然变化——这类变化本身
+    是对的，但要逐张核对过才能进白名单，所以默认仍报失败。
+    """
     current, pages, stitched, logical = _analyze(parsed_dir)
     checks: list[Check] = []
+    allowed = set(allow_digest)
 
     # 1. 数值不变性 / 2. 页码不变性（需要基线快照）
     if before is not None:
-        numeric_bad, page_bad, missing = [], [], []
+        numeric_bad, page_bad, missing, accepted = [], [], [], []
         for key, old in before["tables"].items():
             new = current["tables"].get(key)
             if new is None:
                 missing.append(key)
                 continue
             if old["numeric_digest"] != new["numeric_digest"]:
-                numeric_bad.append(key)
+                (accepted if key in allowed else numeric_bad).append(key)
             if (old["page_start"], old["page_end"]) != (new["page_start"], new["page_end"]):
                 page_bad.append(key)
-        checks.append(
-            Check(
-                "数值不变性",
-                not numeric_bad,
-                "全部一致" if not numeric_bad else f"{len(numeric_bad)} 张数值变了：{numeric_bad[:5]}",
-            )
-        )
+        detail = "全部一致"
+        if numeric_bad:
+            detail = f"{len(numeric_bad)} 张数值变了：{numeric_bad[:5]}"
+        elif accepted:
+            detail = f"全部一致（另有 {len(accepted)} 张已核对认可：{accepted[:5]}）"
+        checks.append(Check("数值不变性", not numeric_bad, detail))
         checks.append(
             Check(
                 "页码不变性",
@@ -780,6 +791,124 @@ def render_unit_map(snapshot: dict) -> str:
 
 
 # ──────────────────────────────────────────────────────────────
+# 8.5 rowspan 展开对照
+# ──────────────────────────────────────────────────────────────
+#: ``rowspan="2"`` / ``rowspan='2'`` 都要能剥掉。
+_ROWS_ATTR_RE = re.compile(r"""\s+rowspan\s*=\s*("[^"]*"|'[^']*')""", re.IGNORECASE)
+
+
+def _show_row(cells: list[str]) -> str:
+    """把一行渲染成「· 分隔」的形式，空单元格显式画成 ``·``，便于看出错位。"""
+    return " | ".join(cell if cell.strip() else "·" for cell in cells)
+
+
+def render_rowspan_report(parsed_dir: Path) -> str:
+    """列出所有含 ``rowspan`` 的表，给出「展开前 / 展开后」逐行对照。
+
+    「展开前」用「删掉 HTML 里所有 ``rowspan`` 属性」复现：旧实现只记录不展开
+    ``rowspan``，等价于每个单元格都是 ``rowspan=1``。因此这份对照精确等于
+    「本次改动前后的差异」，而不是重新实现一套判据。
+    """
+    payload = json.loads((parsed_dir / "content_list.json").read_text(encoding="utf-8"))
+    doc_id = parsed_dir.name
+
+    total = with_rowspan = changed = 0
+    empty_body = 0
+    blocks: list[str] = []
+    page_ordinal: dict[int, int] = {}
+
+    for block in payload:
+        if block.get("type") != "table":
+            continue
+        total += 1
+        page = int(block.get("page_idx", 0)) + 1
+        page_ordinal[page] = page_ordinal.get(page, 0) + 1
+        html = block.get("table_body") or block.get("html") or ""
+        if not html.strip():
+            # MinerU 识别到表格区域但没产出 HTML；``content_list_to_pages``
+            # 会因取不到文本而整块跳过，这里如实计数，不让它无声消失。
+            empty_body += 1
+            continue
+        if "rowspan" not in html.lower():
+            continue
+        with_rowspan += 1
+
+        old_rows, _, _ = html_table_to_rows(_ROWS_ATTR_RE.sub("", html))
+        new_rows, _, _ = html_table_to_rows(html)
+        width = max([len(row) for row in old_rows + new_rows] or [0])
+        if width:
+            old_rows = [row + [""] * (width - len(row)) for row in old_rows]
+            new_rows = [row + [""] * (width - len(row)) for row in new_rows]
+        if old_rows == new_rows:
+            continue
+
+        changed += 1
+        blocks.append(f"### P{page} 表格#{page_ordinal[page]}")
+        blocks.append("")
+        blocks.append(f"- 列数：{width}　行数：{len(new_rows)}")
+        blocks.append("- 原始 HTML：")
+        blocks.append("")
+        blocks.append("```html")
+        blocks.append(html[:400] + ("…" if len(html) > 400 else ""))
+        blocks.append("```")
+        blocks.append("")
+        shown = 0
+        for index in range(max(len(old_rows), len(new_rows))):
+            before = old_rows[index] if index < len(old_rows) else []
+            after = new_rows[index] if index < len(new_rows) else []
+            if before == after:
+                continue
+            blocks.append(f"- **第 {index} 行**")
+            blocks.append(f"  - 改前：{_show_row(before)}")
+            blocks.append(f"  - 改后：{_show_row(after)}")
+            shown += 1
+            if shown >= 4:
+                blocks.append("- …（其余行相同，略）")
+                break
+        blocks.append("- [ ] 我核对过 PDF 这一处")
+        blocks.append("")
+
+    lines = [
+        f"# rowspan 展开对照：{doc_id}",
+        "",
+        f"- `content_list` 中的 table 块：{total} 张",
+        f"- 其中 `table_body` 为空（MinerU 识别到表格区域但没产出 HTML，"
+        f"解析时整块跳过）：{empty_body} 张",
+        f"- 实际进入解析：{total - empty_body} 张",
+        f"- 含 `rowspan` 的表：{with_rowspan} 张",
+        f"- **展开后内容发生变化：{changed} 张**",
+        "",
+        "> 对照方法：把 HTML 里的 `rowspan` 属性全部删掉，再用同一个解析函数算一遍，",
+        "> 得到「改前」；直接解析得到「改后」。两者只差 rowspan 是否进位，",
+        "> 因此这份清单就是本次改动的完整影响面。",
+        ">",
+        "> 注意：行跨展开会把合并单元格的内容**复制**到被覆盖的每一行，所以含数字的",
+        "> 合并格会让同一数字在表里重复出现——这类表在 `invariants --before` 里会报",
+        "> 「数值指纹变化」。逐张核对确认是「复制」而不是「错位」后，用",
+        "> `--allow-digest` 显式认可，不要让白名单悄悄变长。",
+        "",
+    ]
+    if blocks:
+        lines.extend(blocks)
+    else:
+        lines.append("没有任何表的内容发生变化。若本次改动本应产生影响，说明 rowspan 没被展开。")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _cmd_rowspan(args: argparse.Namespace) -> int:
+    report = render_rowspan_report(Path(args.doc).expanduser().resolve())
+    if args.out:
+        out = Path(args.out).expanduser()
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(report, encoding="utf-8")
+        print(f"rowspan 对照已写入 {out}")
+    else:
+        print(report)
+    return 0
+
+
+# ──────────────────────────────────────────────────────────────
 # 9. CLI
 # ──────────────────────────────────────────────────────────────
 def _cmd_snapshot(args: argparse.Namespace) -> int:
@@ -825,7 +954,9 @@ def _cmd_invariants(args: argparse.Namespace) -> int:
     if args.before:
         before = json.loads(Path(args.before).expanduser().resolve().read_text(encoding="utf-8"))
 
-    checks = check_invariants(parsed_dir, before)
+    raw_allow = args.allow_digest or ""
+    allow = [key.strip() for key in raw_allow.split(",") if key.strip()]
+    checks = check_invariants(parsed_dir, before, allow)
     width = max(len(check.name) for check in checks)
     failed = 0
     for check in checks:
@@ -879,6 +1010,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
+    rowspan = sub.add_parser("rowspan", help="rowspan 展开前后逐行对照")
+    rowspan.add_argument("--doc", required=True, help="已解析目录，如 data/parsed/002594_2025_年报")
+    rowspan.add_argument("--out", help="报告输出路径（.md），省略则打印到标准输出")
+    rowspan.set_defaults(func=_cmd_rowspan)
+
     snapshot = sub.add_parser("snapshot", help="导出全量结论快照")
     snapshot.add_argument("--doc", required=True, help="已解析目录，如 data/parsed/002594_2025_年报")
     snapshot.add_argument("--out", required=True, help="快照输出路径（.json）")
@@ -893,6 +1029,10 @@ def build_parser() -> argparse.ArgumentParser:
     invariants = sub.add_parser("invariants", help="跑守恒律，失败退出码 1")
     invariants.add_argument("--doc", required=True)
     invariants.add_argument("--before", help="基线快照；提供后才会校验数值/页码不变性")
+    invariants.add_argument(
+        "--allow-digest",
+        help="已人工核对认可的数值指纹变化，逗号分隔的逻辑表 id",
+    )
     invariants.set_defaults(func=_cmd_invariants)
 
     manual = sub.add_parser("manual-check", help="生成人工核验清单")
