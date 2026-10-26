@@ -237,6 +237,11 @@ MinerU 后端：**`vlm`**（`MINERU_MODEL_VERSION=vlm`）。**必须用 vlm**，
 - **验证**：`tools/audit.py headers` 逐表列「改前表头 / 改后表头 / 原始 HTML / 勾选框」。
 - **失效条件**：MinerU 自身 `colspan` 计数与内容不一致时（P128/P265 疑似），
   压平后分组列与叶子列会对不齐，这类表需人工核对。
+- **别忘了往下传**：`header_rows` 必须穿过 `TableBlock → StitchedTable →
+  LogicalTable` 三层。曾经只在 `TableBlock` 上算对、`StitchedTable` 没这个字段，
+  结果 320 张逻辑表的 `header_rows` 全为空，多行表头只以压平字符串形式到了下游。
+  **判据算对之后要用下游字段再统计一遍**（坑-26）。修复后 50 张逻辑表带多层表头、
+  7 张带表标题。
 
 ### 5.3 `colspan` 未展开导致数值整体左移（最危险）
 
