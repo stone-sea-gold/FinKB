@@ -243,6 +243,10 @@ def _section_kind(
     实测 P186_T134：``房屋及建筑物 | 41,744,687 | 尚未办完所有手续``
     三格全是**值**（项目/账面价值/未办妥原因），但「尚未办完所有手续」
     不含数字，会被误判成「键」，从而凑成 ``键|值|键`` 的假交替。
+
+    ``kv`` 由**有效列数**决定，与行数、有无数字都无关。旧判据
+    「``len(rows) <= 2`` 且全无数字」把 5 行的 P117_T69（审计意见类型等）
+    判成 data，又把只有 2 行数字的 P219_T208 续表判成 kv，两个方向都错。
     """
     if cut_kind == "summary" and not own_header and _is_short_summary(rows, options):
         return "summary"
@@ -253,10 +257,89 @@ def _section_kind(
         and parse_kv_row(rows[0]) is not None
     ):
         return "kv_row"
-    if not own_header and len(rows) <= 2 and all(_numeric_count(row) == 0 for row in rows):
-        # 纯文本的短段 —— 典型是「关键审计事项」这类标签 + 长文
+    if _effective_width(rows) == 2:
         return "kv"
     return "data"
+
+
+def _effective_width(rows: list[list[str]]) -> int:
+    """有效列数 = 有数据的列数 − 恒定填充列数。
+
+    判定 ``kv`` 只看这一个数：≥3 → 按列取值的数据表；=2 → 键值表。行数、
+    有没有数字都不参与（旧判据正是被这两点带偏的）。
+
+    「有数据」指该列在**数据行**里至少有一个非空取值（表头由调用方剥离）。
+    「恒定填充列」指非空取值 **≥3 个且全部相同** —— 释义表的「指」、
+    币种表的「人民币」这类列占着列位却不携带信息。
+
+    为什么要求 ≥3 个：只有 2 个样本时无法区分「恒定」与「恰好相同」。
+    实测 P45_T30（9 列衍生品投资表）只有 2 行数字且两行完全一样，
+    不设下界会把 8 个真数据列全剔掉，9 列表被误判成 2 列键值表。
+    """
+    if not rows:
+        return 0
+    width = max(len(row) for row in rows)
+    used = {
+        index
+        for row in rows
+        for index, cell in enumerate(row)
+        if cell.strip()
+    }
+    constant: set[int] = set()
+    for index in range(width):
+        values = [
+            row[index].strip()
+            for row in rows
+            if index < len(row) and row[index].strip()
+        ]
+        if len(values) >= 3 and len(set(values)) == 1:
+            constant.add(index)
+    return len(used - constant)
+
+
+def _merge_wrapped_values(
+    rows: list[list[str]],
+    width: int,
+    options: SplitOptions,
+) -> tuple[list[list[str]], list[tuple[int, int]]]:
+    """把「标签行 + 紧随的折行长文本」并成一个键值对。
+
+    实测 P72_T43：``利润分配或资本公积金转增预案的详细情况说明`` 与紧随其后
+    的 100 字说明在 HTML 里是两行（各自 ``<td colspan="2">``），语义上却是
+    一个键值对。不合并时后一行会被当成脚注（长度 > ``footnote_min_length``）、
+    前一行退化成 ``section_path``，两边都对不上。
+
+    只有 2 列的窄表参与合并：宽表里跟在标题后面的长文本往往是脚注，
+    实测 P109-P110_T62 的 ``注1:…``（474 字）就属于这种情况。
+
+    Returns:
+        ``(merged_rows, origin)``；``origin[k] = (start, end)`` 是第 k 个
+        合并行覆盖的原始行区间，用于把 ``row_range`` 映射回原文。
+    """
+    if width > 2:
+        return [list(row) for row in rows], [(index, index + 1) for index in range(len(rows))]
+
+    merged: list[list[str]] = []
+    origin: list[tuple[int, int]] = []
+    index = 0
+    while index < len(rows):
+        current = rows[index]
+        following = rows[index + 1] if index + 1 < len(rows) else None
+        if (
+            following is not None
+            and len(_non_empty(current)) == 1
+            and len(_non_empty(following)) == 1
+            and len(following[0].strip()) >= options.footnote_min_length
+            and not following[0].strip().startswith(options.footnote_prefix)
+        ):
+            merged.append([current[0].strip(), following[0].strip()])
+            origin.append((index, index + 2))
+            index += 2
+            continue
+        merged.append(list(current))
+        origin.append((index, index + 1))
+        index += 1
+    return merged, origin
 
 
 def _is_short_summary(rows: list[list[str]], options: SplitOptions | None) -> bool:
@@ -275,6 +358,7 @@ def _is_short_summary(rows: list[list[str]], options: SplitOptions | None) -> bo
 def _collect_cut_candidates(
     table: StitchedTable,
     rows: list[list[str]],
+    section_rows: list[tuple[int, str]] | None = None,
 ) -> list[tuple[int, str]]:
     """汇总两类分节候选。
 
@@ -287,8 +371,16 @@ def _collect_cut_candidates(
 
     第 2 类要求「标题形态」（冒号结尾或中文序号），因此不会把普通的稀疏数据行
     误判为分节——实测新增的 20 处全部是真标题。
+
+    Args:
+        section_rows: 全宽行的下标；合并折行后行号会变，调用方需传映射后的结果。
+            默认取 ``table.section_rows``。
     """
-    declared = [(index, text) for index, text in table.section_rows if 0 <= index < len(rows)]
+    declared = [
+        (index, text)
+        for index, text in (section_rows if section_rows is not None else table.section_rows)
+        if 0 <= index < len(rows)
+    ]
     known = {index for index, _ in declared}
 
     extra: list[tuple[int, str]] = []
@@ -326,13 +418,32 @@ def split_sections(
         result.tables.append(_build_one(table, table.header, "inherited", [], [], (0, 0), "data", 1))
         return result
 
+    rows, origin = _merge_wrapped_values(rows, width, opts)
+
+    position = {
+        original: merged
+        for merged, (start, end) in enumerate(origin)
+        for original in range(start, end)
+    }
+    section_rows = [(position[index], text) for index, text in table.section_rows if index in position]
+
     cuts: list[SectionCut] = []
-    for index, text in _collect_cut_candidates(table, rows):
-        if not (0 <= index < len(rows)):
-            continue
-        cut = classify_cut(index, text, rows, parent_header, width, opts)
-        result.cuts.append(cut)
-        if cut.kind != "footnote":
+    # 2 列表没有列语义：切分只会把标签行变成 ``section_path``（等于删掉一行），
+    # 而标签恰恰是这张键值表的**键**。实测 P72_T43 的「本次现金分红情况」「其他」
+    # 就是这样消失的。整表保留为一张逻辑表。
+    if width > 2:
+        for index, text in _collect_cut_candidates(table, rows, section_rows):
+            if not (0 <= index < len(rows)):
+                continue
+            cut = classify_cut(index, text, rows, parent_header, width, opts)
+            result.cuts.append(cut)
+            if cut.kind == "footnote":
+                continue
+            if index >= len(rows) - 1:
+                # 末行切分后没有数据可切，只会把这一行变成无人引用的 section_path
+                # （实测 P183_T130 末行的「上述金融资产包括…」就这样消失）
+                cut.reason += "；末行，无可切分内容，保留为数据行"
+                continue
             cuts.append(cut)
 
     seq = 0
@@ -362,7 +473,7 @@ def split_sections(
                 rows=segment,
                 page_start=table.page_start,
                 page_end=table.page_end,
-                row_range=(start, end),
+                row_range=(origin[start][0], origin[end - 1][1]),
                 kind=kind,
                 # 段自带表头时，那一行已经被切进 rows，层数信息在这里没有意义；
                 # 只有继承父表表头的段才拿得到父表的多层表头原貌。
@@ -410,7 +521,16 @@ def split_sections(
 
     if not result.tables:
         result.tables.append(
-            _build_one(table, parent_header, "inherited", [], rows, (0, len(rows)), "data", 1)
+            _build_one(
+                table,
+                parent_header,
+                "inherited",
+                [],
+                rows,
+                (0, origin[-1][1] if origin else 0),
+                _section_kind(False, "data", rows, parent_header, opts),
+                1,
+            )
         )
     return result
 

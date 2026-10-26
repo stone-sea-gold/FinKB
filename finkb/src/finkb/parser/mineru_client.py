@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import time
 import zipfile
@@ -381,6 +382,17 @@ _HEADING_TYPES = {"title", "heading"}
 #: 有了类型标签就不必依赖统计推断——这是比 ``noise_filter`` 更可靠的信号。
 _NOISE_TYPES = {"header", "footer", "page_number", "aside_text", "page_footnote"}
 
+#: 带编号的章节标题前缀（``十三、`` / ``4、`` / ``（1）`` / ``第八节``）。
+#: 表格前紧邻的这类块是章节标题，不是表头——P242 那种「表头被拆成标题块」的
+#: 情形里，运行段的开头往往还挂着一个 ``4、其他关联方``。
+_SECTION_NUMBER_RE = re.compile(
+    r"^(?:[一二三四五六七八九十百]+[、.]|\d+[、.]"
+    r"|[（(][一二三四五六七八九十\d]+[)）]|第[一二三四五六七八九十]+[节章])"
+)
+
+#: 表头单元格的长度上限。超过这个长度的标题属于章节名，不可能是列名。
+_MAX_HEADER_CELL_CHARS = 12
+
 
 def _build_page_number_map(content_list: list[dict[str, Any]]) -> dict[int, int]:
     """建立 ``page_idx → 物理页码`` 映射。
@@ -437,6 +449,7 @@ def content_list_to_pages(
     page_map = _build_page_number_map(content_list)
     last_table: TableBlock | None = None
     tables_on_page: dict[int, int] = {}
+    heading_run: list[str] = []
 
     for item in content_list:
         raw_page_idx = int(item.get("page_idx", 0))
@@ -469,13 +482,19 @@ def content_list_to_pages(
 
         table = None
         if kind == "table":
-            table = _table_block_from_item(item, meta, block_index)
+            table = _table_block_from_item(item, meta, block_index, heading_run)
             if table is not None:
                 last_table = table
                 # 表格块保留 Markdown 文本形态，便于落盘与人工核对
                 text = html_table_to_markdown(
                     str(item.get("table_body") or item.get("html") or "")
                 ) or text
+
+        if kind == "heading":
+            # 只有**紧邻**表格的连续标题块才可能是被拆散的表头
+            heading_run.append(text.strip())
+        else:
+            heading_run.clear()
 
         page.blocks.append(
             Block(
@@ -521,12 +540,16 @@ def _table_block_from_item(
     item: dict[str, Any],
     meta: DocMeta,
     block_index: int,
+    headings: list[str] | None = None,
 ) -> TableBlock | None:
     """从 MinerU 表格条目直接构造 :class:`TableBlock`。
 
     不经过 Markdown 往返，因为 Markdown 管道表在语法上**无法表达「无表头」**，
     而跨页续接表恰恰就是无表头的。往返一趟会把首行数据行误当成表头，导致缝合
     误判「带独立表头 → 新表」。
+
+    ``headings`` 是紧邻表格的连续标题块。MinerU 偶尔把表头行拆成两个标题块
+    （P242 的「公司名称 / 关联方关系」），此时 HTML 里根本没有表头——回收它。
     """
     body = item.get("table_body") or item.get("html")
     if not isinstance(body, str) or not body.strip():
@@ -536,17 +559,49 @@ def _table_block_from_item(
     if not layout.rows and not layout.header:
         return None
 
+    header: list[str] | None = list(layout.header) if layout.header else None
+    header_rows = [list(row) for row in layout.header_rows]
+    if header is None:
+        rebuilt = _header_from_heading_run(headings, layout.width)
+        if rebuilt is not None:
+            header = rebuilt
+            header_rows = [list(rebuilt)]
+
     return TableBlock(
         meta=meta,
-        header=list(layout.header) if layout.header else None,
+        header=header,
         rows=[list(row) for row in layout.rows],
-        has_separator=bool(layout.header),
+        has_separator=header is not None,
         block_index=block_index,
         raw_lines=[],
         section_rows=list(layout.section_rows),
-        header_rows=[list(row) for row in layout.header_rows],
+        header_rows=header_rows,
         table_title=layout.table_title,
     )
+
+
+def _header_from_heading_run(
+    headings: list[str] | None,
+    width: int,
+) -> list[str] | None:
+    """把紧邻表格的连续标题块当成被拆散的表头。
+
+    三条约束都是结构事实，没有任何经验阈值：
+
+    - 去掉开头带编号的章节标题（``4、其他关联方``），剩下的才可能是列名；
+    - 剩下的格数必须**恰好等于列数**，多一个少一个都放弃；
+    - 每格都得像个列名（长度有上限），长句子是正文不是列名。
+    """
+    if not headings or width < 2:
+        return None
+    cells = list(headings)
+    while cells and _SECTION_NUMBER_RE.match(cells[0]):
+        cells.pop(0)
+    if len(cells) != width:
+        return None
+    if any(len(cell) > _MAX_HEADER_CELL_CHARS for cell in cells):
+        return None
+    return cells
 
 
 def _item_text(item: dict[str, Any]) -> str:

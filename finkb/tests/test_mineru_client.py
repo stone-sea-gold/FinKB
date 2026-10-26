@@ -46,6 +46,63 @@ def _only_table_block(content_list: list[dict[str, object]]):
     return block.table
 
 
+def test_heading_run_before_table_becomes_its_header() -> None:
+    """P242：MinerU 把表头两个单元格拆成了表格前的两个二级标题块。"""
+    content_list = [
+        {"type": "text", "text": "4、其他关联方", "text_level": 2, "page_idx": 241},
+        {"type": "text", "text": "公司名称", "text_level": 2, "page_idx": 241},
+        {"type": "text", "text": "关联方关系", "text_level": 2, "page_idx": 241},
+        {
+            "type": "table",
+            "table_body": (
+                "<table><tr><td>深圳壳牌比亚迪电动汽车投资有限公司</td>"
+                "<td>联营企业</td></tr></table>"
+            ),
+            "page_idx": 241,
+        },
+    ]
+    table = _only_table_block(content_list)
+
+    assert table.header == ["公司名称", "关联方关系"]
+    assert table.rows == [["深圳壳牌比亚迪电动汽车投资有限公司", "联营企业"]]
+
+
+def test_heading_run_with_wrong_cell_count_is_not_a_header() -> None:
+    """章节标题不是表头：格数对不上就放弃，不能硬凑。"""
+    content_list = [
+        {"type": "text", "text": "十三、内部控制评价报告", "text_level": 2, "page_idx": 74},
+        {"type": "text", "text": "1、内控评价报告", "text_level": 2, "page_idx": 74},
+        {
+            "type": "table",
+            "table_body": (
+                "<table><tr><td>缺陷等级</td><td>设定标准</td><td>缺陷认定标准</td>"
+                "<td>整改措施</td></tr><tr><td>重大缺陷</td><td>甲</td><td>乙</td>"
+                "<td>丙</td></tr></table>"
+            ),
+            "page_idx": 74,
+        },
+    ]
+    table = _only_table_block(content_list)
+
+    assert table.header is None
+
+
+def test_heading_run_breaks_on_intervening_text() -> None:
+    """标题与表格之间夹了正文，就不是这张表的表头。"""
+    content_list = [
+        {"type": "text", "text": "公司名称", "text_level": 2, "page_idx": 0},
+        {"type": "text", "text": "与本集团发生交易的合营企业和联营企业如下：", "page_idx": 0},
+        {
+            "type": "table",
+            "table_body": "<table><tr><td>甲公司</td><td>联营企业</td></tr></table>",
+            "page_idx": 0,
+        },
+    ]
+    table = _only_table_block(content_list)
+
+    assert table.header is None
+
+
 def test_empty_table_placeholder_extends_page_end() -> None:
     """MinerU 把跨页表合并成一块锚定在首页，后续页只留空 table 块。"""
     content_list = [

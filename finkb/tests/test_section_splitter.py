@@ -6,6 +6,7 @@ from finkb.common.models import DocMeta, StitchedTable, TableBlock
 from finkb.parser.markdown_blocks import html_table_layout, html_table_to_rows
 from finkb.parser.section_splitter import (
     SplitOptions,
+    _effective_width,
     _looks_like_heading,
     split_sections,
 )
@@ -223,7 +224,13 @@ def test_narrow_table_requires_heading_marker() -> None:
     assert _collect_cut_candidates(table, table.rows) == []
 
 
-def test_narrow_table_splits_on_numbered_heading() -> None:
+def test_narrow_table_keeps_label_rows_instead_of_splitting() -> None:
+    """2 列表不切分：切分只能把标签行变成 section_path，等于删掉一行。
+
+    实测 P72_T43：``本次现金分红情况`` / ``其他`` / ``利润分配…说明`` 三行
+    都是「仅首列非空」，切分后全部退化成分节路径，其中两行直接消失
+    （``emit()`` 对空段 ``return``），而它们恰恰是这张键值表的**键**。
+    """
     table = make_table(
         rows=[
             ["一、经营活动产生的现金流量:", ""],
@@ -235,10 +242,13 @@ def test_narrow_table_splits_on_numbered_heading() -> None:
     )
     result = split_sections(table)
 
-    assert result.count == 2
-    assert result.tables[0].section_path == ["一、经营活动产生的现金流量:"]
-    assert result.tables[0].header == ["", "2025年"]
-    assert result.tables[1].section_path == ["二、投资活动产生的现金流量:"]
+    assert result.count == 1
+    assert [row[0] for row in result.tables[0].rows] == [
+        "一、经营活动产生的现金流量:",
+        "销售商品收到的现金",
+        "二、投资活动产生的现金流量:",
+        "收回投资收到的现金",
+    ]
 
 
 def test_all_sections_have_non_empty_header_when_parent_has_one() -> None:
@@ -446,3 +456,104 @@ def test_logical_table_inherits_multilayer_header_and_title() -> None:
     assert logical.header_source == "inherited"
     assert logical.header_rows == [["", "2025年", "2024年"], ["", "金额", "金额"]]
     assert logical.table_title == "营业收入构成"
+
+
+# --------------------------------------------------------------------------- #
+# 有效列数决定 kind（P117 五行的键值表曾被判成 data）
+# --------------------------------------------------------------------------- #
+def test_effective_width_drops_constant_fill_column() -> None:
+    """释义表 P8_T01：第二列 4 行全是「指」，有效列 3 → 2。"""
+    rows = [
+        ["本公司、公司、比亚迪", "指", "比亚迪股份有限公司"],
+        ["本集团、集团", "指", "比亚迪股份有限公司及其附属公司"],
+        ["报告期", "指", "2025年01月01日至2025年12月31日"],
+        ["元、千元、万元", "指", "人民币元、人民币千元、人民币万元"],
+    ]
+
+    assert _effective_width(rows) == 2
+
+
+def test_effective_width_keeps_two_row_identical_columns() -> None:
+    """P45_T30 形态：9 列只有 2 行数据且完全重复 —— 两行不足以证明「恒定」。"""
+    rows = [["外汇", "1", "2", "3", "4", "5", "6", "7", "8"]] * 2
+
+    assert _effective_width(rows) == 9
+
+
+def test_five_row_two_column_table_is_kv() -> None:
+    """P117_T69：5 行「字段|取值」是键值表，不能被「≤2 行」挡回 data。"""
+    rows = [
+        ["审计意见类型", "标准的无保留意见"],
+        ["审计报告签署日期", "2026年03月27日"],
+        ["审计机构名称", "安永华明会计师事务所(特殊普通合伙)"],
+        ["审计报告文号", "安永华明(2026)审字第70013328_H01号"],
+        ["审计报告意见类型", "无保留意见"],
+    ]
+    (logical,) = split_sections(make_table(rows)).tables
+
+    assert logical.kind == "kv"
+
+
+def test_three_effective_columns_stays_data() -> None:
+    rows = [["甲公司", "联营企业", "北京"], ["乙公司", "合营企业", "上海"]]
+    (logical,) = split_sections(make_table(rows)).tables
+
+    assert logical.kind == "data"
+
+
+def test_summary_still_wins_over_kv() -> None:
+    """真汇总块只有 2 列有数据，但类型必须是 summary 而不是 kv。"""
+    label = "三、筹资活动产生的现金流量"
+    table = make_table(
+        [[label, "", "", ""]] + _sparse_rows(2),
+        header=HEADER_4,
+        section_rows=[(0, label)],
+    )
+    (logical,) = split_sections(table).tables
+
+    assert logical.kind == "summary"
+
+
+def test_trailing_label_is_not_a_cut_point() -> None:
+    """P183_T130：末行是「上述金融资产包括…」这类补充说明，切了就整行消失。"""
+    table = make_table(
+        [["以公允价值计量且其变动计入当期损益的金融资产", "3,079,960", "2,655,245"],
+         ["上述金融资产包括基金投资和其他股权投资。", "", ""]],
+        header=["", "2025年", "2024年"],
+        section_rows=[(1, "上述金融资产包括基金投资和其他股权投资。")],
+    )
+    (logical,) = split_sections(table).tables
+
+    assert logical.rows[-1][0] == "上述金融资产包括基金投资和其他股权投资。"
+
+
+def test_adjacent_label_rows_are_never_dropped() -> None:
+    """P72_T43 形态：三个连续标签行 + 折行长文本，一行都不能丢。"""
+    rows = [
+        ["每10股送红股数(股)", "0"],
+        ["每10股派息数(元)(含税)", "3.58"],
+        ["本次现金分红情况", ""],
+        ["其他", ""],
+        ["利润分配或资本公积金转增预案的详细情况说明", ""],
+        ["公司第八届董事会第二十二次会议审议通过了《关于审议公司2025年度利润分配方案的议案》。", ""],
+    ]
+    table = make_table(
+        rows,
+        section_rows=[
+            (2, "本次现金分红情况"),
+            (3, "其他"),
+            (4, "利润分配或资本公积金转增预案的详细情况说明"),
+            (5, "公司第八届董事会第二十二次会议审议通过了《关于审议公司2025年度利润分配方案的议案》。"),
+        ],
+    )
+    (logical,) = split_sections(table).tables
+
+    assert logical.kind == "kv"
+    keys = [row[0] for row in logical.rows]
+    assert "本次现金分红情况" in keys
+    assert "其他" in keys
+    # 标签 + 折行长文本 = 一个键值对
+    assert [
+        "利润分配或资本公积金转增预案的详细情况说明",
+        "公司第八届董事会第二十二次会议审议通过了《关于审议公司2025年度利润分配方案的议案》。",
+    ] in logical.rows
