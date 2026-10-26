@@ -70,6 +70,12 @@ class TableBlock:
     section_rows: list[tuple[int, str]] = field(default_factory=list)
     header_rows: list[list[str]] = field(default_factory=list)
     table_title: str | None = None
+    page_end: int = 0
+    """表格覆盖到的最后一页；``0`` 表示与 ``meta.page`` 相同（不跨页）。
+
+    MinerU 会把跨页表格合并成一个块锚定在起始页，后续页只留空的 table 占位块。
+    那些占位块是「表续到哪一页」的唯一证据，由 ``content_list_to_pages`` 回填。
+    """
 
     @property
     def ncols(self) -> int:
@@ -81,6 +87,11 @@ class TableBlock:
     @property
     def page(self) -> int:
         return self.meta.page
+
+    @property
+    def last_page(self) -> int:
+        """表格覆盖的最后一页（1-based）。跨页表大于 :attr:`page`。"""
+        return self.page_end or self.meta.page
 
     @property
     def is_headerless(self) -> bool:
@@ -147,6 +158,10 @@ class StitchedTable:
     section: str | None = None
     #: 跨页拼接后累计的「全宽合并行」，下标相对 ``rows``。
     section_rows: list[tuple[int, str]] = field(default_factory=list)
+    #: 表头各层原貌（已展开合并单元格）。空表示无表头。
+    header_rows: list[list[str]] = field(default_factory=list)
+    #: 表标题（HTML 里单格跨满全宽的那一行），不是表头。
+    table_title: str | None = None
 
     @property
     def ncols(self) -> int:

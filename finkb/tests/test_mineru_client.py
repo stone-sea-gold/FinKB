@@ -33,6 +33,67 @@ def test_content_list_page_idx_is_converted_to_one_based() -> None:
     assert [p.number for p in pages] == [1, 2]
 
 
+TABLE_HTML = (
+    "<table><tr><td>项目</td><td>金额</td></tr>"
+    "<tr><td>营业收入</td><td>1,000</td></tr></table>"
+)
+
+
+def _only_table_block(content_list: list[dict[str, object]]):
+    pages = content_list_to_pages(content_list, DOC)
+    (block,) = [block for page in pages for block in page.blocks if block.table is not None]
+    assert block.table is not None
+    return block.table
+
+
+def test_empty_table_placeholder_extends_page_end() -> None:
+    """MinerU 把跨页表合并成一块锚定在首页，后续页只留空 table 块。"""
+    content_list = [
+        {"type": "text", "text": "十七、其他重大事项的说明", "page_idx": 93},
+        {"type": "table", "table_body": TABLE_HTML, "page_idx": 93},
+        {"type": "table", "table_body": "", "page_idx": 94},
+        {"type": "table", "table_body": "", "page_idx": 95},
+    ]
+    table = _only_table_block(content_list)
+
+    assert (table.page, table.last_page) == (94, 96)
+
+
+def test_empty_table_on_same_page_does_not_extend() -> None:
+    content_list = [
+        {"type": "table", "table_body": TABLE_HTML, "page_idx": 0},
+        {"type": "table", "table_body": "", "page_idx": 0},
+    ]
+    table = _only_table_block(content_list)
+
+    assert table.last_page == 1
+
+
+def test_empty_table_with_page_gap_does_not_extend() -> None:
+    """占位页不连续说明中间断过，不能盲目接上。"""
+    content_list = [
+        {"type": "table", "table_body": TABLE_HTML, "page_idx": 0},
+        {"type": "table", "table_body": "", "page_idx": 2},
+    ]
+    table = _only_table_block(content_list)
+
+    assert table.last_page == 1
+
+
+def test_placeholder_belongs_to_the_table_above_it_on_the_same_page() -> None:
+    """P65 形态：页首占位块续上一页的表，页中的实块才是新表。"""
+    content_list = [
+        {"type": "table", "table_body": TABLE_HTML, "page_idx": 0},
+        {"type": "table", "table_body": "", "page_idx": 1},
+        {"type": "table", "table_body": TABLE_HTML, "page_idx": 1},
+        {"type": "table", "table_body": "", "page_idx": 2},
+    ]
+    pages = content_list_to_pages(content_list, DOC)
+    tables = [block.table for page in pages for block in page.blocks if block.table is not None]
+
+    assert [table.last_page for table in tables] == [2, 3]
+
+
 def test_content_list_heading_sets_section_for_following_blocks() -> None:
     content_list = [
         {"type": "text", "text": "封面", "page_idx": 0},

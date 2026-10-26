@@ -84,6 +84,32 @@ MinerU 后端：**`vlm`**（`MINERU_MODEL_VERSION=vlm`）。**必须用 vlm**，
 - **解决**：ADR-013——页码行必须满足「数字 == 该页物理页码」。
 - **验证**：`test_standalone_page_number_line_is_stripped`
 
+### 2.3 跨页表只报锚点页，页码区间恒为单页
+
+- **现象**：`P94_T57` 有 165 行（公告索引），`page_start == page_end == 94`，
+  但内容实际从 P94 铺到 P103。`P130_T77` 是现金流量表主体（45 行），一半行在 P131。
+- **根因**：MinerU 遇到跨页表格时，**把所有行合并进起始页那一个 `table` 块**，
+  后续每页只留一个**空的 `table` 块**（`table_body` 为空字符串）。
+  那个空块带着 `page_idx` 与 `bbox`，是「表续到了这一页」的唯一证据——
+  而 `content_list_to_pages` 的 `if not text.strip(): continue` 把它丢掉了。
+  缝合侧再写死 `page_end=first.page`，区间就永远是单页。
+- **为什么不能从 HTML 里数页数**：锚点块的 HTML 只在开头出现一次表头
+  （165 个 `<tr>` 里表头 1 次），正文行不带页码。
+- **为什么不能按 bbox 估**：`bbox` 是整页的框不是逐行的；折行行高不一致，
+  用「页高 / 行高」估行数必然错，且错了无从核验。
+- **解决**（ADR-022）：`TableBlock.page_end` + `_extend_page_end()`，
+  三条护栏——① 必须已经有一张表；② 必须是**本页第一个** `table` 块
+  （P65 形态：页首空块续上一页，页中实块才是新表）；③ 页码必须紧接上一张表的末页。
+- **实测**：19 张表回填成功，跨页表 3 → 22 张；`parent_id` 从 `#P94_T57`
+  变成 `#P94-P103_T57`；逻辑表数、类型分布、数值指纹全部不变。
+- **验证**：`test_empty_table_placeholder_extends_page_end`、
+  `test_empty_table_on_same_page_does_not_extend`、
+  `test_empty_table_with_page_gap_does_not_extend`、
+  `test_placeholder_belongs_to_the_table_above_it_on_the_same_page`、
+  `test_multi_page_anchor_block_keeps_its_page_end`
+- **注意**：`table_id` 仍是短表号（`#P94_T57`），带区间的叫 `parent_id`。
+  报告与逻辑表号一律用 `parent_id`。
+
 ---
 
 ## 3. 页眉页脚与噪音

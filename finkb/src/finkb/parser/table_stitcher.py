@@ -213,12 +213,14 @@ def stitch_tables(
                 header=list(first.header) if first.header is not None else None,
                 rows=[list(row) for row in first.rows],
                 page_start=first.page,
-                page_end=first.page,
+                page_end=first.last_page,
                 source_tables=1,
                 parent_id=parent_id,
                 table_id=table_id,
                 section=first.meta.section,
                 section_rows=list(first.section_rows),
+                header_rows=[list(row) for row in first.header_rows],
+                table_title=first.table_title,
             )
 
             pages_touched = [first.page]
@@ -269,7 +271,7 @@ def stitch_tables(
                 stitched.section_rows.extend(
                     (index + offset, text) for index, text in next_block.table.section_rows
                 )
-                stitched.page_end = next_block.table.page
+                stitched.page_end = next_block.table.last_page
                 stitched.source_tables += 1
                 pages_touched.append(next_block.table.page)
                 reasons.append(reason)

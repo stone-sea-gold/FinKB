@@ -389,6 +389,50 @@ def parent_digests(snapshot: dict) -> dict[str, list[str]]:
     return out
 
 
+#: 表号里的页码段；``#P94_T57`` 与 ``#P94-P103_T57`` 指同一张表。
+_PAGE_SEGMENT_RE = re.compile(r"#P[0-9P\-]+_T(\d+)")
+
+
+def _table_key(key: str) -> str:
+    """把页码段抹平成表序号，用来跨 id 认出同一张表。
+
+    只抹页码、不动 ``_T{seq}``：表序号是这张表在文档里的位次，页码区间变化
+    （跨页表锚点回填）不影响它。若连表序号都不同，那就是两张表，哪怕内容
+    一模一样也不能配成「改号」——合并报表与母公司报表常有完全相同的两张表。
+    """
+    return _PAGE_SEGMENT_RE.sub(r"#T\1", key)
+
+
+def _pair_renames(
+    b_tables: dict, a_tables: dict, added: list[str], removed: list[str]
+) -> tuple[list[tuple[str, str]], list[str], list[str]]:
+    """把「表号变了、内容没变」的删除与新增配成一对。
+
+    MinerU 把跨页表格合并成一个块后，表号里的页码区间会从 ``P94`` 扩成
+    ``P94-P103``——id 全变，而 kind、行数、数值指纹三项一个都不会变。
+    不配对的话，报告读起来像是「29 张表消失了」，是最容易误导人的写法。
+    """
+
+    def sig(entry: dict) -> tuple[object, ...]:
+        return (entry["kind"], entry["row_count"], entry["numeric_digest"])
+
+    pool: dict[tuple[object, ...], list[str]] = {}
+    for key in added:
+        pool.setdefault((sig(a_tables[key]), _table_key(key)), []).append(key)
+
+    pairs: list[tuple[str, str]] = []
+    rest_removed: list[str] = []
+    for key in removed:
+        bucket = pool.get((sig(b_tables[key]), _table_key(key)))
+        if bucket:
+            pairs.append((key, bucket.pop(0)))
+        else:
+            rest_removed.append(key)
+
+    paired = {new for _, new in pairs}
+    return pairs, [key for key in added if key not in paired], rest_removed
+
+
 def diff_snapshots(before: dict, after: dict) -> tuple[str, list[str]]:
     """生成 Markdown 对照报告。
 
@@ -400,6 +444,7 @@ def diff_snapshots(before: dict, after: dict) -> tuple[str, list[str]]:
     added = [key for key in a_tables if key not in b_tables]
     removed = [key for key in b_tables if key not in a_tables]
     common = [key for key in a_tables if key in b_tables]
+    renames, added, removed = _pair_renames(b_tables, a_tables, added, removed)
 
     changed: list[tuple[str, str, object, object]] = []
     for key in common:
@@ -416,11 +461,12 @@ def diff_snapshots(before: dict, after: dict) -> tuple[str, list[str]]:
         f"- 改前快照：`{before.get('created_at', '?')}`（{len(b_tables)} 张逻辑表）",
         f"- 改后快照：`{after.get('created_at', '?')}`（{len(a_tables)} 张逻辑表）",
         f"- **变化过的表：{len(touched)} 张，共 {len(changed)} 处字段变化**",
-        f"- 新增 {len(added)} 张 / 删除 {len(removed)} 张",
+        f"- 改号 {len(renames)} 张（仅页码区间变化）"
+        f" / 新增 {len(added)} 张 / 删除 {len(removed)} 张",
         "",
     ]
 
-    if not changed and not added and not removed:
+    if not changed and not added and not removed and not renames:
         lines.append("> 没有任何变化。若本次改动本应产生影响，说明判据没生效。")
         return "\n".join(lines), []
 
@@ -428,6 +474,23 @@ def diff_snapshots(before: dict, after: dict) -> tuple[str, list[str]]:
         lines += ["## 字段变化", "", "| 表号 | 字段 | 改前 | 改后 |", "|---|---|---|---|"]
         for key, name, old, new in changed:
             lines.append(f"| `{key}` | {name} | {_short(old)} | {_short(new)} |")
+        lines.append("")
+
+    if renames:
+        lines += [
+            "## 改号（页码区间变化，内容未变）",
+            "",
+            "> 表号里的页码区间变了，但 kind、行数、数值指纹三项全一致。",
+            "> 典型原因是 MinerU 把跨页表格合并成一个块，锚点从 `P94` 扩成 `P94-P103`。",
+            "",
+            "| 改前表号 | 改后表号 | kind | 行数 |",
+            "|---|---|---|---|",
+        ]
+        for old_key, new_key in renames:
+            entry = a_tables[new_key]
+            lines.append(
+                f"| `{old_key}` | `{new_key}` | {entry['kind']} | {entry['row_count']} |"
+            )
         lines.append("")
 
     if added:
@@ -1019,6 +1082,220 @@ def render_header_report(parsed_dir: Path) -> str:
     return "\n".join(lines)
 
 
+# ──────────────────────────────────────────────────────────────
+# 8d. 页码区间（跨页表锚点回填）
+# ──────────────────────────────────────────────────────────────
+#: 全角转半角——MinerU 的单元格用半角冒号，PDF 原文用全角，不统一就对不上。
+_HALFWIDTH = str.maketrans("：（）％，；", ":()%,;")
+
+
+def _normalize(text: str) -> str:
+    """去掉所有空白并把全角标点转半角，用于跨来源文本比对。"""
+    return "".join(text.split()).translate(_HALFWIDTH)
+
+
+@dataclass
+class PageSpan:
+    """一张跨页物理表的页码区间证据。"""
+
+    table_id: str
+    page_start: int
+    page_end: int
+    row_count: int
+    logical_count: int
+    placeholder_pages: list[int]
+    total: int
+    hits_in: list[int]
+    hits_outside: int
+    misses: int
+
+    @property
+    def verdict(self) -> str:
+        """把三类命中情况压成一句话结论。"""
+        if not self.total:
+            return "无样本"
+        if self.hits_in and not self.hits_outside:
+            return "✓ 区间内命中"
+        if self.hits_in:
+            return f"✓ 区间内命中；另有 {self.hits_outside} 行也出现在末页+1"
+        if self.hits_outside:
+            return f"⚠ 仅出现在末页+1（{self.hits_outside} 行）"
+        return "✗ 无法定位"
+
+
+def _placeholder_pages(content_list: list[dict]) -> dict[int, list[int]]:
+    """锚点页 → 该表在后续页留下的空占位块页号。"""
+    out: dict[int, list[int]] = {}
+    anchor_page: int | None = None
+    seen_on_page: dict[int, int] = {}
+    for item in content_list:
+        page_no = int(item.get("page_idx", 0)) + 1
+        if str(item.get("type", "text")) != "table":
+            continue
+        body = str(item.get("table_body") or item.get("html") or "")
+        if body.strip():
+            anchor_page = page_no
+            seen_on_page[page_no] = seen_on_page.get(page_no, 0) + 1
+            continue
+        if anchor_page is None or seen_on_page.get(page_no):
+            continue
+        out.setdefault(anchor_page, []).append(page_no)
+    return out
+
+
+def _sampled_rows(table: StitchedTable, limit: int = 6) -> list[str]:
+    """挑几行有辨识度的文本，用来在 PDF 里反查。"""
+    texts: list[str] = []
+    for row in table.rows:
+        for cell in row:
+            text = cell.strip()
+            if len(text) >= 8:
+                texts.append(text)
+                break
+    if not texts:
+        return []
+    step = max(1, len(texts) // limit)
+    return texts[::step][:limit]
+
+
+def _pdf_page_texts(pdf_path: Path) -> list[str] | None:
+    """逐页取文本并归一化；没装 pypdf 就返回 None。"""
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        return None
+    reader = PdfReader(str(pdf_path))
+    return [_normalize(page.extract_text() or "") for page in reader.pages]
+
+
+def collect_page_spans(parsed_dir: Path, pdf_path: Path | None = None) -> list[PageSpan]:
+    """找出跨页物理表，并收集「表续到哪一页」的证据。"""
+    _, _, stitched, logical = _analyze(parsed_dir)
+    content_list = json.loads(
+        (parsed_dir / "content_list.json").read_text(encoding="utf-8")
+    )
+    placeholders = _placeholder_pages(content_list)
+
+    counts: dict[str, int] = {}
+    for table in logical:
+        parent = table.logical_id.split("#S")[0]
+        counts[parent] = counts.get(parent, 0) + 1
+
+    pdf_pages = _pdf_page_texts(pdf_path) if pdf_path is not None else None
+    spans: list[PageSpan] = []
+    for table in stitched:
+        if table.page_start == table.page_end:
+            continue
+        samples = [_normalize(text) for text in _sampled_rows(table)]
+        hits_in: list[int] = []
+        hits_outside = 0
+        misses = 0
+        for sample in samples:
+            inside = [
+                page_no
+                for page_no in range(table.page_start, table.page_end + 1)
+                if page_no <= len(pdf_pages or []) and sample in pdf_pages[page_no - 1]
+            ]
+            if inside:
+                hits_in.append(inside[0])
+                continue
+            beyond = table.page_end + 1
+            if pdf_pages is not None and beyond <= len(pdf_pages) and sample in pdf_pages[beyond - 1]:
+                hits_outside += 1
+            else:
+                misses += 1
+        spans.append(
+            PageSpan(
+                table_id=table.parent_id,
+                page_start=table.page_start,
+                page_end=table.page_end,
+                row_count=len(table.rows),
+                logical_count=counts.get(table.parent_id, 1),
+                placeholder_pages=placeholders.get(table.page_start, []),
+                total=len(samples),
+                hits_in=hits_in,
+                hits_outside=hits_outside,
+                misses=misses,
+            )
+        )
+    return spans
+
+
+CHECKBOX = "- [ ]"
+
+
+def render_page_span_report(parsed_dir: Path, pdf_path: Path | None = None) -> str:
+    """页码区间核验报告：逐张列出跨页表的区间与证据。"""
+    spans = collect_page_spans(parsed_dir, pdf_path)
+    lines: list[str] = [
+        f"# 页码区间核验：{parsed_dir.name}",
+        "",
+        f"- 生成时间：`{datetime.now().isoformat(timespec='seconds')}`",
+        f"- PDF：`{pdf_path.name if pdf_path else '（未提供，跳过文本反查）'}`",
+        f"- 跨页物理表：**{len(spans)} 张**",
+        "",
+        "## 一览",
+        "",
+        "| 表号 | 页码区间 | 行数 | 逻辑表 | 占位块页 | PDF 反查 | 结论 |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for span in spans:
+        placeholders = "、".join(f"P{p}" for p in span.placeholder_pages) or "（无）"
+        if span.total:
+            check = f"{len(span.hits_in)}/{span.total} 行落在区间内"
+            if span.misses:
+                check += f"，{span.misses} 行无法定位"
+        else:
+            check = "无样本"
+        lines.append(
+            f"| `{span.table_id}` | P{span.page_start}–P{span.page_end} "
+            f"| {span.row_count} | {span.logical_count} | {placeholders} "
+            f"| {check} | {span.verdict} |"
+        )
+    lines.append("")
+
+    lines += [
+        "## 怎么读这张表",
+        "",
+        "- **占位块页** = MinerU 在该页留下一个空的 table 块。这是「表续到了这里」的原始证据，"
+        "本次修复就是把它回填成 `page_end`。",
+        "- **PDF 反查** = 从表里抽最多 6 行文本，去 PDF 对应页里找。找不到只说明"
+        "「PDF 的文本流顺序和表格行不一致」，**不代表区间错**（P72-P73 就是全角冒号导致的对不上）。",
+        "- **末页+1 也出现同源文本** 不是错误信号：P113-P114 与 P115 是两张不同的表"
+        "（中介机构情况 / 募集资金使用情况），键列都是同一批债券名称，自然重复。",
+        "",
+        "## 逐张核对",
+        "",
+        "> 只需要核对下面的勾选项。区间正确与否，看的是「PDF 里这张表是否从起始页开始、"
+        "在末页结束、末页+1 不再有表体」，不是看反查命中率。",
+        "",
+    ]
+    for span in spans:
+        lines += [
+            f"### `{span.table_id}` — P{span.page_start}–P{span.page_end}"
+            f"（{span.row_count} 行，{span.logical_count} 张逻辑表）",
+            "",
+            f"{CHECKBOX} PDF 第 {span.page_start} 页有这张表的表体",
+            f"{CHECKBOX} PDF 第 {span.page_end} 页仍有这张表的表体",
+            f"{CHECKBOX} PDF 第 {span.page_end + 1} 页没有这张表的**续表内容**",
+            "",
+        ]
+    return "\n".join(lines)
+
+
+def _cmd_page_spans(args: argparse.Namespace) -> int:
+    pdf_path = Path(args.pdf).expanduser().resolve() if args.pdf else None
+    report = render_page_span_report(Path(args.doc).expanduser().resolve(), pdf_path)
+    if args.out:
+        out = Path(args.out).expanduser()
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(report, encoding="utf-8")
+        print(f"页码区间核验已写入 {out}")
+    else:
+        print(report)
+    return 0
+
+
 def _cmd_headers(args: argparse.Namespace) -> int:
     report = render_header_report(Path(args.doc).expanduser().resolve())
     if args.out:
@@ -1144,6 +1421,12 @@ def build_parser() -> argparse.ArgumentParser:
         description="审计与核验：快照 / 对照 / 守恒律 / 人工核验清单",
     )
     sub = parser.add_subparsers(dest="command", required=True)
+
+    spans = sub.add_parser("page-spans", help="跨页表页码区间核验")
+    spans.add_argument("--doc", required=True, help="已解析目录")
+    spans.add_argument("--pdf", help="年报 PDF，给出则做文本反查")
+    spans.add_argument("--out", help="报告输出路径（.md），省略则打印到标准输出")
+    spans.set_defaults(func=_cmd_page_spans)
 
     rowspan = sub.add_parser("rowspan", help="rowspan 展开前后逐行对照")
     rowspan.add_argument("--doc", required=True, help="已解析目录，如 data/parsed/002594_2025_年报")

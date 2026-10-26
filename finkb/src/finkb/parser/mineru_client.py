@@ -435,6 +435,8 @@ def content_list_to_pages(
     pages: dict[int, Page] = {}
     current_section: str | None = None
     page_map = _build_page_number_map(content_list)
+    last_table: TableBlock | None = None
+    tables_on_page: dict[int, int] = {}
 
     for item in content_list:
         raw_page_idx = int(item.get("page_idx", 0))
@@ -442,7 +444,12 @@ def content_list_to_pages(
         item_type = str(item.get("type", "text"))
         text = _item_text(item)
         if not text.strip():
+            if item_type == "table":
+                _extend_page_end(last_table, page_no, tables_on_page.get(page_no, 0))
             continue
+
+        if item_type == "table":
+            tables_on_page[page_no] = tables_on_page.get(page_no, 0) + 1
 
         if _is_heading(item):
             current_section = text.strip()
@@ -464,6 +471,7 @@ def content_list_to_pages(
         if kind == "table":
             table = _table_block_from_item(item, meta, block_index)
             if table is not None:
+                last_table = table
                 # 表格块保留 Markdown 文本形态，便于落盘与人工核对
                 text = html_table_to_markdown(
                     str(item.get("table_body") or item.get("html") or "")
@@ -483,6 +491,30 @@ def content_list_to_pages(
         )
 
     return [pages[key] for key in sorted(pages)]
+
+
+def _extend_page_end(
+    last_table: TableBlock | None,
+    page_no: int,
+    tables_seen_on_page: int,
+) -> None:
+    """把空表格占位块的页码回填到上一张表。
+
+    MinerU 遇到跨页表格时，会把所有行合并进起始页的那个块，并在后续页各留一个
+    空的 table 块。空块没有内容，但它带着 ``page_idx``——这是「这张表续到了第几
+    页」的唯一证据。丢掉它，表格的页码区间就永远是单页。
+
+    三条护栏：
+
+    - 必须已经有一张表，否则这个空块无主；
+    - 必须是本页**第一个** table 块——出现在页中的空块属于它上面那张表；
+    - 页码必须紧接上一张表的末页；断档说明中间另有内容，不能盲目接。
+    """
+    if last_table is None or tables_seen_on_page:
+        return
+    if page_no != last_table.last_page + 1:
+        return
+    last_table.page_end = page_no
 
 
 def _table_block_from_item(

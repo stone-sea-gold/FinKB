@@ -316,3 +316,90 @@ def test_balance_sheet_identity_fails_on_mismatch() -> None:
         logical_id=f"{DOC}#P2_T01#S01",
     )
     assert not audit.check_balance_sheet([assets, equity])[0].ok
+
+
+# --------------------------------------------------------------------------- #
+# 页码区间证据（跨页表锚点回填）
+# --------------------------------------------------------------------------- #
+def test_normalize_strips_whitespace_and_fullwidth_punctuation() -> None:
+    assert audit._normalize(" 比亚迪 ：2025 年 （含税）") == "比亚迪:2025年(含税)"
+
+
+def test_placeholder_pages_map_to_the_table_above() -> None:
+    content_list = [
+        {"type": "text", "text": "说明", "page_idx": 0},
+        {"type": "table", "table_body": "<table></table>", "page_idx": 0},
+        {"type": "table", "table_body": "", "page_idx": 1},
+        {"type": "table", "table_body": "", "page_idx": 2},
+        {"type": "table", "table_body": "<table></table>", "page_idx": 2},
+        {"type": "table", "table_body": "", "page_idx": 3},
+    ]
+
+    assert audit._placeholder_pages(content_list) == {1: [2, 3], 3: [4]}
+
+
+def test_placeholder_on_anchor_page_is_not_counted() -> None:
+    content_list = [
+        {"type": "table", "table_body": "<table></table>", "page_idx": 0},
+        {"type": "table", "table_body": "", "page_idx": 0},
+    ]
+
+    assert audit._placeholder_pages(content_list) == {}
+
+
+def test_page_span_verdict_prefers_in_range_hits() -> None:
+    span = audit.PageSpan(
+        table_id=f"{DOC}#P9-P10_T05",
+        page_start=9,
+        page_end=10,
+        row_count=3,
+        logical_count=1,
+        placeholder_pages=[10],
+        total=3,
+        hits_in=[9, 10],
+        hits_outside=0,
+        misses=0,
+    )
+
+    assert span.verdict.startswith("✓")
+
+
+def test_page_span_verdict_flags_only_outside_hits() -> None:
+    span = audit.PageSpan(
+        table_id=f"{DOC}#P9-P10_T05",
+        page_start=9,
+        page_end=10,
+        row_count=3,
+        logical_count=1,
+        placeholder_pages=[10],
+        total=3,
+        hits_in=[],
+        hits_outside=2,
+        misses=1,
+    )
+
+    assert span.verdict.startswith("⚠")
+
+
+def test_table_key_ignores_page_range() -> None:
+    assert audit._table_key("d#P94_T57#S01") == audit._table_key("d#P94-P103_T57#S01")
+
+
+def test_rename_pairing_requires_same_table_sequence() -> None:
+    """内容完全相同的两张不同表不能配成「改号」——合并报表与母公司报表常有这种。"""
+    before = snapshot_of({"d#P1_T01#S01": entry()})
+    after = snapshot_of({"d#P1_T05#S01": entry()})
+
+    markdown, _ = audit.diff_snapshots(before, after)
+
+    assert "改号 0 张" in markdown
+    assert "新增的表" in markdown and "消失的表" in markdown
+
+
+def test_rename_pairing_matches_same_table_after_page_range_change() -> None:
+    before = snapshot_of({"d#P94_T57#S01": entry()})
+    after = snapshot_of({"d#P94-P103_T57#S01": entry()})
+
+    markdown, _ = audit.diff_snapshots(before, after)
+
+    assert "改号 1 张" in markdown

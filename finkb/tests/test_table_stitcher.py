@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from finkb.common.models import Block, DocMeta, Page, TableBlock
 from finkb.parser.markdown_blocks import parse_page_anchored_markdown
 from finkb.parser.table_stitcher import StitchOptions, stitch_tables
 
@@ -22,6 +23,37 @@ def meta(page: int, section: str | None = SECTION) -> str:
 
 def stitch(markdown: str, options: StitchOptions | None = None):
     return stitch_tables(parse_page_anchored_markdown(markdown, default_doc=DOC), options)
+
+
+# --------------------------------------------------------------------------- #
+# 0. 合页锚点：MinerU 把跨页表并成一块时，page_end 由占位块回填
+# --------------------------------------------------------------------------- #
+def test_multi_page_anchor_block_keeps_its_page_end() -> None:
+    meta = DocMeta(doc_id=DOC, page=1, section=SECTION)
+    page = Page(
+        number=1,
+        blocks=[
+            Block(
+                meta=meta,
+                kind="table",
+                lines=["| 项目 | 金额 |"],
+                block_index=0,
+                table=TableBlock(
+                    meta=meta,
+                    header=["项目", "金额"],
+                    rows=[["营业收入", "1,000"]],
+                    page_end=3,
+                ),
+            )
+        ],
+    )
+
+    result = stitch_tables([page])
+
+    assert len(result.tables) == 1
+    table = result.tables[0]
+    assert (table.page_start, table.page_end) == (1, 3)
+    assert table.parent_id == f"{DOC}#P1-P3_T01"
 
 
 # --------------------------------------------------------------------------- #

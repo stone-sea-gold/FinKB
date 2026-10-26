@@ -18,6 +18,8 @@ def make_table(
     header: list[str] | None = None,
     section_rows: list[tuple[int, str]] | None = None,
     page: int = 1,
+    header_rows: list[list[str]] | None = None,
+    table_title: str | None = None,
 ) -> StitchedTable:
     return StitchedTable(
         doc_id=DOC,
@@ -29,6 +31,8 @@ def make_table(
         parent_id=f"{DOC}#P{page}_T01",
         table_id=f"{DOC}#P{page}_T01",
         section_rows=section_rows or [],
+        header_rows=header_rows or [],
+        table_title=table_title,
     )
 
 
@@ -424,3 +428,21 @@ def test_dense_long_segment_is_data() -> None:
     )
     result = split_sections(table)
     assert [t.kind for t in result.tables] == ["data"]
+
+
+# --------------------------------------------------------------------------- #
+# 多层表头：层数信息必须传到逻辑表，否则 L1 拿不到「2025年/金额」这种结构
+# --------------------------------------------------------------------------- #
+def test_logical_table_inherits_multilayer_header_and_title() -> None:
+    table = make_table(
+        [["比亚迪汽车", "1,000", "2,000"]],
+        header=["", "2025年/金额", "2024年/金额"],
+        header_rows=[["", "2025年", "2024年"], ["", "金额", "金额"]],
+        table_title="营业收入构成",
+    )
+
+    (logical,) = split_sections(table).tables
+
+    assert logical.header_source == "inherited"
+    assert logical.header_rows == [["", "2025年", "2024年"], ["", "金额", "金额"]]
+    assert logical.table_title == "营业收入构成"
