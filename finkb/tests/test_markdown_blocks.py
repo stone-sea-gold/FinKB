@@ -212,3 +212,26 @@ def test_rowspan_placeholder_row_without_own_cells_is_dropped() -> None:
     rows, _, _ = html_table_to_rows(html)
 
     assert rows == [["A", "B"], ["1", "2"]]
+
+
+def test_ragged_group_row_with_empty_parent_cell_is_layer_two() -> None:
+    """上一层某列空着（没有分组名）时，这一层给该列取名不阻止多行判定。
+
+    实测来源：P180「合营企业」表，MinerU 把 `本年变动` 的 colspan 少算了两列，
+    在行尾补了两个空 `<td>`，末两列的分组单元格就丢了。若要求「下一层所有自有列
+    都必须落在分组区间内」，这张表会退化成单层表头，`本年变动/追加投资` 的分组
+    信息整层丢失。
+    """
+    html = (
+        "<table>"
+        '<tr><td rowspan="2">合营企业</td><td colspan="2">本年变动</td><td></td></tr>'
+        "<tr><td>追加投资</td><td>其他</td><td>年末余额</td></tr>"
+        "<tr><td>比亚迪汽车金融</td><td>1</td><td>2</td><td>3</td></tr>"
+        "</table>"
+    )
+
+    layout = html_table_layout(html)
+
+    assert len(layout.header_rows) == 2
+    assert layout.header == ["合营企业", "本年变动/追加投资", "本年变动/其他", "年末余额"]
+    assert layout.rows == [["比亚迪汽车金融", "1", "2", "3"]]
