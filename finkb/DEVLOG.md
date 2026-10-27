@@ -510,6 +510,28 @@ noise_filter, table_stitcher → models
 
 ---
 
+### ADR-025 超过 MinerU 页数上限时自动分批，并在内存里合成**一份** content_list（2026-10-27）
+
+- **决策**：`finkb parse --auto-split` 按 `--max-pages`（默认 200）切页、逐批用
+  `page_ranges` 提交，把每批的 `page_idx` 平移「本批起始页 − 1」后拼成**唯一一份**
+  `content_list`，再走原有的转换/清洗/缝合链路。合并逻辑是纯函数
+  （`merge_batches()` / `offset_content_list()`），离线可测。
+- **背景**：MinerU 的 vlm 后端单文件上限 200 页（实测报错
+  `number of pages exceeds limit (200 pages), please split the file and try again`）。
+  比亚迪年报 268 页、赛力斯 224 页都超。此前靠手工：跑两次 `--pages`，再手改
+  JSON 给第二批 `page_idx += 200`。
+- **为什么必须合成一份而不是保留两批**：页码锚点、跨页缝合的「前一页最后一个
+  块 + 下一页第一个块」、以及 `page_end` 回填，全部依赖**同一套连续页号**。
+  两批各自成文，批边界上的表会被当成两张无关的表。
+- **为什么不平移 `page_number` 块**：它的 `text` 本身就是绝对页码（如 `"202"`），
+  只有 `page_idx` 是每批从 0 重编号的。
+- **离线对账**（不烧额度）：用 `data/_s1` / `data/_s2` 两批真实产物跑
+  `merge_batches`，与当初手工合并的 `content_list.json` 对比——块数 4017 = 4017、
+  `page_idx` 分布完全一致、`content_list_to_pages` 得 224 页（1..224）；
+  比亚迪两批合并得 268 页（1..268）。
+
+---
+
 ## 6. 被推翻 / 废弃的方案（不要重提）
 
 | 曾提出 | 为什么废弃 | 替代 |
@@ -652,7 +674,8 @@ noise_filter, table_stitcher → models
   批次2 的 `{0:201, 1:202...}` 覆盖批次1 的 `{0:1, 1:2...}`，页码映射互相踩踏。
 - **修复**：合并时把后续批次的 `page_idx` **整体加上前序批次的最大值 + 1**，
   使 `page_idx` 全局唯一；`page_number` 块的值保持不变（它本来就是真实物理页）。
-- **待办**：应把「按 200 页自动分批 + 偏移合并」做进 CLI，目前是手工合并。
+- **已修（2026-10-27）**：`finkb parse --auto-split` 自动切批并调用
+  `merge_batches()` 合成一份 content_list，见 ADR-025。手工合并已成为历史路径。
 
 ### 坑-17 拒绝理由误导排查方向
 - **症状**：P72→73 的续接表**自带表头**（`姓名/职务/报告期初持股数…`），

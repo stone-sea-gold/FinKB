@@ -162,6 +162,11 @@ def render_page_anchored_markdown(pages: Iterable[Page]) -> str:
 # --------------------------------------------------------------------------- #
 # MinerU 在线客户端
 # --------------------------------------------------------------------------- #
+#: MinerU 单文件页数上限。超过会直接报错：
+#: ``number of pages exceeds limit (200 pages), please split the file and try again``。
+DEFAULT_PAGE_LIMIT = 200
+
+
 class MineruClient:
     """MinerU 在线 API 的最小客户端。
 
@@ -362,6 +367,37 @@ class MineruClient:
         extract_dir = self.download_zip(zip_url, workdir / doc_id)
         return self.parse_extracted(extract_dir, doc_id)
 
+    def parse_pdf_split(
+        self,
+        pdf_path: Path,
+        doc_id: str,
+        workdir: Path,
+        page_limit: int = DEFAULT_PAGE_LIMIT,
+    ) -> ParsedDocument:
+        """超过 MinerU 单文件页数上限时自动分批解析并合并。
+
+        超限时 MinerU 直接报错 ``number of pages exceeds limit``。这里按上限切页、
+        逐批提交，再把各批 ``page_idx`` 平移后拼成一份 ``content_list``——
+        **只有一份**，所以页码锚点、跨页缝合、`page_end` 回填都在同一套坐标系里。
+        """
+        ranges = chunk_ranges(pdf_page_count(pdf_path), page_limit)
+        if len(ranges) <= 1:
+            return self.parse_pdf(pdf_path, doc_id, workdir)
+
+        batches: list[tuple[int, list[dict[str, Any]]]] = []
+        for start, end in ranges:
+            part = self.parse_pdf(
+                pdf_path, doc_id, workdir, page_ranges=f"{start}-{end}"
+            )
+            batches.append((start, list(part.content_list)))
+        merged = merge_batches(batches)
+        return ParsedDocument(
+            doc_id=doc_id,
+            pages=content_list_to_pages(merged, doc_id),
+            markdown="",
+            content_list=merged,
+        )
+
     def parse_url(self, file_url: str, doc_id: str, workdir: Path) -> ParsedDocument:
         """端到端（公网 URL）：submit → 轮询 → 下载 → 解析。"""
         zip_url = self.wait_for_result(self.submit_url(file_url))
@@ -422,6 +458,46 @@ def _build_page_number_map(content_list: list[dict[str, Any]]) -> dict[int, int]
             continue
         mapping[int(item.get("page_idx", 0))] = int(text)
     return mapping
+
+
+def pdf_page_count(pdf_path: Path) -> int:
+    """数 PDF 页数；读不了返回 0（调用方据此退化为单次解析）。"""
+    try:
+        from pypdf import PdfReader
+    except ImportError:  # pragma: no cover - pypdf 是可选依赖
+        return 0
+    try:
+        return len(PdfReader(str(pdf_path)).pages)
+    except Exception:  # pragma: no cover - 损坏文件不该让解析崩掉
+        return 0
+
+
+def chunk_ranges(total_pages: int, limit: int = DEFAULT_PAGE_LIMIT) -> list[tuple[int, int]]:
+    """把 ``1..total_pages`` 按 ``limit`` 切成若干个 1 基闭区间。"""
+    if total_pages <= 0 or limit <= 0:
+        return []
+    return [
+        (start, min(start + limit - 1, total_pages))
+        for start in range(1, total_pages + 1, limit)
+    ]
+
+
+def offset_content_list(items: list[dict[str, Any]], offset: int) -> list[dict[str, Any]]:
+    """把一批 ``content_list`` 的 ``page_idx`` 整体平移 ``offset``。
+
+    MinerU 对每次请求都从 0 重新编号 ``page_idx``，两批直接拼会**互相覆盖页**，
+    而且不会报错——这正是坑-16 的成因。``page_number`` 块的 ``text`` 本身是
+    绝对页码（如 ``"202"``），不需要平移。
+    """
+    return [{**item, "page_idx": int(item.get("page_idx", 0)) + offset} for item in items]
+
+
+def merge_batches(batches: Iterable[tuple[int, list[dict[str, Any]]]]) -> list[dict[str, Any]]:
+    """把多批解析结果按「本批起始物理页」拼成一份 ``content_list``。"""
+    merged: list[dict[str, Any]] = []
+    for start_page, items in batches:
+        merged.extend(offset_content_list(items, start_page - 1))
+    return merged
 
 
 def _is_heading(item: dict[str, Any]) -> bool:

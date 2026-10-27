@@ -108,7 +108,8 @@ MINERU_API_TOKEN=xxx ../.venv/bin/python -m finkb.cli parse ...
 finkb parse "../raw/002594_2025_年报.pdf" --pages 43-44
 
 # ② 全量解析（268 页，消耗较多额度）
-finkb parse "../raw/002594_2025_年报.pdf"
+#    MinerU 单文件上限 200 页；超过时加 --auto-split 自动分批并合并成一份结果
+finkb parse "../raw/002594_2025_年报.pdf" --auto-split
 
 # ③ 离线模式：不调用 MinerU，用 pypdf 验证链路是否通
 finkb parse "../raw/002594_2025_年报.pdf" --offline

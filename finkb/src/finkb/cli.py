@@ -29,12 +29,15 @@ from pathlib import Path
 
 from finkb.common.models import StitchedTable
 from finkb.parser.mineru_client import (
+    DEFAULT_PAGE_LIMIT,
     MineruClient,
+    chunk_ranges,
     content_list_to_pages,
     MineruConfig,
     MineruError,
     OfflinePdfParser,
     ParsedDocument,
+    pdf_page_count,
     render_page_anchored_markdown,
 )
 from finkb.parser.noise_filter import strip_running_noise
@@ -151,12 +154,23 @@ def run_parse(args: argparse.Namespace) -> int:
             return 3
         ranges = args.pages or None
         print(f"模式     : MinerU 在线 ({config.base_url}, {config.model_version})")
-        print(f"页码范围 : {ranges or '全部'}")
         client = MineruClient(config)
+        workdir = Path(args.workdir).expanduser().resolve()
+        limit = int(getattr(args, "max_pages", DEFAULT_PAGE_LIMIT))
+        auto_split = bool(getattr(args, "auto_split", False)) and ranges is None
+        if auto_split:
+            chunks = chunk_ranges(pdf_page_count(pdf_path), limit)
+            if len(chunks) > 1:
+                print(f"分批     : {len(chunks)} 批（上限 {limit} 页）"
+                      f" " + "、".join(f"{a}-{b}" for a, b in chunks))
+        print(f"页码范围 : {ranges or '全部'}")
         try:
-            document = client.parse_pdf(
-                pdf_path, doc_id, Path(args.workdir).expanduser().resolve(), page_ranges=ranges
-            )
+            if auto_split:
+                document = client.parse_pdf_split(pdf_path, doc_id, workdir, limit)
+            else:
+                document = client.parse_pdf(
+                    pdf_path, doc_id, workdir, page_ranges=ranges
+                )
         except MineruError as exc:
             print(f"[错误] MinerU 解析失败：{exc}", file=sys.stderr)
             return 4
@@ -279,6 +293,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parse_cmd.add_argument(
         "--offline", action="store_true", help="离线模式（pypdf 兜底，不调用 MinerU）"
+    )
+    parse_cmd.add_argument(
+        "--auto-split",
+        dest="auto_split",
+        action="store_true",
+        help="超过 MinerU 单文件页数上限时自动分批解析并合并成一份 content_list",
+    )
+    parse_cmd.add_argument(
+        "--max-pages",
+        dest="max_pages",
+        type=int,
+        default=DEFAULT_PAGE_LIMIT,
+        help=f"分批时每批最多多少页（默认 {DEFAULT_PAGE_LIMIT}）",
     )
     parse_cmd.add_argument(
         "--split-sections",
