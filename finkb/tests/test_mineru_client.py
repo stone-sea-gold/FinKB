@@ -760,3 +760,61 @@ def test_caption_strips_a_trailing_checkbox_glued_to_the_sentence() -> None:
     assert table.caption == "前十名股东因转融通出借原因导致较上期发生变化"
     # 去掉复选框尾巴后剩下的是短名词短语，没有冒号也没有提示词 ⇒ 低置信档
     assert table.caption_source == "text"
+
+
+def test_numbered_list_item_is_not_a_caption() -> None:
+    """P8：释义表吃到了上一页备查文件目录的最后一条「五、在香港…年报。」。
+
+    它不是跨页问题——同一页上的编号列表项同样不是表名，所以判据是
+    「中文编号开头」，不是「换了一页」。
+    """
+    content_list = [
+        {"type": "text", "text": "五、在香港联合交易所有限公司网站公布的公司 2025 年年报。", "page_idx": 6},
+        {"type": "header", "text": "比亚迪股份有限公司 2025年年度报告全文", "page_idx": 6},
+        {"type": "page_number", "text": "7", "page_idx": 6},
+        {"type": "table", "table_body": TABLE_HTML, "page_idx": 7},
+    ]
+    table = _only_table_block(content_list)
+    assert table.caption == ""
+    assert table.caption_source == "missing"
+
+
+def test_form_question_above_a_checkbox_is_not_a_caption() -> None:
+    """P11：「公司是否需追溯调整…」+「□是 ☑否」是表单问句，顶上还有标题。"""
+    content_list = [
+        {"type": "text", "text": "六、主要会计数据和财务指标", "text_level": 2, "page_idx": 10},
+        {"type": "text", "text": "公司是否需追溯调整或重述以前年度会计数据", "page_idx": 10},
+        {"type": "text", "text": "□是 \uf052否", "page_idx": 10},
+        {"type": "table", "table_body": TABLE_HTML, "page_idx": 10},
+    ]
+    table = _only_table_block(content_list)
+    assert table.caption == ""
+    assert table.caption_source == "heading"
+
+
+def test_applicable_checkbox_keeps_the_caption() -> None:
+    """P62/P63/P72/P81：「适用 □不适用」上方那句**就是**表名，不能跳过。
+
+    与「是/否」的区别在这里：适用/不适用问的是「本章节适不适用」，
+    标题写在勾选行上方；是/否问的是一个是非题，答案是给这条问句的。
+    """
+    content_list = [
+        {"type": "text", "text": "适用 □不适用", "page_idx": 62},
+        {"type": "text", "text": "在其他单位任职情况", "page_idx": 62},
+        {"type": "table", "table_body": TABLE_HTML, "page_idx": 62},
+    ]
+    table = _only_table_block(content_list)
+    assert table.caption == "在其他单位任职情况"
+    assert table.caption_source == "self"  # 含「情况」，命中提示词
+
+
+def test_affirmative_answer_keeps_the_caption() -> None:
+    """P76：「☑是 □否」勾的是「是」，下方表正是被问到的那份清单。"""
+    content_list = [
+        {"type": "text", "text": "上市公司及其主要子公司是否纳入环境信息依法披露企业名单", "page_idx": 75},
+        {"type": "text", "text": "\uf052 是 □否", "page_idx": 75},
+        {"type": "table", "table_body": TABLE_HTML, "page_idx": 75},
+    ]
+    table = _only_table_block(content_list)
+    assert table.caption == "上市公司及其主要子公司是否纳入环境信息依法披露企业名单"
+    assert table.caption_source == "text"

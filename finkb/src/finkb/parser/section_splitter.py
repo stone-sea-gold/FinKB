@@ -472,8 +472,10 @@ def split_sections(
                 else [],
                 table_title=table.table_title if header_source == "inherited" else None,
                 period_label=table.period_label,
-                caption=table.caption,
-                caption_source=table.caption_source,
+                # 段自带分节标题时，名字由 section_path 承担：沿用表级 caption 会把
+                # 「与经营活动有关的现金」盖到「与投资活动」那一段上（P217_T205）。
+                caption=table.caption if not path else "",
+                caption_source=table.caption_source if not path else "section",
             ))
         )
 

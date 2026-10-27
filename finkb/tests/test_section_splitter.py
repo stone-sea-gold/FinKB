@@ -22,6 +22,8 @@ def make_table(
     header_rows: list[list[str]] | None = None,
     table_title: str | None = None,
     period_label: str = "",
+    caption: str = "",
+    caption_source: str = "missing",
 ) -> StitchedTable:
     return StitchedTable(
         doc_id=DOC,
@@ -36,6 +38,8 @@ def make_table(
         header_rows=header_rows or [],
         table_title=table_title,
         period_label=period_label,
+        caption=caption,
+        caption_source=caption_source,
     )
 
 
@@ -612,3 +616,29 @@ def test_logical_table_keeps_period_label() -> None:
     (section,) = split_sections(table).tables
 
     assert section.period_label == "2024 年"
+
+
+def test_section_with_its_own_label_does_not_inherit_the_table_caption() -> None:
+    """P217_T205：一张表切出「经营/投资」四段，表级 caption 只能描述第一段。"""
+    table = make_table(
+        rows=[
+            ["收到其他与经营活动有关的大额现金流入列示如下:", "", ""],
+            ["其他收益款", "9,594,083", "19,600,017"],
+            ["支付其他与经营活动有关的大额现金流出列示如下:", "", ""],
+            ["销售及推广费用", "14,504,480", "9,425,061"],
+        ],
+        header=None,
+        section_rows=[
+            (0, "收到其他与经营活动有关的大额现金流入列示如下:"),
+            (2, "支付其他与经营活动有关的大额现金流出列示如下:"),
+        ],
+        caption="与经营活动有关的现金",
+        caption_source="text",
+    )
+    result = split_sections(table)
+    assert len(result.tables) == 2
+    assert result.tables[0].section_path == ["收到其他与经营活动有关的大额现金流入列示如下:"]
+    assert result.tables[0].caption == ""
+    assert result.tables[0].caption_source == "section"
+    assert result.tables[1].section_path == ["支付其他与经营活动有关的大额现金流出列示如下:"]
+    assert result.tables[1].caption == ""

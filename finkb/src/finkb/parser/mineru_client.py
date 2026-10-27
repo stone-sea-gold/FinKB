@@ -463,6 +463,14 @@ _BOX_LINE_MAX_CHARS = 15
 #: 行尾粘着的复选框尾巴。有些表名和「□适用 √不适用」被 MinerU 粘成了同一行，
 #: 去掉尾巴表名仍然可用（赛力斯 P72「前十名股东…发生变化□适用 √不适用」）。
 _BOX_TAIL_RE = re.compile(r"[□☑√✓].*$")
+#: 「是/否」型表单问句**勾了「否」**。MinerU 用私用区字形 ``\uf052`` 表示勾选，
+#: 它紧挨着被选中的那一项：「□是 ☑否」压成 ``'□是 \\uf052否'``。
+#: 勾「否」= 答案说「没有」，上方那句问句与下表无关（P11）；
+#: 勾「是」则下方正是被问到的那份清单（P76）。
+_BOX_NO_ANSWER_RE = re.compile("\uf052\\s*否")
+#: 中文编号列表项（「五、在香港…公布的公司 2025 年年报。」）。属于正文列举，
+#: 不是表名——P8 的释义表曾跨页吃到上一页备查文件目录的最后一条。
+_LIST_ITEM_RE = re.compile(r"^[一二三四五六七八九十]+、")
 
 #: 目录行（``第一节 释义....5``）。出现在表格上方是版面残留，不是表名。
 _TOC_RE = re.compile(r"\.{4,}")
@@ -567,7 +575,7 @@ def content_list_to_pages(
     prev_kind: str | None = None
     prev_text = ""
     prev_noise = False
-    history: list[tuple[str, str, bool]] = []
+    history: list[tuple[str, str, bool, int]] = []
 
     for item in content_list:
         raw_page_idx = int(item.get("page_idx", 0))
@@ -606,14 +614,14 @@ def content_list_to_pages(
                 if prev_kind == "text" and not prev_noise and _PERIOD_LABEL_RE.match(prev_text):
                     # 期间标签是表格的元数据，不是正文里独立的一句话
                     table.period_label = prev_text.strip()
-                table.caption, table.caption_source = _resolve_caption(history)
+                table.caption, table.caption_source = _resolve_caption(history, page_no)
                 # 表格块保留 Markdown 文本形态，便于落盘与人工核对
                 text = html_table_to_markdown(
                     str(item.get("table_body") or item.get("html") or "")
                 ) or text
 
         prev_kind, prev_text, prev_noise = kind, text.strip(), item_type in _NOISE_TYPES
-        history.append((kind, text.strip(), prev_noise))
+        history.append((kind, text.strip(), prev_noise, page_no))
 
         if kind == "heading":
             # 只有**紧邻**表格的连续标题块才可能是被拆散的表头
@@ -647,16 +655,19 @@ def _is_box_line(text: str) -> bool:
     return bool(_BOX_LINE_RE.search(stripped)) and len(stripped) <= _BOX_LINE_MAX_CHARS
 
 
-def _resolve_caption(history: list[tuple[str, str, bool]]) -> tuple[str, str]:
+def _resolve_caption(
+    history: list[tuple[str, str, bool, int]], page_no: int
+) -> tuple[str, str]:
     """从表格之前的内容块里回溯，找出这张表的**表外标题**。
 
-    ``history`` 的元素是 ``(kind, text, is_noise)``，按出现顺序排列。
+    ``history`` 的元素是 ``(kind, text, is_noise, page)``，按出现顺序排列。
 
     Returns:
         ``(caption, caption_source)``；``caption_source`` 的取值见
         :attr:`finkb.common.models.TableBlock.caption_source`。
     """
-    for kind, text, is_noise in reversed(history):
+    skip_next_text = False
+    for kind, text, is_noise, page in reversed(history):
         if is_noise:
             continue
         if kind in {"table", "image", "code"}:
@@ -669,12 +680,26 @@ def _resolve_caption(history: list[tuple[str, str, bool]]) -> tuple[str, str]:
         if _TOC_RE.search(stripped):
             continue  # 目录行是版面残留
         if _is_box_line(stripped):
+            # 「是/否」型表单问句，且勾的是**否**——答案说「没有」，上方那句
+            # 与下表无关（P11「公司是否需追溯调整…」+「□是 ☑否」）。
+            # 「适用/不适用」型不同：上方那句就是这张表的名称，不能跳过；
+            # 勾了「是」的也不跳过（P76「…是否纳入环境信息依法披露企业名单」
+            # +「☑是 □否」，下方正是该名单的数量表）。
+            skip_next_text = bool(_BOX_NO_ANSWER_RE.search(stripped))
             continue
+        if skip_next_text and kind == "text":
+            skip_next_text = False
+            continue
+        skip_next_text = False
         stripped = _BOX_TAIL_RE.sub("", stripped).strip()
         if not stripped:
             continue
         if kind == "heading":
             return "", "heading"
+        if _LIST_ITEM_RE.match(stripped):
+            # 「五、在香港…公布的公司 2025 年年报。」这类编号列表项属于正文，
+            # 不是表名（P8 的释义表吃到了上一页备查文件目录的最后一条）
+            return "", "missing"
         if len(stripped) > _CAPTION_MAX_CHARS:
             return "", "missing"
         if stripped.endswith(("：", ":")) or _CAPTION_HINT_RE.search(stripped):
