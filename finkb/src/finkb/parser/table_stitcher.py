@@ -221,6 +221,7 @@ def stitch_tables(
                 section_rows=list(first.section_rows),
                 header_rows=[list(row) for row in first.header_rows],
                 table_title=first.table_title,
+                period_label=first.period_label,
             )
 
             pages_touched = [first.page]

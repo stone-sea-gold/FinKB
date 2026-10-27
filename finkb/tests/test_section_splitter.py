@@ -21,6 +21,7 @@ def make_table(
     page: int = 1,
     header_rows: list[list[str]] | None = None,
     table_title: str | None = None,
+    period_label: str = "",
 ) -> StitchedTable:
     return StitchedTable(
         doc_id=DOC,
@@ -34,6 +35,7 @@ def make_table(
         section_rows=section_rows or [],
         header_rows=header_rows or [],
         table_title=table_title,
+        period_label=period_label,
     )
 
 
@@ -597,3 +599,16 @@ def test_adjacent_label_rows_are_never_dropped() -> None:
         "利润分配或资本公积金转增预案的详细情况说明",
         "公司第八届董事会第二十二次会议审议通过了《关于审议公司2025年度利润分配方案的议案》。",
     ] in logical.rows
+
+
+def test_logical_table_keeps_period_label() -> None:
+    """期间标签是表级元数据，切分后每一段都要带上。"""
+    table = make_table(
+        rows=[["合计", "1", "2"], ["其他", "3", "4"]],
+        header=["", "金额", "比例"],
+        period_label="2024 年",
+    )
+
+    (section,) = split_sections(table).tables
+
+    assert section.period_label == "2024 年"

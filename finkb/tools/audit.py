@@ -334,6 +334,7 @@ def _analyze(parsed_dir: Path) -> tuple[dict, list[Page], list[StitchedTable], l
             "header": table.header,
             "header_source": table.header_source,
             "section_path": table.section_path,
+            "period_label": table.period_label,
             "unit": decision.unit,
             "unit_rule": decision.rule,
             "unit_evidence": decision.evidence,
@@ -369,7 +370,8 @@ def make_snapshot(parsed_dir: Path) -> dict:
 # 5. 对照报告
 # ──────────────────────────────────────────────────────────────
 #: diff 时比较的字段。顺序即报告里的展示顺序。
-DIFF_FIELDS = ("kind", "unit", "unit_rule", "header_source", "header", "section_path", "row_count")
+DIFF_FIELDS = ("kind", "unit", "unit_rule", "header_source", "header", "section_path",
+               "period_label", "row_count")
 
 
 def _short(value: object, limit: int = 60) -> str:
@@ -457,6 +459,10 @@ def diff_snapshots(before: dict, after: dict) -> tuple[str, list[str]]:
     """
     b_tables = before.get("tables", {})
     a_tables = after.get("tables", {})
+    # 旧快照没有新加的字段时不能报成「全部变化」，统一补默认值
+    for tables in (b_tables, a_tables):
+        for record in tables.values():
+            record.setdefault("period_label", "")
     added = [key for key in a_tables if key not in b_tables]
     removed = [key for key in b_tables if key not in a_tables]
     common = [key for key in a_tables if key in b_tables]

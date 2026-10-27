@@ -471,6 +471,7 @@ def split_sections(
                 if header_source == "inherited"
                 else [],
                 table_title=table.table_title if header_source == "inherited" else None,
+                period_label=table.period_label,
             ))
         )
 
@@ -562,6 +563,7 @@ def _build_one(
         if header_source == "inherited"
         else [],
         table_title=table.table_title if header_source == "inherited" else None,
+        period_label=table.period_label,
     ))
 
 

@@ -497,3 +497,51 @@ def test_request_upload_urls_raises_when_incomplete() -> None:
 
     with pytest.raises(MineruError, match="file_urls"):
         client.request_upload_urls("a.pdf")
+
+
+def test_standalone_period_label_is_attached_to_the_table() -> None:
+    """P167：MinerU 把「2025 年」输出成表格前的一个独立文本块。
+
+    同一页两张表头完全相同的表（T94/T95）只有靠这个标签才分得出年份。
+    """
+    content_list = [
+        {"type": "text", "text": "（2） 按坏账计提方法分类披露", "text_level": 2, "page_idx": 0},
+        {"type": "text", "text": "2025 年", "page_idx": 0},
+        {
+            "type": "table",
+            "table_body": "<table><tr><td></td><td>金额</td></tr><tr><td>合计</td><td>1</td></tr></table>",
+            "page_idx": 0,
+        },
+    ]
+    table = _only_table_block(content_list)
+
+    assert table.period_label == "2025 年"
+
+
+def test_period_label_must_be_adjacent() -> None:
+    """中间夹了别的正文，标签就不属于这张表。"""
+    content_list = [
+        {"type": "text", "text": "2025 年", "page_idx": 0},
+        {"type": "text", "text": "单位：千元", "page_idx": 0},
+        {
+            "type": "table",
+            "table_body": "<table><tr><td>合计</td><td>1</td></tr></table>",
+            "page_idx": 0,
+        },
+    ]
+
+    assert _only_table_block(content_list).period_label == ""
+
+
+def test_non_period_text_before_table_is_not_a_label() -> None:
+    """只有「年份（可带 12 月 31 日）」才算期间标签，别的短文本不算。"""
+    content_list = [
+        {"type": "text", "text": "单位：千元", "page_idx": 0},
+        {
+            "type": "table",
+            "table_body": "<table><tr><td>合计</td><td>1</td></tr></table>",
+            "page_idx": 0,
+        },
+    ]
+
+    assert _only_table_block(content_list).period_label == ""

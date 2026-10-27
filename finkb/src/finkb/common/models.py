@@ -70,6 +70,13 @@ class TableBlock:
     section_rows: list[tuple[int, str]] = field(default_factory=list)
     header_rows: list[list[str]] = field(default_factory=list)
     table_title: str | None = None
+    period_label: str = ""
+    """表格所属的期间标签，如 ``2025 年``、``2024 年 12 月 31 日``。
+
+    MinerU 常把「2025 年」「2024 年」输出成表格**前一个独立的文本块**，于是同一页
+    两张表头完全相同的表（P167 的 T94/T95）在数据层无法区分年份。这里把紧邻的
+    期间标签吸收到表上；空串表示没有。
+    """
     page_end: int = 0
     """表格覆盖到的最后一页；``0`` 表示与 ``meta.page`` 相同（不跨页）。
 
@@ -162,6 +169,8 @@ class StitchedTable:
     header_rows: list[list[str]] = field(default_factory=list)
     #: 表标题（HTML 里单格跨满全宽的那一行），不是表头。
     table_title: str | None = None
+    #: 期间标签（表格前紧邻的「2025 年」这类文本块），空串表示没有。
+    period_label: str = ""
 
     @property
     def ncols(self) -> int:
@@ -240,6 +249,7 @@ class LogicalTable:
     orphan_values: list[str] = field(default_factory=list)
     header_rows: list[list[str]] = field(default_factory=list)
     table_title: str | None = None
+    period_label: str = ""
 
     @property
     def ncols(self) -> int:

@@ -437,6 +437,13 @@ _SECTION_NUMBER_RE = re.compile(
 #: 表头单元格的长度上限。超过这个长度的标题属于章节名，不可能是列名。
 _MAX_HEADER_CELL_CHARS = 12
 
+#: 期间标签：整块文本只有一个年份，可选带「12 月 31 日」。
+#: MinerU 常把它输出成表格前的一个独立文本块（实测比亚迪年报 39 处），
+#: 于是同一页两张表头相同的表在数据层分不出年份（P167 的 T94/T95）。
+_PERIOD_LABEL_RE = re.compile(
+    r"^\s*(?:19|20)\d{2}\s*年\s*(?:12\s*月\s*31\s*日)?\s*$"
+)
+
 
 def _build_page_number_map(content_list: list[dict[str, Any]]) -> dict[int, int]:
     """建立 ``page_idx → 物理页码`` 映射。
@@ -534,6 +541,9 @@ def content_list_to_pages(
     last_table: TableBlock | None = None
     tables_on_page: dict[int, int] = {}
     heading_run: list[str] = []
+    prev_kind: str | None = None
+    prev_text = ""
+    prev_noise = False
 
     for item in content_list:
         raw_page_idx = int(item.get("page_idx", 0))
@@ -569,10 +579,15 @@ def content_list_to_pages(
             table = _table_block_from_item(item, meta, block_index, heading_run)
             if table is not None:
                 last_table = table
+                if prev_kind == "text" and not prev_noise and _PERIOD_LABEL_RE.match(prev_text):
+                    # 期间标签是表格的元数据，不是正文里独立的一句话
+                    table.period_label = prev_text.strip()
                 # 表格块保留 Markdown 文本形态，便于落盘与人工核对
                 text = html_table_to_markdown(
                     str(item.get("table_body") or item.get("html") or "")
                 ) or text
+
+        prev_kind, prev_text, prev_noise = kind, text.strip(), item_type in _NOISE_TYPES
 
         if kind == "heading":
             # 只有**紧邻**表格的连续标题块才可能是被拆散的表头

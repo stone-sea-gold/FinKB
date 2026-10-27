@@ -209,7 +209,9 @@ def run_parse(args: argparse.Namespace) -> int:
             (logical_dir / f"{name}.md").write_text(
                 f"<!-- {logical.logical_id}  kind={logical.kind}  "
                 f"header_source={logical.header_source}  "
-                f"section={'/'.join(logical.section_path) or '—'} -->\n"
+                f"section={'/'.join(logical.section_path) or '—'}"
+                + (f"  period={logical.period_label}" if logical.period_label else "")
+                + " -->\n"
                 f"{logical.to_markdown()}\n",
                 encoding="utf-8",
             )
