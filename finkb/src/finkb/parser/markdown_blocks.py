@@ -335,6 +335,11 @@ def _is_pure_number(text: str) -> bool:
 #: 必须向后看几行才能确认「这是一张以期间为列的表」。
 HEADER_LOOKAHEAD_ROWS = 3
 
+#: 「首格为空的表头」里其余单元格的长度上限。比对标题的 12 字宽——财务报表的
+#: 列名常是「稳定期的关键参数的确定依据」这种长短语，超过 20 字基本是被截断的
+#: 正文残句（实测 P53-P55），不能当列名。
+_MAX_HEADER_TAIL_CELL_CHARS = 20
+
 
 @dataclass(frozen=True)
 class TableLayout:
@@ -399,7 +404,22 @@ def _looks_like_header_row(
     # 纯文本表兜底：整表没有任何数值时上一条失效。此时若首行所有非空单元格
     # 都以冒号结尾，按列名处理（实测 P118「关键审计事项」）。
     cells = [cell.strip() for cell in row if cell.strip()]
-    return len(cells) >= 2 and all(cell.endswith((":", "：")) for cell in cells)
+    if len(cells) >= 2 and all(cell.endswith((":", "：")) for cell in cells):
+        return True
+
+    # 首格为空的表头：MinerU 常把整行表头的第 0 格输出成空 <td>（实测 P150 折旧
+    # 年限表、P248 股份支付表、赛力斯年份表）。**不能**要求「本行无纯数值」——
+    # 赛力斯的表头就是 2024/2025 这种年份。三条结构特征代替内容猜测：
+    #   ① 首格为空、其余格是短文本（长残句是表格被截断，不是列名）；
+    #   ② 后续数据行里第 0 列确实有值 → 第 0 列是真数据列，只是列名丢了；
+    #   ③ 至少 2 行如此，避免单行残表被当成表头。
+    if row and not row[0].strip():
+        others = [cell.strip() for cell in row[1:] if cell.strip()]
+        populated = sum(1 for following in rows[index + 1 :] if following and following[0].strip())
+        if others and populated >= 2:
+            return all(len(cell) <= _MAX_HEADER_TAIL_CELL_CHARS for cell in others)
+
+    return False
 
 
 def _carried_columns(raw_rows: list[list[tuple[str, int, int]]], target: int) -> set[int]:

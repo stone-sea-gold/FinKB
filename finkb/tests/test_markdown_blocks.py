@@ -235,3 +235,70 @@ def test_ragged_group_row_with_empty_parent_cell_is_layer_two() -> None:
     assert len(layout.header_rows) == 2
     assert layout.header == ["合营企业", "本年变动/追加投资", "本年变动/其他", "年末余额"]
     assert layout.rows == [["比亚迪汽车金融", "1", "2", "3"]]
+
+
+# --------------------------------------------------------------------------- #
+# 首格为空的表头（MinerU 输出里整行表头的第 0 格是空 <td>）
+# --------------------------------------------------------------------------- #
+def test_header_with_empty_first_cell_is_recognized() -> None:
+    """P150 折旧年限表：首行 ``['', '估计使用年限', ...]``，第 0 格为空。"""
+    html = (
+        "<table><tr><td></td><td>估计使用年限</td><td>预计净残值率</td><td>年折旧率</td></tr>"
+        "<tr><td>房屋及建筑物</td><td>3-70年</td><td>0%-5%</td><td>1.4%-33.3%</td></tr>"
+        "<tr><td>机器设备</td><td>3-12年</td><td>0%-5%</td><td>7.9%-33.3%</td></tr></table>"
+    )
+    layout = html_table_layout(html)
+
+    assert layout.header == ["", "估计使用年限", "预计净残值率", "年折旧率"]
+    assert layout.rows[0][0] == "房屋及建筑物"
+
+
+def test_empty_first_cell_two_column_header_is_recognized() -> None:
+    """P248：两列表的列名在第二格，首格空。"""
+    html = (
+        "<table><tr><td></td><td>以权益结算的股份支付费用</td></tr>"
+        "<tr><td>研发人员</td><td>395,229</td></tr>"
+        "<tr><td>管理人员</td><td>248,378</td></tr></table>"
+    )
+    layout = html_table_layout(html)
+
+    assert layout.header == ["", "以权益结算的股份支付费用"]
+    assert len(layout.rows) == 2
+
+
+def test_year_header_with_empty_first_cell_is_recognized() -> None:
+    """赛力斯 P10：被吞的表头行是纯数字年份，不能被「本行无纯数值」挡掉。"""
+    html = (
+        "<table><tr><td></td><td>2024</td><td>2025</td><td>同比</td></tr>"
+        "<tr><td>营业收入</td><td>1,234</td><td>1,567</td><td>27.0%</td></tr>"
+        "<tr><td>净利润</td><td>234</td><td>345</td><td>47.4%</td></tr></table>"
+    )
+    layout = html_table_layout(html)
+
+    assert layout.header == ["", "2024", "2025", "同比"]
+    assert len(layout.rows) == 2
+
+
+def test_long_fragment_row_is_not_treated_as_header() -> None:
+    """P53-P55：首行是截断的残句（远超 20 字），不能当表头。"""
+    html = (
+        "<table><tr><td></td><td>易所和证券登记结算机构申请锁定;未在2个交易日内提交锁定申请的,"
+        "授权董事会核实后直接向证券交易所和证券登记结算机构报送本企业的身份信息</td></tr>"
+        "<tr><td>甲方</td><td>乙方</td></tr>"
+        "<tr><td>丙方</td><td>丁方</td></tr></table>"
+    )
+    layout = html_table_layout(html)
+
+    assert not layout.header
+
+
+def test_empty_first_cell_header_needs_a_populated_first_column() -> None:
+    """后续行第 0 列没有值 → 第 0 列不是数据列，首行更像残片而不是表头。"""
+    html = (
+        "<table><tr><td></td><td>备注</td></tr>"
+        "<tr><td></td><td>说明一</td></tr>"
+        "<tr><td>甲</td><td>说明二</td></tr></table>"
+    )
+    layout = html_table_layout(html)
+
+    assert not layout.header
