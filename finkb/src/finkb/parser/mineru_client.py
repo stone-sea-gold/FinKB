@@ -135,10 +135,18 @@ class ParsedDocument:
 
 
 def render_page_anchored_markdown(pages: Iterable[Page]) -> str:
-    """把 ``Page``/``Block`` 渲染成带 META 注释的 Markdown。"""
+    """把 ``Page``/``Block`` 渲染成带 META 注释的 Markdown。
+
+    已判 ``is_noise`` 的块**不渲染**：MinerU 的 ``header``/``footer`` 与
+    统计出来的重复页眉都在这一类里。它们留着会让 ``page_anchored.md``
+    每页多一行重复文字（比亚迪年报 267 行），而噪音本身的记录在
+    ``NoiseReport`` 里，不需要正文再存一份。
+    """
     chunks: list[str] = []
     for page in pages:
         for block in page.blocks:
+            if block.is_noise:
+                continue
             meta = {
                 "doc": block.meta.doc_id,
                 "page": block.meta.page,

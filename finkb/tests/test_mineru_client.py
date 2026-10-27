@@ -213,6 +213,35 @@ def test_render_round_trip_preserves_pages_and_sections() -> None:
     assert reparsed[0].blocks[0].meta.section == "第三节 管理层讨论与分析"
 
 
+def test_render_skips_noise_blocks() -> None:
+    """页眉页脚已判 ``is_noise``，落盘时不该再出现在正文里。
+
+    MinerU 把页眉标成 ``header``、页脚标成 ``footer``，``_NOISE_TYPES`` 已经
+    给它们打了 ``is_noise=True``；但渲染时不分青红皂白全写进去，比亚迪年报
+    的 ``page_anchored.md`` 里因此有 267 行「…2025年年度报告全文」。
+    """
+    pages = [
+        Page(
+            number=3,
+            blocks=[
+                Block(
+                    meta=DocMeta(DOC, 3),
+                    kind="header",
+                    lines=["比亚迪股份有限公司 2025年年度报告全文"],
+                    is_noise=True,
+                ),
+                Block(meta=DocMeta(DOC, 3), kind="text", lines=["第一节 重要提示"]),
+                Block(meta=DocMeta(DOC, 3), kind="page_number", lines=["3"], is_noise=True),
+            ],
+        )
+    ]
+    markdown = render_page_anchored_markdown(pages)
+
+    assert "第一节 重要提示" in markdown
+    assert "2025年年度报告全文" not in markdown
+    assert "<!-- META:" in markdown
+
+
 # --------------------------------------------------------------------------- #
 # 客户端流程（使用假传输层，不触网）
 # --------------------------------------------------------------------------- #

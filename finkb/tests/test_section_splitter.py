@@ -400,7 +400,7 @@ def _sparse_rows(count: int, start: int = 0) -> list[list[str]]:
 
 
 def test_long_sparse_segment_is_not_summary() -> None:
-    """P130_T77 形态：后继行很稀，但整段有 9 行 —— 是数据表不是汇总块。"""
+    """P130_T77 形态：现金流分段，看着「稀」，但它是数据表不是汇总块。"""
     label = "一、经营活动产生的现金流量"
     table = make_table(
         [[label, "", "", ""]] + _sparse_rows(9),
@@ -410,22 +410,58 @@ def test_long_sparse_segment_is_not_summary() -> None:
     result = split_sections(table)
 
     assert [t.kind for t in result.tables] == ["data"]
-    assert "降级为 data" in result.cuts[0].reason
     assert result.cuts[0].kind == "data"
 
 
-def test_short_sparse_segment_is_still_summary() -> None:
-    """真汇总块：2 行，每行 3 个非空格 —— 必须仍然判 summary。"""
+def test_total_label_is_summary() -> None:
+    """真汇总块：标签自带「合计」语义（P89-P91_T52#S04 形态）。"""
+    label = "公司担保总额(即前三大项的合计)"
+    table = make_table(
+        [[label, "", "", ""]] + _sparse_rows(2),
+        header=HEADER_4,
+        section_rows=[(0, label)],
+    )
+    (logical,) = split_sections(table).tables
+
+    assert logical.kind == "summary"
+
+
+def test_narrow_total_labelled_block_stays_data() -> None:
+    """3 列 12 行、标签含「合计」—— 是数据表，不是汇总块（P215_T201 形态）。
+
+    只看标签字面会把「合计」当成汇总区标志，但窄而长的块显然是数据：
+    汇总块是「对上面若干行的汇总」，本身不会长。
+    """
+    rows = [[f"项目{i}", str(i), str(i)] for i in range(6)]
+    rows += [["合计", "100", "200"]]
+    rows += [[f"其中{i}", str(i), str(i)] for i in range(6)]
+    table = make_table(
+        rows,
+        header=["项目", "2025年", "2024年"],
+        section_rows=[(6, "合计")],
+    )
+    result = split_sections(table)
+
+    # 分节是对的（「合计」确实另起一段），但两段都是数据表：
+    # 3 列的块再按「合计」判汇总，只会把半张表标成汇总区。
+    assert [t.kind for t in result.tables] == ["data", "data"]
+
+
+def test_cash_flow_section_label_is_never_summary() -> None:
+    """现金流「…产生的现金流量」不是汇总块。
+
+    旧判据只看「后继行非空格少」，2 行的现金流分段会被判成汇总块；
+    赛力斯年报里 19 张 summary 有 16 张是这种误判。
+    """
     label = "三、筹资活动产生的现金流量"
     table = make_table(
         [[label, "", "", ""]] + _sparse_rows(2),
         header=HEADER_4,
         section_rows=[(0, label)],
     )
-    result = split_sections(table)
+    (logical,) = split_sections(table).tables
 
-    assert [t.kind for t in result.tables] == ["summary"]
-    assert "降级" not in result.cuts[0].reason
+    assert logical.kind == "data"
 
 
 def test_dense_long_segment_is_data() -> None:
@@ -502,10 +538,14 @@ def test_three_effective_columns_stays_data() -> None:
 
 
 def test_summary_still_wins_over_kv() -> None:
-    """真汇总块只有 2 列有数据，但类型必须是 summary 而不是 kv。"""
-    label = "三、筹资活动产生的现金流量"
+    """汇总块有效列只有 2 列，但类型必须是 summary 而不是 kv。"""
+    label = "公司担保总额(即前三大项的合计)"
     table = make_table(
-        [[label, "", "", ""]] + _sparse_rows(2),
+        [
+            [label, "", "", ""],
+            ["担保总额", "1,240,000", "", ""],
+            ["其中：对子公司担保", "800,000", "", ""],
+        ],
         header=HEADER_4,
         section_rows=[(0, label)],
     )

@@ -19,7 +19,7 @@
 分类          特征                                        处理
 ============  ==========================================  ================
 ``new_table`` 后继行看起来是表头（≥3 非空、无纯数值）      该段自有表头
-``summary``   ≥4 列表，且后继行非空单元格 ≤4（键值对）      汇总块
+``summary``   ≥4 列表，且标签含「合计/小计/总额/总计」       汇总块
 ``heading``   窄表，文本以冒号结尾或带中文序号              分节标签
 ``footnote``  以「注」开头或长度 > 40                       脚注，**不切分**
 ============  ==========================================  ================
@@ -43,6 +43,11 @@ _HEADING_PREFIX_RE = re.compile(
     r"^(?:[一二三四五六七八九十]+[、.]|[（(]\s*\d+\s*[)）]|第[一二三四五六七八九十]+[、.章节])"
 )
 
+#: 汇总块的语义标志：分节标签里出现这些词，说明这一块是合计/汇总区。
+#: 「合计/小计/总额/总计」是中文报表里表示「这一行是上面若干行的汇总」的固定用词，
+#: 与表宽、行数、有没有数字都无关——用它判定比统计「后继行有几个非空格」可靠。
+_SUMMARY_LABEL_RE = re.compile(r"(合计|小计|总额|总计)")
+
 
 @dataclass(frozen=True)
 class SplitOptions:
@@ -52,22 +57,21 @@ class SplitOptions:
         header_similarity_threshold: 后继行与父表表头判定为「同一表头」的相似度下限。
         footnote_prefix: 脚注行前缀（命中即不切分）。
         footnote_min_length: 超过该长度视为脚注（实测 P109 的「注1:…」长达 200+ 字）。
-        summary_max_nonempty: 判定为汇总块时，后继行允许的最大非空单元格数。
-        summary_max_rows: 判定为汇总块时，段内允许的最大行数。
-            只看「非空格数」会漏判空列多的宽表：财务报表附注的
-            「附注七」列大量留空，10–21 行的数据表每行也只有 3 个非空格，
-            会被误判成汇总块（实测 7 张核心报表中招）。**行数**才是有区分度的维度：
-            真汇总块 0–3 行，误判的 ≥8 行。
-        summary_min_width: 只在 **≥ 该列数** 的表上启用汇总块判据。
-            窄表（2–3 列）里任何行都满足「非空 ≤4」，该判据恒真、没有区分力。
+        summary_min_width: 只在 **≥ 该列数** 的表上识别汇总块。
+            窄表（2–3 列）多半本身就是键值表，再按「合计」切一刀只会得到两张
+            半截表；汇总块判据在窄表上没有区分力。
         narrow_heading_only: 窄表是否只按「冒号/中文序号」切分（保守模式）。
+
+    汇总块只看**标签语义**（见 :data:`_SUMMARY_LABEL_RE`），不看表宽之外的
+    任何统计量：早期按「后继行非空格数 ≤ N」判定，实测两个方向都错——
+    财务报表附注的「附注七」列大量留空，10–21 行的数据表每行也只有 3 个非空格，
+    于是 7 张核心报表被误判成汇总块；而赛力斯年报的现金流分段（2 行、每行 3 格）
+    又被当成汇总块，19 张 summary 里 16 张是误判。
     """
 
     header_similarity_threshold: float = 0.5
     footnote_prefix: str = "注"
     footnote_min_length: int = 40
-    summary_max_nonempty: int = 4
-    summary_max_rows: int = 3
     summary_min_width: int = 4
     narrow_heading_only: bool = True
 
@@ -209,13 +213,14 @@ def classify_cut(
             )
 
     # ② 宽表上的键值对汇总块（窄表禁用：判据在那里恒真）
-    if width >= options.summary_min_width and len(next_non_empty) <= options.summary_max_nonempty:
+    # ② 汇总块：标签自带「合计/小计/总额/总计」语义
+    if width >= options.summary_min_width and _SUMMARY_LABEL_RE.search(stripped):
         return SectionCut(
             row_index,
             text,
             "summary",
             False,
-            f"后继为键值对（{len(next_non_empty)} 个非空格，表宽 {width}）",
+            f"汇总块标签（表宽 {width} 列）",
         )
 
     # ③ 窄表：只认显式标题标记，避免把数据行误当分节
@@ -229,10 +234,9 @@ def classify_cut(
 
 def _section_kind(
     own_header: bool,
-    cut_kind: SectionKind,
+    cut: SectionCut | None,
     rows: list[list[str]],
     parent_header: list[str] | None = None,
-    options: SplitOptions | None = None,
 ) -> SectionKind:
     """结合段内内容细化类型。
 
@@ -247,8 +251,14 @@ def _section_kind(
     ``kv`` 由**有效列数**决定，与行数、有无数字都无关。旧判据
     「``len(rows) <= 2`` 且全无数字」把 5 行的 P117_T69（审计意见类型等）
     判成 data，又把只有 2 行数字的 P219_T208 续表判成 kv，两个方向都错。
+
+    ``summary`` 由**分节标签的语义**决定，与段内行数无关。
     """
-    if cut_kind == "summary" and not own_header and _is_short_summary(rows, options):
+    if (
+        cut is not None
+        and cut.kind == "summary"
+        and _SUMMARY_LABEL_RE.search(cut.text)
+    ):
         return "summary"
     if (
         not own_header
@@ -340,19 +350,6 @@ def _merge_wrapped_values(
         origin.append((index, index + 1))
         index += 1
     return merged, origin
-
-
-def _is_short_summary(rows: list[list[str]], options: SplitOptions | None) -> bool:
-    """汇总块必须又短又稀。
-
-    「稀」是切分时的必要条件（``summary_max_nonempty``），「短」是分段后
-    才能确认的充分条件——两者都满足才认。只判「稀」会把空列多的宽表
-    整张吞成 summary（实测 P130_T77 现金流量表 12/15/21 行）。
-    """
-    opts = options or SplitOptions()
-    if len(rows) > opts.summary_max_rows:
-        return False
-    return all(len(_non_empty(row)) <= opts.summary_max_nonempty for row in rows)
 
 
 def _collect_cut_candidates(
@@ -454,14 +451,7 @@ def split_sections(
         segment = rows[start:end]
         if not segment:
             return
-        cut_kind: SectionKind = cut.kind if cut is not None else "data"
-        kind = _section_kind(
-            header_source == "self", cut_kind, segment, header, opts
-        )
-        if cut is not None and cut_kind == "summary" and kind != "summary":
-            # 切分时只看到「后继行稀」，分段后才发现它并不短 —— 改判并留痕
-            cut.kind = "data"
-            cut.reason += f"；但段内 {len(segment)} 行，降级为 data"
+        kind = _section_kind(header_source == "self", cut, segment, header)
         seq += 1
         result.tables.append(
             _finalize(LogicalTable(
@@ -528,7 +518,7 @@ def split_sections(
                 [],
                 rows,
                 (0, origin[-1][1] if origin else 0),
-                _section_kind(False, "data", rows, parent_header, opts),
+                _section_kind(False, None, rows, parent_header),
                 1,
             )
         )

@@ -92,7 +92,7 @@ def build_report(doc_id: str, tables: list[StitchedTable], options: SplitOptions
     add("| 分类 | 判据 | 处理 |")
     add("|---|---|---|")
     add("| `data` + 自有表头 | 后继行像表头（≥3 非空、无纯数值、与父表头相似或父表无表头） | 切分，用自有表头 |")
-    add(f"| `summary` | 表宽 ≥ {options.summary_min_width} 列，后继行非空 ≤ {options.summary_max_nonempty}，**且切出的段 ≤ {options.summary_max_rows} 行** | 切分，继承父表头 |")
+    add(f"| `summary` | 表宽 ≥ {options.summary_min_width} 列，**且标签含「合计/小计/总额/总计」** | 切分，继承父表头 |")
     add("| `data`（分节标签） | 窄表且文本带冒号/中文序号；或宽表后继为数据行 | 切分，继承父表头 |")
     add("| `footnote` | 以「注」开头 或 长度 > 40 | **不切分** |")
     add("")
