@@ -818,3 +818,35 @@ def test_affirmative_answer_keeps_the_caption() -> None:
     table = _only_table_block(content_list)
     assert table.caption == "上市公司及其主要子公司是否纳入环境信息依法披露企业名单"
     assert table.caption_source == "text"
+
+
+def test_bare_currency_line_is_a_unit_not_a_caption() -> None:
+    """赛力斯 P125/P136/P209/P218：币种单独占一行「人民币元」，不带「币种：」前缀。
+
+    这一行已经是表格的单位元数据，不能当表名；表名还要继续往上找。
+    """
+    content_list = [
+        {"type": "text", "text": "按预期信用损失一般模型计提坏账准备", "page_idx": 124},
+        {"type": "text", "text": "单位：元 币种：人民币", "page_idx": 124},
+        {"type": "text", "text": "人民币元", "page_idx": 124},
+        {"type": "table", "table_body": TABLE_HTML, "page_idx": 124},
+    ]
+    table = _only_table_block(content_list)
+    assert table.caption == "按预期信用损失一般模型计提坏账准备"
+    assert table.caption != "人民币元"
+
+
+def test_period_range_label_is_a_period_not_a_caption() -> None:
+    """赛力斯 P84/P86/P90/P92：期间写成区间「2025 年 1—12 月」。
+
+    它不是表名，而是这张表的期间元数据——同一节里 2024 年那张会写成别的区间，
+    把年份存进 ``period_label`` 才能把两张表分开。
+    """
+    content_list = [
+        {"type": "text", "text": "主营业务分行业情况", "page_idx": 83},
+        {"type": "text", "text": "2025 年 1—12 月", "page_idx": 83},
+        {"type": "table", "table_body": TABLE_HTML, "page_idx": 83},
+    ]
+    table = _only_table_block(content_list)
+    assert table.period_label == "2025 年 1—12 月"
+    assert table.caption == "主营业务分行业情况"
