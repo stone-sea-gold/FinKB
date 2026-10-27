@@ -28,10 +28,12 @@ def make_table(
     kind: str = "data",
     page: int = 10,
     logical_id: str | None = None,
+    parent: str | None = None,
 ) -> LogicalTable:
+    parent_id = parent or f"{DOC}#P{page}_T01"
     return LogicalTable(
-        logical_id=logical_id or f"{DOC}#P{page}_T01#S01",
-        parent_id=f"{DOC}#P{page}_T01",
+        logical_id=logical_id or f"{parent_id}#S01",
+        parent_id=parent_id,
         header=header,
         header_source="self" if header else "inherited",
         section_path=[],
@@ -85,6 +87,11 @@ def test_normalize_unit_prefers_longest_token() -> None:
         ("不适用", None),
         ("2025年", None),
         ("61", "61"),
+        # 「元、两位小数」口径的年报：14 位有效数字必须一位不丢。
+        # 曾按 10 位有效数字截断，190,501,783,194.92 → 190,501,783,200，
+        # 现金流恒等式因此凭空差 30 元（赛力斯 2025 年报）。
+        ("190,501,783,194.92", "190501783194.92"),
+        ("143,905,863,420.75", "143905863420.75"),
     ],
 )
 def test_parse_number(cell: str, expected: str | None) -> None:
@@ -106,6 +113,16 @@ def test_numeric_digest_changes_when_a_value_changes() -> None:
     before = [["营业收入", "1,000"]]
     after = [["营业收入", "1,001"]]
     assert audit.numeric_digest(before) != audit.numeric_digest(after)
+
+
+def test_numeric_digest_stays_at_ten_significant_digits() -> None:
+    """指纹按 10 位有效数字归一——历史快照才能继续比对。
+
+    解析要全精度（算术用），指纹要归一（跨版本比对用）。两者拆开，
+    改精度就不会把所有历史快照变成「数值全变」。
+    """
+    assert audit.numeric_digest([["1,234.00000001"]]) == audit.numeric_digest([["1,234"]])
+    assert audit.numeric_digest([["12.30%"]]) == audit.numeric_digest([["12.3%"]])
 
 
 def test_numeric_digest_detects_row_reorder() -> None:
@@ -291,6 +308,20 @@ def test_cash_flow_identity_fails_on_mismatch() -> None:
     assert not [c for c in checks if c.name == "现金流量表·经营活动"][0].ok
 
 
+def test_cash_flow_identity_holds_for_yuan_with_cents() -> None:
+    """「元、两位小数」口径：14 位有效数字被截成 10 位就会凭空差 30 元。"""
+    table = make_table(
+        [
+            ["经营活动现金流入小计", "", "190,501,783,194.92"],
+            ["经营活动现金流出小计", "", "161,588,039,865.68"],
+            ["经营活动产生的现金流量净额", "", "28,913,743,329.24"],
+        ],
+        header=["项目", "附注", "2025年度"],
+    )
+    check = [c for c in audit.check_cash_flow([table]) if c.name == "现金流量表·经营活动"][0]
+    assert check.ok, check.detail
+
+
 def test_cash_flow_ignores_attachment_column() -> None:
     """「附注七」列里也有数字（62），不能被当成金额。"""
     checks = audit.check_cash_flow([cash_flow_table("60")])
@@ -307,6 +338,56 @@ def test_balance_sheet_identity_passes() -> None:
     )
     check = audit.check_balance_sheet([assets, equity])[0]
     assert check.ok
+
+
+def test_balance_sheet_handles_new_standard_equity_label_across_sections() -> None:
+    """新准则标签 + 一张物理表被切成多段：资产 #S02、负债 #S04、权益 #S05。
+
+    旧写法要求「同一张逻辑表里同时有负债合计和股东权益合计」，这种排版下
+    直接找不到（赛力斯 2025 年报：资产 143,905,863,420.75 = 负债
+    102,047,535,793.91 + 所有者权益 41,858,327,626.84）。
+    """
+    parent = f"{DOC}#P80-P82_T82"
+    assets = make_table([["资产总计", "", "1,000"]], logical_id=f"{parent}#S02", parent=parent)
+    liability = make_table([["负债合计", "", "600"]], logical_id=f"{parent}#S04", parent=parent)
+    equity = make_table(
+        [["所有者权益(或股东权益)合计", "", "400"]],
+        logical_id=f"{parent}#S05",
+        parent=parent,
+    )
+    check = audit.check_balance_sheet([assets, liability, equity])[0]
+    assert check.ok, check.detail
+
+
+def test_balance_sheet_prefers_sibling_sections_over_a_parent_only_statement() -> None:
+    """同一份文档里合并报表与母公司报表并存时，取与资产总计同表的那一段。"""
+    consolidated = f"{DOC}#P80-P82_T82"
+    parent_only = f"{DOC}#P82-P84_T83"
+    assets = make_table(
+        [["资产总计", "", "1,000"]], logical_id=f"{consolidated}#S02", parent=consolidated
+    )
+    liab = make_table([["负债合计", "", "600"]], logical_id=f"{consolidated}#S04", parent=consolidated)
+    equity = make_table(
+        [["所有者权益(或股东权益)合计", "", "400"]],
+        logical_id=f"{consolidated}#S05",
+        parent=consolidated,
+    )
+    # 母公司报表排在后面，数值不同——不能被误取
+    other_assets = make_table(
+        [["资产总计", "", "900"]], logical_id=f"{parent_only}#S02", parent=parent_only
+    )
+    other_liab = make_table(
+        [["负债合计", "", "500"]], logical_id=f"{parent_only}#S04", parent=parent_only
+    )
+    other_equity = make_table(
+        [["所有者权益(或股东权益)合计", "", "400"]],
+        logical_id=f"{parent_only}#S05",
+        parent=parent_only,
+    )
+    check = audit.check_balance_sheet(
+        [assets, liab, equity, other_assets, other_liab, other_equity]
+    )[0]
+    assert check.ok, check.detail
 
 
 def test_balance_sheet_identity_fails_on_mismatch() -> None:

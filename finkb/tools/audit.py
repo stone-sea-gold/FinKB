@@ -250,6 +250,10 @@ def _parse_number(cell: str) -> str | None:
     """把单元格还原成规范数值字符串；不是纯数值返回 ``None``。
 
     括号表示负数（``(1,234)`` → ``-1234``），百分号保留。
+
+    **保留全部有效位**：报表有「千元整数」也有「元、两位小数」两种口径，
+    后者一个数就有 14 位有效数字。按 10 位截断会让
+    ``190,501,783,194.92`` 变成 ``190,501,783,200``，恒等式凭空差 30 元。
     """
     text = cell.strip()
     if not PURE_NUMBER_RE.match(text):
@@ -262,7 +266,19 @@ def _parse_number(cell: str) -> str | None:
         return None
     if negative:
         value = -value
-    return f"{value:.10g}" + ("%" if text.endswith("%") else "")
+    return f"{value:.15g}" + ("%" if text.endswith("%") else "")
+
+
+def _fingerprint_token(number: str) -> str:
+    """把已解析的数值再归一成指纹用的短形式（10 位有效数字）。
+
+    指纹的职责是「数字有没有被改动」，不是「精确到分」。归一化让
+    ``1,234`` 与 ``1,234.00000001`` 同指纹，也保证换精度不会让历史快照
+    全部变成「数值已变」。
+    """
+    percent = number.endswith("%")
+    rounded = f"{float(number.rstrip('%')):.10g}"
+    return rounded + ("%" if percent else "")
 
 
 def numeric_digest(rows: list[list[str]]) -> str:
@@ -276,7 +292,7 @@ def numeric_digest(rows: list[list[str]]) -> str:
         for cell in row:
             number = _parse_number(cell)
             if number is not None:
-                tokens.append(number)
+                tokens.append(_fingerprint_token(number))
     joined = "\x1f".join(tokens)
     return hashlib.sha256(joined.encode("utf-8")).hexdigest()[:16]
 
@@ -611,8 +627,8 @@ def _check_cash_flow_table(section: str, table: LogicalTable) -> Check:
     return Check(
         f"现金流量表·{section}",
         abs(delta) < 1,
-        f"{inflow:,.0f} − {outflow:,.0f} = {inflow - outflow:,.0f}，"
-        f"表列净额 {net:,.0f}（{short}）",
+        f"{_money(inflow)} − {_money(outflow)} = {_money(inflow - outflow)}，"
+        f"表列净额 {_money(net)}（{short}）",
     )
 
 
@@ -637,35 +653,76 @@ def check_cash_flow(logical: list[LogicalTable]) -> list[Check]:
     return checks
 
 
-def check_balance_sheet(logical: list[LogicalTable]) -> list[Check]:
-    """资产负债表：资产总计 = 负债合计 + 股东权益合计。"""
-    assets = equity = None
+#: 资产负债表「权益合计」的别名。新准则报表写「所有者权益(或股东权益)合计」，
+#: 旧版写「股东权益合计」——指的是同一行，只是叫法不同。
+_EQUITY_TOTAL_LABELS = (
+    "股东权益合计",
+    "所有者权益合计",
+    "所有者权益(或股东权益)合计",
+    "所有者权益（或股东权益）合计",
+)
+
+
+def _locate_row(
+    logical: list[LogicalTable],
+    labels: tuple[str, ...] | str,
+    parent_id: str | None = None,
+) -> tuple[LogicalTable, str] | None:
+    """按科目名找第一张含它的表；``parent_id`` 给定时只在该物理表内找。"""
+    wanted = {labels} if isinstance(labels, str) else set(labels)
     for table in logical:
-        labels = {row[0].strip() for row in table.rows if row}
-        if "资产总计" in labels and assets is None:
-            assets = table
-        if "负债合计" in labels and "股东权益合计" in labels and equity is None:
-            equity = table
+        if parent_id is not None and table.parent_id != parent_id:
+            continue
+        for row in table.rows:
+            if row and row[0].strip() in wanted:
+                return table, row[0].strip()
+    return None
 
-    if assets is None or equity is None:
-        return [Check("资产负债表恒等式", False, "未找到资产总计或负债/权益合计")]
 
-    col_a = _first_numeric_column(assets)
-    col_e = _first_numeric_column(equity)
-    total_assets = _row_value(assets, "资产总计", col_a)
-    total_liab = _row_value(equity, "负债合计", col_e)
-    total_equity = _row_value(equity, "股东权益合计", col_e)
+def _money(value: float) -> str:
+    """金额显示：有角分就带两位小数，整数就不带——两种口径互不打扰。"""
+    return f"{value:,.2f}" if value != int(value) else f"{value:,.0f}"
+
+
+def check_balance_sheet(logical: list[LogicalTable]) -> list[Check]:
+    """资产负债表：资产总计 = 负债合计 + 权益合计。
+
+    三项**不要求在同一张逻辑表里**：一张物理表被切成「资产 / 负债 / 权益」
+    三段是常见排版（赛力斯 2025 年报的 ``#S02`` / ``#S04`` / ``#S05``）。
+    查找顺序是「资产总计所在的那张物理表」→「全文档第一张」，
+    这样合并报表优先于母公司报表，也不改变旧文档的取表结果。
+    """
+    anchor = _locate_row(logical, "资产总计")
+    if anchor is None:
+        return [Check("资产负债表恒等式", False, "未找到资产总计")]
+    assets, assets_label = anchor
+    sibling = assets.parent_id
+
+    liability = _locate_row(logical, "负债合计", sibling) or _locate_row(logical, "负债合计")
+    equity = _locate_row(logical, _EQUITY_TOTAL_LABELS, sibling) or _locate_row(
+        logical, _EQUITY_TOTAL_LABELS
+    )
+    if liability is None or equity is None:
+        return [Check("资产负债表恒等式", False, "未找到负债合计或权益合计")]
+
+    liability_table, liability_label = liability
+    equity_table, equity_label = equity
+
+    total_assets = _row_value(assets, assets_label, _first_numeric_column(assets))
+    total_liab = _row_value(liability_table, liability_label, _first_numeric_column(liability_table))
+    total_equity = _row_value(equity_table, equity_label, _first_numeric_column(equity_table))
 
     if None in (total_assets, total_liab, total_equity):
         return [Check("资产负债表恒等式", False, "行存在但取不到数值")]
 
     delta = total_assets - total_liab - total_equity
+    aliased = "" if equity_label == "股东权益合计" else f"，权益行作「{equity_label}」"
     return [
         Check(
             "资产负债表恒等式",
             abs(delta) < 1,
-            f"资产 {total_assets:,.0f} vs 负债 {total_liab:,.0f} + 权益 {total_equity:,.0f}"
-            f"（差额 {delta:,.0f}）",
+            f"资产 {_money(total_assets)} vs 负债 {_money(total_liab)}"
+            f" + 权益 {_money(total_equity)}（差额 {_money(delta)}{aliased}）",
         )
     ]
 
