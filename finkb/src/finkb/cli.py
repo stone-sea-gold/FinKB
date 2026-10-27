@@ -211,6 +211,7 @@ def run_parse(args: argparse.Namespace) -> int:
                 f"header_source={logical.header_source}  "
                 f"section={'/'.join(logical.section_path) or '—'}"
                 + (f"  period={logical.period_label}" if logical.period_label else "")
+                + (f"  caption={logical.caption}" if logical.caption else "")
                 + " -->\n"
                 f"{logical.to_markdown()}\n",
                 encoding="utf-8",

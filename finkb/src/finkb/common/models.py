@@ -77,6 +77,23 @@ class TableBlock:
     两张表头完全相同的表（P167 的 T94/T95）在数据层无法区分年份。这里把紧邻的
     期间标签吸收到表上；空串表示没有。
     """
+    caption: str = ""
+    """表格的**表外标题**，即表格上方紧邻的那句「单项计提坏账准备的应收账款情况如下：」。
+
+    MinerU 把这类句子输出成独立的文本块，它既不是章节标题（没有 ``text_level``），
+    也不是表内标题，转换时自然丢了。可同一节里往往有好几张表（P167 的
+    T94–T98 共用 section「（2） 按坏账计提方法分类披露」），**表外标题是唯一的区分**。
+    空串表示这张表没有可用的表外标题，具体原因见 ``caption_source``。
+    """
+    caption_source: str = "missing"
+    """``caption`` 的来历，取值 ``self`` / ``text`` / ``heading`` / ``adjacent_table`` / ``missing``。
+
+    - ``self``：命中标题判据（冒号收尾，或含「如下 / 情况 / 明细 / 列示」等）。
+    - ``text``：有紧邻短句但不像标题（如「公司前 5 大客户资料」），照样收录，置信度低。
+    - ``heading``：表格上方就是标题块，语义已由 ``meta.section`` 承载，不重复记。
+    - ``adjacent_table``：紧贴上一张表（续页或并列表），本来就没有独立表名。
+    - ``missing``：紧前被正文段落 / 目录挡住，或翻到文档开头。
+    """
     page_end: int = 0
     """表格覆盖到的最后一页；``0`` 表示与 ``meta.page`` 相同（不跨页）。
 
@@ -171,6 +188,9 @@ class StitchedTable:
     table_title: str | None = None
     #: 期间标签（表格前紧邻的「2025 年」这类文本块），空串表示没有。
     period_label: str = ""
+    #: 表外标题（表格上方紧邻的那句话），空串表示没有；``caption_source`` 记来历。
+    caption: str = ""
+    caption_source: str = "missing"
 
     @property
     def ncols(self) -> int:
@@ -250,6 +270,9 @@ class LogicalTable:
     header_rows: list[list[str]] = field(default_factory=list)
     table_title: str | None = None
     period_label: str = ""
+    #: 表外标题；``caption_source`` 见 :class:`TableBlock`。
+    caption: str = ""
+    caption_source: str = "missing"
 
     @property
     def ncols(self) -> int:

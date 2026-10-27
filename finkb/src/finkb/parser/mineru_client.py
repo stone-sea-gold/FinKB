@@ -444,6 +444,29 @@ _PERIOD_LABEL_RE = re.compile(
     r"^\s*(?:19|20)\d{2}\s*年\s*(?:12\s*月\s*31\s*日)?\s*$"
 )
 
+#: 表外标题的长度上限。超过这个长度的是正文段落，不是表名（实测赛力斯
+#: P12/P13 表格上方就是成段的行业描述）。
+_CAPTION_MAX_CHARS = 80
+
+#: 表外标题的**弱**判据：冒号收尾之外，含这些词也大概率是表名。
+#: 命中记 ``self``；不命中但仍短，照样收录，记 ``text``（低置信）。
+_CAPTION_HINT_RE = re.compile(r"(如下|情况|明细|构成|列示|结构|安排)")
+
+#: 单位 / 币种声明行：已经是表格的单位元数据，不是表名。
+_UNIT_LINE_RE = re.compile(r"^(单位|币种|编制单位|金额单位)\s*[:：]")
+
+#: 复选框行。MinerU 会给「√适用 □不适用」打 ``text_level``，但它既不是章节
+#: 标题、也不是表名，两处都要排除。
+_BOX_LINE_RE = re.compile(r"[□☑√✓]")
+_BOX_LINE_MAX_CHARS = 15
+
+#: 行尾粘着的复选框尾巴。有些表名和「□适用 √不适用」被 MinerU 粘成了同一行，
+#: 去掉尾巴表名仍然可用（赛力斯 P72「前十名股东…发生变化□适用 √不适用」）。
+_BOX_TAIL_RE = re.compile(r"[□☑√✓].*$")
+
+#: 目录行（``第一节 释义....5``）。出现在表格上方是版面残留，不是表名。
+_TOC_RE = re.compile(r"\.{4,}")
+
 
 def _build_page_number_map(content_list: list[dict[str, Any]]) -> dict[int, int]:
     """建立 ``page_idx → 物理页码`` 映射。
@@ -544,6 +567,7 @@ def content_list_to_pages(
     prev_kind: str | None = None
     prev_text = ""
     prev_noise = False
+    history: list[tuple[str, str, bool]] = []
 
     for item in content_list:
         raw_page_idx = int(item.get("page_idx", 0))
@@ -558,7 +582,7 @@ def content_list_to_pages(
         if item_type == "table":
             tables_on_page[page_no] = tables_on_page.get(page_no, 0) + 1
 
-        if _is_heading(item):
+        if _is_heading(item) and not _is_box_line(text):
             current_section = text.strip()
             kind = "heading"
         elif item_type == "table":
@@ -582,12 +606,14 @@ def content_list_to_pages(
                 if prev_kind == "text" and not prev_noise and _PERIOD_LABEL_RE.match(prev_text):
                     # 期间标签是表格的元数据，不是正文里独立的一句话
                     table.period_label = prev_text.strip()
+                table.caption, table.caption_source = _resolve_caption(history)
                 # 表格块保留 Markdown 文本形态，便于落盘与人工核对
                 text = html_table_to_markdown(
                     str(item.get("table_body") or item.get("html") or "")
                 ) or text
 
         prev_kind, prev_text, prev_noise = kind, text.strip(), item_type in _NOISE_TYPES
+        history.append((kind, text.strip(), prev_noise))
 
         if kind == "heading":
             # 只有**紧邻**表格的连续标题块才可能是被拆散的表头
@@ -609,6 +635,52 @@ def content_list_to_pages(
         )
 
     return [pages[key] for key in sorted(pages)]
+
+
+def _is_box_line(text: str) -> bool:
+    """复选框行（``√适用 □不适用``）。
+
+    MinerU 会给这类行打 ``text_level``，于是它既会被当成章节标题继承进
+    ``section``（实测两家 6 张表），又会在回溯表外标题时被误取。它两个都不是。
+    """
+    stripped = text.strip()
+    return bool(_BOX_LINE_RE.search(stripped)) and len(stripped) <= _BOX_LINE_MAX_CHARS
+
+
+def _resolve_caption(history: list[tuple[str, str, bool]]) -> tuple[str, str]:
+    """从表格之前的内容块里回溯，找出这张表的**表外标题**。
+
+    ``history`` 的元素是 ``(kind, text, is_noise)``，按出现顺序排列。
+
+    Returns:
+        ``(caption, caption_source)``；``caption_source`` 的取值见
+        :attr:`finkb.common.models.TableBlock.caption_source`。
+    """
+    for kind, text, is_noise in reversed(history):
+        if is_noise:
+            continue
+        if kind in {"table", "image", "code"}:
+            return "", "adjacent_table"
+        stripped = text.strip()
+        if not stripped:
+            continue
+        if _PERIOD_LABEL_RE.match(stripped) or _UNIT_LINE_RE.match(stripped):
+            continue  # 已经是表的元数据，不是表名
+        if _TOC_RE.search(stripped):
+            continue  # 目录行是版面残留
+        if _is_box_line(stripped):
+            continue
+        stripped = _BOX_TAIL_RE.sub("", stripped).strip()
+        if not stripped:
+            continue
+        if kind == "heading":
+            return "", "heading"
+        if len(stripped) > _CAPTION_MAX_CHARS:
+            return "", "missing"
+        if stripped.endswith(("：", ":")) or _CAPTION_HINT_RE.search(stripped):
+            return stripped, "self"
+        return stripped, "text"
+    return "", "missing"
 
 
 def _extend_page_end(

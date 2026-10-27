@@ -39,6 +39,11 @@ TABLE_HTML = (
 )
 
 
+def _table_blocks(content_list: list[dict[str, object]]):
+    pages = content_list_to_pages(content_list, DOC)
+    return [block.table for page in pages for block in page.blocks if block.table is not None]
+
+
 def _only_table_block(content_list: list[dict[str, object]]):
     pages = content_list_to_pages(content_list, DOC)
     (block,) = [block for page in pages for block in page.blocks if block.table is not None]
@@ -545,3 +550,213 @@ def test_non_period_text_before_table_is_not_a_label() -> None:
     ]
 
     assert _only_table_block(content_list).period_label == ""
+
+
+def test_caption_comes_from_the_adjacent_plain_text_block() -> None:
+    """P167：表外那句「单项计提坏账准备的应收账款情况如下：」是这张表的名字。"""
+    content_list = [
+        {"type": "text", "text": "（2） 按坏账计提方法分类披露", "text_level": 2, "page_idx": 0},
+        {"type": "text", "text": "单项计提坏账准备的应收账款情况如下：", "page_idx": 0},
+        {
+            "type": "table",
+            "table_body": "<table><tr><td>名称</td><td>账面余额</td></tr></table>",
+            "page_idx": 0,
+        },
+    ]
+    table = _only_table_block(content_list)
+
+    assert table.caption == "单项计提坏账准备的应收账款情况如下："
+    assert table.caption_source == "self"
+    assert table.meta.section == "（2） 按坏账计提方法分类披露"
+
+
+def test_caption_is_empty_when_the_heading_already_names_the_table() -> None:
+    content_list = [
+        {"type": "text", "text": "（3） 坏账准备的情况", "text_level": 2, "page_idx": 0},
+        {
+            "type": "table",
+            "table_body": "<table><tr><td>年初</td><td>1</td></tr></table>",
+            "page_idx": 0,
+        },
+    ]
+    table = _only_table_block(content_list)
+
+    assert table.caption == ""
+    assert table.caption_source == "heading"
+
+
+def test_caption_scan_skips_unit_and_period_lines() -> None:
+    """单位声明与期间标签是元数据，跨过它们仍应摸到标题。"""
+    content_list = [
+        {"type": "text", "text": "2、交易性金融资产", "text_level": 2, "page_idx": 0},
+        {"type": "text", "text": "单位：元 币种：人民币", "page_idx": 0},
+        {"type": "text", "text": "2025 年", "page_idx": 0},
+        {
+            "type": "table",
+            "table_body": "<table><tr><td>合计</td><td>1</td></tr></table>",
+            "page_idx": 0,
+        },
+    ]
+    table = _only_table_block(content_list)
+
+    assert table.caption == ""
+    assert table.caption_source == "heading"
+    assert table.period_label == "2025 年"
+
+
+def test_caption_marks_adjacent_table() -> None:
+    """两张表紧贴在一起，第二张没有独立的表外标题。"""
+    content_list = [
+        {
+            "type": "table",
+            "table_body": "<table><tr><td>甲</td><td>1</td></tr></table>",
+            "page_idx": 0,
+        },
+        {
+            "type": "table",
+            "table_body": "<table><tr><td>乙</td><td>2</td></tr></table>",
+            "page_idx": 0,
+        },
+    ]
+    _first, second = _table_blocks(content_list)
+
+    assert second.caption == ""
+    assert second.caption_source == "adjacent_table"
+
+
+def test_caption_low_confidence_for_short_noun_phrase() -> None:
+    """「公司前 5 大客户资料」没有冒号也没有「如下」，仍是表名，只是判据拿不准。"""
+    content_list = [
+        {"type": "text", "text": "公司前 5 大客户资料", "page_idx": 0},
+        {
+            "type": "table",
+            "table_body": "<table><tr><td>客户</td><td>金额</td></tr></table>",
+            "page_idx": 0,
+        },
+    ]
+    table = _only_table_block(content_list)
+
+    assert table.caption == "公司前 5 大客户资料"
+    assert table.caption_source == "text"
+
+
+def test_box_line_is_not_treated_as_a_heading() -> None:
+    """「√适用 □不适用」被 MinerU 标了 text_level，但它不是章节标题。"""
+    content_list = [
+        {"type": "text", "text": "√适用 □不适用", "text_level": 2, "page_idx": 0},
+        {
+            "type": "table",
+            "table_body": "<table><tr><td>项目</td><td>1</td></tr></table>",
+            "page_idx": 0,
+        },
+    ]
+    table = _only_table_block(content_list)
+
+    assert table.meta.section is None
+
+
+# --------------------------------------------------------------------------- #
+# 表外标题（caption）
+# --------------------------------------------------------------------------- #
+def test_caption_comes_from_the_sentence_above_the_table() -> None:
+    """P167 T96：表格上方那句「…情况如下：」就是这张表的表名。"""
+    content_list = [
+        {"type": "text", "text": "单项计提坏账准备的应收账款情况如下：", "page_idx": 166},
+        {"type": "table", "table_body": TABLE_HTML, "page_idx": 166},
+    ]
+    table = _only_table_block(content_list)
+    assert table.caption == "单项计提坏账准备的应收账款情况如下："
+    assert table.caption_source == "self"
+
+
+def test_caption_is_empty_when_the_table_is_named_by_a_heading() -> None:
+    content_list = [
+        {"type": "text", "text": "（2） 按坏账计提方法分类披露", "text_level": 1, "page_idx": 166},
+        {"type": "table", "table_body": TABLE_HTML, "page_idx": 166},
+    ]
+    table = _only_table_block(content_list)
+    assert table.caption == ""
+    assert table.caption_source == "heading"
+
+
+def test_caption_skips_period_label_and_unit_line() -> None:
+    """「2025 年」「单位：元」是元数据，不能顶替表名。"""
+    content_list = [
+        {"type": "text", "text": "（2） 按坏账计提方法分类披露", "text_level": 1, "page_idx": 166},
+        {"type": "text", "text": "单位：元", "page_idx": 166},
+        {"type": "text", "text": "2025 年", "page_idx": 166},
+        {"type": "table", "table_body": TABLE_HTML, "page_idx": 166},
+    ]
+    table = _only_table_block(content_list)
+    assert table.caption == ""
+    assert table.caption_source == "heading"
+    assert table.period_label == "2025 年"
+
+
+def test_caption_marks_a_table_glued_to_the_previous_one() -> None:
+    content_list = [
+        {"type": "table", "table_body": TABLE_HTML, "page_idx": 166},
+        {"type": "table", "table_body": TABLE_HTML, "page_idx": 166},
+    ]
+    pages = content_list_to_pages(content_list, DOC)
+    tables = [b.table for p in pages for b in p.blocks if b.table is not None]
+    assert tables[-1] is not None
+    assert tables[-1].caption == ""
+    assert tables[-1].caption_source == "adjacent_table"
+
+
+def test_caption_collects_a_short_phrase_that_is_not_a_textbook_title() -> None:
+    """「公司前 5 大客户资料」没有冒号、没有「如下」，但它确实是表名。"""
+    content_list = [
+        {"type": "text", "text": "公司前 5 大客户资料", "page_idx": 30},
+        {"type": "table", "table_body": TABLE_HTML, "page_idx": 30},
+    ]
+    table = _only_table_block(content_list)
+    assert table.caption == "公司前 5 大客户资料"
+    assert table.caption_source == "text"
+
+
+def test_caption_is_missing_when_a_paragraph_blocks_the_way() -> None:
+    content_list = [
+        {"type": "text", "text": "产业趋势的转变要求车企变革发展理念，从产品导向转向用户导向。" * 3, "page_idx": 12},
+        {"type": "table", "table_body": TABLE_HTML, "page_idx": 12},
+    ]
+    table = _only_table_block(content_list)
+    assert table.caption == ""
+    assert table.caption_source == "missing"
+
+
+def test_box_line_is_neither_a_heading_nor_a_caption() -> None:
+    """「√适用 □不适用」带 text_level，但既不是章节标题也不是表名。"""
+    content_list = [
+        {"type": "text", "text": "（四） 利润分配政策", "text_level": 1, "page_idx": 70},
+        {"type": "text", "text": "√适用 □不适用", "text_level": 2, "page_idx": 70},
+        {"type": "table", "table_body": TABLE_HTML, "page_idx": 70},
+    ]
+    table = _only_table_block(content_list)
+    assert table.meta.section == "（四） 利润分配政策"
+    assert table.caption_source == "heading"
+
+
+def test_caption_skips_the_financial_statement_signature_line() -> None:
+    """「编制单位：赛力斯集团股份有限公司」是报表抬头，不是表名（实测 9 处）。"""
+    content_list = [
+        {"type": "text", "text": "合并资产负债表", "text_level": 1, "page_idx": 79},
+        {"type": "text", "text": "编制单位：赛力斯集团股份有限公司", "page_idx": 79},
+        {"type": "table", "table_body": TABLE_HTML, "page_idx": 79},
+    ]
+    table = _only_table_block(content_list)
+    assert table.caption == ""
+    assert table.caption_source == "heading"
+
+
+def test_caption_strips_a_trailing_checkbox_glued_to_the_sentence() -> None:
+    """赛力斯 P72：表名和「□适用 √不适用」被 MinerU 粘成了同一行。"""
+    content_list = [
+        {"type": "text", "text": "前十名股东因转融通出借原因导致较上期发生变化□适用 √不适用", "page_idx": 71},
+        {"type": "table", "table_body": TABLE_HTML, "page_idx": 71},
+    ]
+    table = _only_table_block(content_list)
+    assert table.caption == "前十名股东因转融通出借原因导致较上期发生变化"
+    # 去掉复选框尾巴后剩下的是短名词短语，没有冒号也没有提示词 ⇒ 低置信档
+    assert table.caption_source == "text"
