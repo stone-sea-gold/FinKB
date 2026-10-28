@@ -281,6 +281,30 @@ def _fingerprint_token(number: str) -> str:
     return rounded + ("%" if percent else "")
 
 
+def _has_bad_grouping(cell: str) -> bool:
+    """千分位分组不合法：``602,855430,242``（两个数粘在一起）、``0,01%``（小数逗号）。
+
+    合法写法只有「首组 1–3 位、其余每组恰好 3 位」。粘连与小数逗号都会破坏这条规则，
+    而它们都会让数字本身变成错的——比列名错更值得报出来。
+    """
+    text = cell.strip().lstrip("-+").rstrip("%").replace("(", "").replace(")", "")
+    if "," not in text or _parse_number(text) is None:
+        return False
+    groups = text.split(".")[0].split(",")
+    return not (1 <= len(groups[0]) <= 3 and all(len(group) == 3 for group in groups[1:]))
+
+
+def find_malformed_numbers(logical: list[LogicalTable]) -> list[tuple[str, int, str]]:
+    """返回 ``(logical_id, 行号, 单元格原文)``；行号从 0 起。"""
+    found: list[tuple[str, int, str]] = []
+    for table in logical:
+        for index, row in enumerate(table.rows):
+            for cell in row:
+                if _has_bad_grouping(cell):
+                    found.append((table.logical_id, index, cell.strip()))
+    return found
+
+
 def numeric_digest(rows: list[list[str]]) -> str:
     """数据行里全部数值的有序指纹。
 
@@ -1576,6 +1600,25 @@ def _cmd_headers(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_numbers(args: argparse.Namespace) -> int:
+    parsed_dir = Path(args.doc)
+    _, _, _, logical = _analyze(parsed_dir)
+    found = find_malformed_numbers(logical)
+    lines = [f"# 数字格式异常：{parsed_dir.name}", ""]
+    if not found:
+        lines.append("没有发现千分位分组异常的数字。")
+    else:
+        lines += [f"共 {len(found)} 处。", "",
+                  "| 表号 | 行 | 单元格 |", "| --- | --- | --- |"]
+        lines += [f"| `{tid}` | {row} | `{cell}` |" for tid, row, cell in found]
+    text = "\n".join(lines) + "\n"
+    if args.out:
+        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.out).write_text(text, encoding="utf-8")
+    print(text)
+    return 0 if not found else 4
+
+
 def _cmd_rowspan(args: argparse.Namespace) -> int:
     report = render_rowspan_report(Path(args.doc).expanduser().resolve())
     if args.out:
@@ -1800,6 +1843,10 @@ def build_parser() -> argparse.ArgumentParser:
     spans.add_argument("--out", help="报告输出路径（.md），省略则打印到标准输出")
     spans.set_defaults(func=_cmd_page_spans)
 
+    numbers = sub.add_parser("numbers", help="数字格式异常（千分位粘连、小数逗号）")
+    numbers.add_argument("--doc", required=True)
+    numbers.add_argument("--out")
+    numbers.set_defaults(func=_cmd_numbers)
     rowspan = sub.add_parser("rowspan", help="rowspan 展开前后逐行对照")
     rowspan.add_argument("--doc", required=True, help="已解析目录，如 data/parsed/002594_2025_年报")
     rowspan.add_argument("--out", help="报告输出路径（.md），省略则打印到标准输出")

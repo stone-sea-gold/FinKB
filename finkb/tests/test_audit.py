@@ -611,3 +611,14 @@ def test_recall_report_says_when_everything_matches() -> None:
     )
     assert "全部对上" in report
     assert "# 原文召回：d" in report
+
+
+def test_bad_grouping_catches_glued_numbers() -> None:
+    """``602,855430,242`` 是两个数字粘在一起，任何一个读出来都是错的。"""
+    import audit
+
+    assert audit._has_bad_grouping("602,855430,242")
+    assert audit._has_bad_grouping("0,01%")
+    assert not audit._has_bad_grouping("602,855")
+    assert not audit._has_bad_grouping("1,234,567.89")
+    assert not audit._has_bad_grouping("123")
