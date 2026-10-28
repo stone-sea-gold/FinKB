@@ -794,12 +794,19 @@ def check_balance_sheet(logical: list[LogicalTable]) -> list[Check]:
 
     delta = total_assets - total_liab - total_equity
     aliased = "" if equity_label == "股东权益合计" else f"，权益行作「{equity_label}」"
+    # 财报本身就是四舍五入后的整数元，三项加起来可能与合计差几块钱；广汽的母公司报表
+    # 差 2 元、上年同期那一列却分毫不差，PDF 原文三个数都对得上——是报表自己的事。
+    # 容差**只按相对量级**给（一百亿分之一）：2000 亿的报表允许差 21 元，
+    # 一亿的报表只允许差 0.01 元——所以真读错一位，小公司一定报错。
+    # 大公司里 1 元的读错确实看不出来，这是算术本身的分辨率极限，认了。
+    tolerance = abs(total_assets) * 1e-10
+    rounded = "" if abs(delta) < 1 else "，视为报表自身四舍五入"
     return [
         Check(
             "资产负债表恒等式",
-            abs(delta) < 1,
+            abs(delta) <= tolerance,
             f"资产 {_money(total_assets)} vs 负债 {_money(total_liab)}"
-            f" + 权益 {_money(total_equity)}（差额 {_money(delta)}{aliased}）",
+            f" + 权益 {_money(total_equity)}（差额 {_money(delta)}{aliased}{rounded}）",
         )
     ]
 

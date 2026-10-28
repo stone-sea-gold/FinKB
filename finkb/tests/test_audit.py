@@ -622,3 +622,26 @@ def test_bad_grouping_catches_glued_numbers() -> None:
     assert not audit._has_bad_grouping("602,855")
     assert not audit._has_bad_grouping("1,234,567.89")
     assert not audit._has_bad_grouping("123")
+
+
+def test_balance_sheet_tolerates_rounding_but_not_a_misread_digit() -> None:
+    """报表四舍五入允许差几块钱；读错一位（差 100 元）必须报错。"""
+    import audit
+
+    def sheet(assets: int, liab: int, equity: int) -> list:
+        def table(name: str, label: str, value: int):
+            return audit.LogicalTable(
+                logical_id=name, parent_id=name, header=["项目", "金额"],
+                header_source="self", section_path=[], rows=[[label, f"{value:,}"]],
+                page_start=1, page_end=1, row_range=(0, 1), kind="data",
+            )
+        return [
+            table("a", "资产总计", assets),
+            table("b", "负债合计", liab),
+            table("c", "所有者权益合计", equity),
+        ]
+
+    rounded = audit.check_balance_sheet(sheet(214_943_407_093, 105_259_714_163, 109_683_692_932))
+    assert all(check.ok for check in rounded)
+    broken = audit.check_balance_sheet(sheet(214_943_407_193, 105_259_714_163, 109_683_692_932))
+    assert not all(check.ok for check in broken)
