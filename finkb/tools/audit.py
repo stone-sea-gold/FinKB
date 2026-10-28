@@ -1684,6 +1684,98 @@ def _cmd_unit_map(args: argparse.Namespace) -> int:
     return 0
 
 
+_RECALL_NUMBER_RE = re.compile(r"\d{6,}(?:\.\d+)?")
+_SEPARATOR_RE = re.compile(r"[,，\s]")
+
+
+def _page_haystacks(pages, stitched) -> dict[int, str]:
+    """每页可用的数字串：覆盖该页的表格 + 该页的文本块，去掉千分位与空白。
+
+    拼接后直接做**子串**比对。PDF 抽取常把一个数字拆到两行、或把两个数字粘成一串，
+    用正则会两边都判错；子串比对对这两种失真都免疫。
+    """
+    hay: dict[int, str] = {}
+    for table in stitched:
+        text = _SEPARATOR_RE.sub("", "".join(cell for row in table.rows for cell in row))
+        for page in range(table.page_start, table.page_end + 1):
+            hay[page] = hay.get(page, "") + text
+    for page in pages:
+        text = _SEPARATOR_RE.sub("", "".join(block.text for block in page.blocks))
+        hay[page.number] = hay.get(page.number, "") + text
+    return hay
+
+
+def check_recall(parsed_dir: Path, pdf_path: Path) -> dict:
+    """PDF 原文里的每个数字，是否都能在解析结果里找到（召回率）。"""
+    _, pages, stitched, _ = _analyze(parsed_dir)
+    texts = _pdf_page_texts(pdf_path)
+    if texts is None:
+        raise SystemExit("需要 pymupdf 或 pypdf 才能读 PDF 原文")
+    hay = _page_haystacks(pages, stitched)
+    whole = "".join(hay.values())
+    total = covered = elsewhere = 0
+    misses: list[tuple[int, list[str]]] = []
+    for index, text in enumerate(texts, start=1):
+        numbers = set(_RECALL_NUMBER_RE.findall(_SEPARATOR_RE.sub("", text)))
+        page_hay = hay.get(index, "")
+        missing = sorted(number for number in numbers if number not in page_hay)
+        total += len(numbers)
+        covered += len(numbers) - len(missing)
+        elsewhere += sum(1 for number in missing if number in whole)
+        if missing:
+            misses.append((index, missing))
+    return {
+        "doc_id": parsed_dir.name,
+        "total": total,
+        "covered": covered,
+        "elsewhere": elsewhere,
+        "misses": misses,
+    }
+
+
+def render_recall_report(result: dict) -> str:
+    """把召回率结果渲染成 Markdown。"""
+    total = result["total"]
+    covered = result["covered"]
+    misses = result["misses"]
+    lines = [
+        f"# 原文召回：{result['doc_id']}",
+        "",
+        f"- PDF 原文数字：**{total}** 个",
+        f"- 页内能对上：**{covered}** 个（**{covered * 100 // max(total, 1)}%**）",
+        f"- 页内对不上但**全文档能找到**：**{result['elsewhere']}** 个（归属页不对，不是丢失）",
+        f"- 真正找不到：**{total - covered - result['elsewhere']}** 个",
+        f"- 有缺口的页：**{len(misses)}** 页",
+        "",
+        "> 比对口径：数字去掉千分位与空白后做**子串**比对，对「PDF 抽取把数字拆行 /",
+        "> 粘串」这两种失真都免疫。表按 `page_start..page_end` 覆盖页归属。",
+        "",
+        "## 对不上的页",
+        "",
+        "| 页 | 个数 | 样例 |",
+        "| --- | --- | --- |",
+    ]
+    for page, missing in misses:
+        lines.append(f"| {page} | {len(missing)} | {'、'.join(missing[:4])} |")
+    if not misses:
+        lines.append("| — | 0 | 全部对上 |")
+    return "\n".join(lines) + "\n"
+
+
+def _cmd_recall(args: argparse.Namespace) -> int:
+    """统计原文数字被解析结果覆盖的比例。"""
+    result = check_recall(Path(args.doc), Path(args.pdf))
+    report = render_recall_report(result)
+    if args.out:
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(report, encoding="utf-8")
+        print(f"报告已写入 {out}")
+    else:
+        print(report)
+    return 0 if result["covered"] == result["total"] else 4
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="审计与核验：快照 / 对照 / 守恒律 / 人工核验清单",
@@ -1695,6 +1787,12 @@ def build_parser() -> argparse.ArgumentParser:
     cells.add_argument("--pdf", required=True)
     cells.add_argument("--out")
     cells.set_defaults(func=_cmd_verify_cells)
+
+    recall = sub.add_parser("recall", help="原文数字召回：PDF 里的每个数字能否在解析结果里找到")
+    recall.add_argument("--doc", required=True)
+    recall.add_argument("--pdf", required=True)
+    recall.add_argument("--out")
+    recall.set_defaults(func=_cmd_recall)
 
     spans = sub.add_parser("page-spans", help="跨页表页码区间核验")
     spans.add_argument("--doc", required=True, help="已解析目录")

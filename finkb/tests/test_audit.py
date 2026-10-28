@@ -587,3 +587,27 @@ def test_parse_fingerprint_accepts_current_stamp(tmp_path):
         '{"pipeline_fingerprint": "%s"}' % pipeline_fingerprint(), encoding="utf-8"
     )
     assert audit._check_fingerprint(tmp_path).ok
+
+
+def test_recall_haystack_spans_table_pages_and_text_blocks() -> None:
+    """一张跨 1–2 页的表，它的数字要同时出现在两页的「可对上」集合里。"""
+    from types import SimpleNamespace
+
+    table = SimpleNamespace(page_start=1, page_end=2, rows=[["12,345,678.90", "1"]])
+    pages = [
+        SimpleNamespace(number=1, blocks=[SimpleNamespace(text="补充 7,654,321 元")]),
+        SimpleNamespace(number=2, blocks=[]),
+    ]
+    hay = audit._page_haystacks(pages, [table])
+
+    assert "12345678.90" in hay[1]
+    assert "12345678.90" in hay[2]
+    assert "7654321" in hay[1]
+
+
+def test_recall_report_says_when_everything_matches() -> None:
+    report = audit.render_recall_report(
+        {"doc_id": "d", "total": 5, "covered": 5, "elsewhere": 0, "misses": []}
+    )
+    assert "全部对上" in report
+    assert "# 原文召回：d" in report
