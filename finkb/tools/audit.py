@@ -595,11 +595,35 @@ def _row_value(table: LogicalTable, label: str, column: int = 0) -> float | None
     return None
 
 
+def _looks_like_money(cell: str) -> bool:
+    """金额单元格：带千分位或小数点，或至少 5 位数字。
+
+    附注号的「62」「61」不是金额，靠这条排除——否则现金流量表的「附注七」列
+    会被当成金额列。
+    """
+    if _parse_number(cell) is None:
+        return False
+    digits = cell.replace(",", "").replace(".", "").replace("-", "").strip("%")
+    return "," in cell or "." in cell or len(digits) >= 5
+
+
 def _first_numeric_column(table: LogicalTable) -> int:
-    """找出第一个「多数单元格是纯数值」的列下标。"""
+    """当期金额所在列。
+
+    取**最左边**那个「多数行是金额」的列，而不是数值最多的列：两期并排时上期
+    那列往往更满（本期有空白），按「最多」会选到上期，把上期净额当成本期
+    （000625 半年报 `P42-P43_T37#S02` 就这么错了）。没有明显金额列时退回
+    数值最多的旧规则。
+    """
     if not table.rows:
         return 1
     width = max(len(row) for row in table.rows)
+    for col in range(1, width):
+        hits = sum(
+            1 for row in table.rows if col < len(row) and _looks_like_money(row[col])
+        )
+        if hits * 2 >= len(table.rows):
+            return col
     best, best_hits = 1, -1
     for col in range(1, width):
         hits = sum(
@@ -612,12 +636,31 @@ def _first_numeric_column(table: LogicalTable) -> int:
     return best
 
 
+def _amount_in_column(table: LogicalTable, label: str, column: int) -> float | None:
+    """取指定行在指定列上的金额；**单元格为空**（不是缺行）时记 0。
+
+    母公司现金流量表常整段留空（本期没有筹资流入），PDF 原文就是空的，
+    按 0 处理才符合恒等式；真丢数据时等式仍然对不上，不会被掩盖。
+    """
+    for row in table.rows:
+        if not row or row[0].strip() != label:
+            continue
+        if column < len(row):
+            number = _parse_number(row[column])
+            if number is not None:
+                return float(number.rstrip("%"))
+            if not row[column].strip():
+                return 0.0
+        return None
+    return None
+
+
 def _check_cash_flow_table(section: str, table: LogicalTable) -> Check:
     """单张现金流量表的三段恒等式。"""
     short = table.logical_id.split("#", 1)[-1]
     col = _first_numeric_column(table)
-    inflow = _row_value(table, f"{section}现金流入小计", col)
-    outflow = _row_value(table, f"{section}现金流出小计", col)
+    inflow = _amount_in_column(table, f"{section}现金流入小计", col)
+    outflow = _amount_in_column(table, f"{section}现金流出小计", col)
     net = None
     for row in table.rows:
         label = row[0].strip() if row else ""

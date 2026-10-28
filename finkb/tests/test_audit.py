@@ -484,3 +484,60 @@ def test_rename_pairing_matches_same_table_after_page_range_change() -> None:
     markdown, _ = audit.diff_snapshots(before, after)
 
     assert "改号 1 张" in markdown
+
+
+# --------------------------------------------------------------------------- #
+# 现金流量表：取哪一列、空单元格怎么算
+# --------------------------------------------------------------------------- #
+def test_amount_column_is_the_leftmost_money_column() -> None:
+    """两期并排时，上期那列可能更满，不能按「数值最多」选。
+
+    000625 半年报 P42-P43_T37#S02：本期（第 1 列）有两格空白，上期（第 2 列）
+    满格；按「最多」会取到上期，把上期净额当成本期。
+    """
+    table = make_table(
+        [
+            ["取得投资收益收到的现金", "418,072,106.70", "298,979,999.95"],
+            ["收到其他与投资活动有关的现金", "", "5,550,500,000.00"],
+            ["投资活动现金流入小计", "572,123,897.11", "5,862,228,015.54"],
+            ["投资活动现金流出小计", "3,105,615,678.84", "2,818,618,769.37"],
+            ["投资活动产生的现金流量净额", "-2,533,491,781.73", "3,043,609,246.17"],
+        ],
+        header=["项目", "2025年半年度", "2024年半年度"],
+    )
+
+    assert audit._first_numeric_column(table) == 1
+    check = audit._check_cash_flow_table("投资活动", table)
+    assert check.ok, check.detail
+
+
+def test_note_number_column_is_not_taken_as_money() -> None:
+    """「附注七」列里也有数字（62、61），但不能被当成金额列。"""
+    table = make_table(
+        [
+            ["销售商品、提供劳务收到的现金", "61", "59,135,544", "133,453,873"],
+            ["经营活动现金流入小计", "62", "861,740,107", "802,604,563"],
+            ["经营活动现金流出小计", "", "802,604,563", "700,000,000"],
+            ["经营活动产生的现金流量净额", "", "59,135,544", "102,604,563"],
+        ],
+        header=["项目", "附注七", "2025年", "2024年"],
+    )
+
+    assert audit._first_numeric_column(table) == 2
+
+
+def test_blank_subtotal_counts_as_zero() -> None:
+    """母公司现金流量表整段留空（本期没有筹资流入），PDF 原文就是空的。"""
+    table = make_table(
+        [
+            ["筹资活动现金流入小计", "", ""],
+            ["筹资活动现金流出小计", "76,666,556.36", "3,453,081,963.24"],
+            ["筹资活动产生的现金流量净额", "-76,666,556.36", "-3,453,081,963.24"],
+        ],
+        header=["项目", "2025年半年度", "2024年半年度"],
+    )
+
+    assert audit._amount_in_column(table, "筹资活动现金流入小计", 1) == 0.0
+    assert audit._amount_in_column(table, "不存在的行", 1) is None
+    check = audit._check_cash_flow_table("筹资活动", table)
+    assert check.ok, check.detail
