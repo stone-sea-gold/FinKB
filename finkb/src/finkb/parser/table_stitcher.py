@@ -177,6 +177,34 @@ def _can_merge(
     return verdict == "merge", reason
 
 
+def _prune_empty_columns(table: StitchedTable) -> None:
+    """删掉「表头没名字、数据也全空」的列（就地修改）。
+
+    MinerU 会为跨行合并或版面留白补出整列空格子：``股东名称|''|持有…|''|股份种类|数量|''``
+    里第 4、7 列永远是空串。留着它们只是把宽度撑大——按列名取值时每个空列都要多判断
+    一次，而且同一张表的不同分片会因此列数不一。
+
+    **只缝合之后做**：缝合前删列会改变分片宽度，让本来就该拒的 16/15 变成别的数字，
+    属于用副作用换副作用。
+    """
+    header = table.header or []
+    width = max([len(header)] + [len(row) for row in table.rows]) if (header or table.rows) else 0
+    keep = [
+        column
+        for column in range(width)
+        if (column < len(header) and header[column].strip())
+        or any(column < len(row) and row[column].strip() for row in table.rows)
+    ]
+    if not keep or len(keep) == width:
+        return
+    if table.header:
+        table.header = [table.header[c] if c < len(table.header) else "" for c in keep]
+    table.header_rows = [
+        [row[c] if c < len(row) else "" for c in keep] for row in table.header_rows
+    ]
+    table.rows = [[row[c] if c < len(row) else "" for c in keep] for row in table.rows]
+
+
 def stitch_tables(
     pages: Sequence[Page],
     options: StitchOptions | None = None,
@@ -225,6 +253,7 @@ def stitch_tables(
                 caption=first.caption,
                 caption_source=first.caption_source,
             )
+            _prune_empty_columns(stitched)
 
             pages_touched = [first.page]
             reasons: list[str] = []

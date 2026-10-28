@@ -420,3 +420,21 @@ def test_is_total_row_helper() -> None:
     assert is_total_row(["资产总计", "", "164,831,252"], _TOTAL_MARKERS)
     assert not is_total_row(["营业收入", "1"], _TOTAL_MARKERS)
     assert not is_total_row([], _TOTAL_MARKERS)
+
+
+def test_fully_empty_columns_are_dropped_after_stitching() -> None:
+    """MinerU 补出的整列空格子要删掉（``股东名称|''|数量`` 里第 2 列）。"""
+    from finkb.common.models import DocMeta, Page, TableBlock
+    from finkb.parser.table_stitcher import stitch_tables
+
+    table = TableBlock(
+        meta=DocMeta(doc_id="d", page=1),
+        header=["股东名称", "", "持股数量"],
+        rows=[["比亚迪", "", "1,783"], ["长安", "", "2,456"]],
+        header_rows=[["股东名称", "", "持股数量"]],
+    )
+    page = Page(number=1, blocks=[Block(meta=DocMeta(doc_id="d", page=1), kind="table", lines=[], table=table)])
+    stitched = stitch_tables([page]).tables[0]
+    assert stitched.header == ["股东名称", "持股数量"]
+    assert stitched.rows == [["比亚迪", "1,783"], ["长安", "2,456"]]
+    assert {len(row) for row in stitched.rows} == {2}
