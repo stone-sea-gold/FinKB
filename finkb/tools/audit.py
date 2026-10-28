@@ -1900,8 +1900,12 @@ def _cmd_recall(args: argparse.Namespace) -> int:
 BASELINE_SCHEMA = 1
 
 
-def collect_corpus(root: Path) -> list[dict]:
-    """把整份语料过一遍，返回每份文档的指标行。"""
+def collect_corpus(root: Path, pdf_root: Path | None = None) -> list[dict]:
+    """把整份语料过一遍，返回每份文档的指标行。
+
+    给了 ``pdf_root`` 就顺带做数值回查——那是唯一从**外部**（PDF 原文）证明
+    「数字没被解析错、页码没算错」的检查，代价是每份多读一次 PDF（本地，不耗额度）。
+    """
     rows = []
     for doc in sorted(p for p in root.iterdir() if p.is_dir() and not p.name.startswith("_")):
         if not (doc / "content_list.json").exists():
@@ -1910,9 +1914,20 @@ def collect_corpus(root: Path) -> list[dict]:
         checks = check_invariants(doc)
         failed = [check for check in checks if not check.ok]
         with_header = sum(1 for table in logical if table.header)
+        checked = missing = 0
+        shift = 0
+        if pdf_root is not None:
+            pdf = pdf_root / f"{doc.name}.pdf"
+            if pdf.exists():
+                results, shift, _ = verify_cells(doc, pdf)
+                checked = sum(item["checked"] for item in results)
+                missing = sum(len(item["missing"]) for item in results)
         rows.append(
             {
                 "doc": doc.name,
+                "verify_checked": checked,
+                "verify_missing": missing,
+                "verify_shift": shift,
                 "pages": len(pages),
                 "logical": len(logical),
                 "header": with_header,
@@ -1948,6 +1963,11 @@ def compare_with_baseline(rows: list[dict], baseline: dict) -> list[str]:
             problems.append(
                 f"`{doc}` 守恒律通过 {old['invariants']} → {row['invariants']}"
             )
+        if row.get("verify_missing", 0) > old.get("verify_missing", 0):
+            problems.append(
+                f"`{doc}` 数值回查查不到 {old.get('verify_missing', 0)} → "
+                f"{row['verify_missing']} 个"
+            )
     return problems
 
 
@@ -1962,6 +1982,8 @@ def write_baseline(rows: list[dict], target: Path) -> None:
                 "header": row["header"],
                 "invariants": row["invariants"],
                 "total_invariants": row["total_invariants"],
+                "verify_checked": row.get("verify_checked", 0),
+                "verify_missing": row.get("verify_missing", 0),
             }
             for row in rows
         },
@@ -1972,7 +1994,7 @@ def write_baseline(rows: list[dict], target: Path) -> None:
 
 def _cmd_baseline(args: argparse.Namespace) -> int:
     """写入或展示语料基线。"""
-    rows = collect_corpus(Path(args.root))
+    rows = collect_corpus(Path(args.root), Path(args.pdf_root) if args.pdf_root else None)
     target = Path(args.out)
     write_baseline(rows, target)
     print(f"基线已写入 {target}（{len(rows)} 份）")
@@ -1984,7 +2006,7 @@ def _cmd_corpus(args: argparse.Namespace) -> int:
 
     每改一版解析代码就跑一次，比逐份点命令快得多；哪一份退步一眼能看见。
     """
-    rows = collect_corpus(Path(args.root))
+    rows = collect_corpus(Path(args.root), Path(args.pdf_root) if args.pdf_root else None)
     problems: list[str] = []
     if args.baseline:
         path = Path(args.baseline)
@@ -2058,11 +2080,13 @@ def build_parser() -> argparse.ArgumentParser:
     corpus.add_argument("--root", default="data/parsed")
     corpus.add_argument("--out")
     corpus.add_argument("--baseline", help="对照基线 JSON；退步时退出码 4")
+    corpus.add_argument("--pdf-root", help="PDF 目录；给了就顺带做数值回查")
     corpus.set_defaults(func=_cmd_corpus)
 
     baseline = sub.add_parser("baseline", help="写入语料基线（供以后对照退步）")
     baseline.add_argument("--root", default="data/parsed")
     baseline.add_argument("--out", default="config/corpus-baseline.json")
+    baseline.add_argument("--pdf-root", help="PDF 目录；给了就把数值回查结果一起写进基线")
     baseline.set_defaults(func=_cmd_baseline)
     numbers = sub.add_parser("numbers", help="数字格式异常（千分位粘连、小数逗号）")
     numbers.add_argument("--doc", required=True)

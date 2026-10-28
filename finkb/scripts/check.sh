@@ -15,4 +15,4 @@ echo "== 单元测试 =="
 
 echo
 echo "== 全语料守恒律 + 基线对照 =="
-"$PYTHON" tools/audit.py corpus --baseline config/corpus-baseline.json
+"$PYTHON" tools/audit.py corpus --baseline config/corpus-baseline.json --pdf-root ../raw

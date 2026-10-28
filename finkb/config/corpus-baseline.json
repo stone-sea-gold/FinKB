@@ -6,154 +6,198 @@
       "logical": 16,
       "header": 15,
       "invariants": 10,
-      "total_invariants": 10
+      "total_invariants": 10,
+      "verify_checked": 163,
+      "verify_missing": 0
     },
     "000625_2025_三季报": {
       "pages": 12,
       "logical": 16,
       "header": 15,
       "invariants": 10,
-      "total_invariants": 10
+      "total_invariants": 10,
+      "verify_checked": 164,
+      "verify_missing": 0
     },
     "000625_2025_半年报": {
       "pages": 136,
       "logical": 252,
       "header": 244,
       "invariants": 13,
-      "total_invariants": 13
+      "total_invariants": 13,
+      "verify_checked": 1740,
+      "verify_missing": 0
     },
     "000625_2025_年报": {
       "pages": 222,
       "logical": 293,
       "header": 266,
       "invariants": 16,
-      "total_invariants": 16
+      "total_invariants": 16,
+      "verify_checked": 1856,
+      "verify_missing": 0
     },
     "000625_2026_一季报": {
       "pages": 11,
       "logical": 16,
       "header": 15,
       "invariants": 10,
-      "total_invariants": 10
+      "total_invariants": 10,
+      "verify_checked": 162,
+      "verify_missing": 0
     },
     "000625_2026_半年报": {
       "pages": 172,
       "logical": 226,
       "header": 219,
       "invariants": 13,
-      "total_invariants": 13
+      "total_invariants": 13,
+      "verify_checked": 1611,
+      "verify_missing": 0
     },
     "002594_2025_一季报": {
       "pages": 9,
       "logical": 18,
       "header": 17,
       "invariants": 10,
-      "total_invariants": 10
+      "total_invariants": 10,
+      "verify_checked": 172,
+      "verify_missing": 0
     },
     "002594_2025_三季报": {
       "pages": 10,
       "logical": 18,
       "header": 17,
       "invariants": 10,
-      "total_invariants": 10
+      "total_invariants": 10,
+      "verify_checked": 181,
+      "verify_missing": 0
     },
     "002594_2025_半年报": {
       "pages": 200,
       "logical": 259,
       "header": 248,
       "invariants": 13,
-      "total_invariants": 13
+      "total_invariants": 13,
+      "verify_checked": 1700,
+      "verify_missing": 0
     },
     "002594_2025_年报": {
       "pages": 268,
       "logical": 317,
       "header": 296,
       "invariants": 16,
-      "total_invariants": 16
+      "total_invariants": 16,
+      "verify_checked": 1893,
+      "verify_missing": 0
     },
     "002594_2026_一季报": {
       "pages": 9,
       "logical": 18,
       "header": 17,
       "invariants": 10,
-      "total_invariants": 10
+      "total_invariants": 10,
+      "verify_checked": 176,
+      "verify_missing": 0
     },
     "002594_2026_半年报": {
       "pages": 207,
       "logical": 253,
       "header": 247,
       "invariants": 13,
-      "total_invariants": 13
+      "total_invariants": 13,
+      "verify_checked": 1708,
+      "verify_missing": 0
     },
     "600036_2025_半年报": {
       "pages": 254,
       "logical": 374,
       "header": 369,
       "invariants": 13,
-      "total_invariants": 13
+      "total_invariants": 13,
+      "verify_checked": 1583,
+      "verify_missing": 0
     },
     "601127_2025_一季报": {
       "pages": 11,
       "logical": 21,
       "header": 20,
       "invariants": 10,
-      "total_invariants": 10
+      "total_invariants": 10,
+      "verify_checked": 171,
+      "verify_missing": 0
     },
     "601127_2025_三季报": {
       "pages": 12,
       "logical": 22,
       "header": 20,
       "invariants": 10,
-      "total_invariants": 10
+      "total_invariants": 10,
+      "verify_checked": 176,
+      "verify_missing": 0
     },
     "601127_2025_半年报": {
       "pages": 177,
       "logical": 271,
       "header": 249,
       "invariants": 13,
-      "total_invariants": 13
+      "total_invariants": 13,
+      "verify_checked": 1647,
+      "verify_missing": 1
     },
     "601127_2025_年报": {
       "pages": 224,
       "logical": 375,
       "header": 341,
       "invariants": 13,
-      "total_invariants": 13
+      "total_invariants": 13,
+      "verify_checked": 1979,
+      "verify_missing": 1
     },
     "601127_2026_一季报": {
       "pages": 11,
       "logical": 22,
       "header": 21,
       "invariants": 10,
-      "total_invariants": 10
+      "total_invariants": 10,
+      "verify_checked": 175,
+      "verify_missing": 0
     },
     "601127_2026_半年报": {
       "pages": 172,
       "logical": 292,
       "header": 268,
       "invariants": 13,
-      "total_invariants": 13
+      "total_invariants": 13,
+      "verify_checked": 1821,
+      "verify_missing": 0
     },
     "601238_2025_年报": {
       "pages": 270,
       "logical": 349,
       "header": 321,
       "invariants": 13,
-      "total_invariants": 13
+      "total_invariants": 13,
+      "verify_checked": 2191,
+      "verify_missing": 0
     },
     "601318_2025_半年报": {
       "pages": 172,
       "logical": 206,
       "header": 201,
       "invariants": 13,
-      "total_invariants": 13
+      "total_invariants": 13,
+      "verify_checked": 863,
+      "verify_missing": 0
     },
     "601633_2025_年报": {
       "pages": 309,
       "logical": 405,
       "header": 378,
       "invariants": 13,
-      "total_invariants": 13
+      "total_invariants": 13,
+      "verify_checked": 2614,
+      "verify_missing": 2
     }
   }
 }

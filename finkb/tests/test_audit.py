@@ -751,6 +751,8 @@ def test_baseline_roundtrip_keeps_only_the_numbers_that_matter(tmp_path) -> None
             "total_invariants": 13,
             "numbers": 0,
             "failures": [],
+            "verify_checked": 12,
+            "verify_missing": 1,
         }
     ]
     target = tmp_path / "baseline.json"
@@ -762,4 +764,16 @@ def test_baseline_roundtrip_keeps_only_the_numbers_that_matter(tmp_path) -> None
         "header": 10,
         "invariants": 13,
         "total_invariants": 13,
+        "verify_checked": 12,
+        "verify_missing": 1,
     }
+
+
+def test_baseline_flags_new_unverifiable_numbers() -> None:
+    """数值回查查不到的数变多就是退步——那是唯一对着 PDF 原文的检查。"""
+    baseline = {
+        "docs": {"d": {"header": 10, "invariants": 13, "verify_missing": 1}}
+    }
+    rows = [{"doc": "d", "header": 10, "invariants": 13, "verify_missing": 4}]
+    problems = audit.compare_with_baseline(rows, baseline)
+    assert problems and "1 → 4" in problems[0]
