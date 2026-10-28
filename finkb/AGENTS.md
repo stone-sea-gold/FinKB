@@ -3,7 +3,7 @@
 本文件面向**在此目录工作的 AI agent**。开始任何任务前先读
 [`DEVLOG.md`](./DEVLOG.md)。
 
-- **改了 `src/finkb/common/models.py` 或 `src/finkb/parser/*.py` 之后，必须重跑全部 18 份文档**（`--reuse-content-list`，不耗 MinerU 额度）。产物版本由 `report.json` 的 `pipeline_fingerprint` 记录，`audit invariants` 会报「产物陈旧」。
+- **改了 `src/finkb/common/models.py` 或 `src/finkb/parser/*.py` 之后，必须重跑全部 22 份文档**（`--reuse-content-list`，不耗 MinerU 额度）。产物版本由 `report.json` 的 `pipeline_fingerprint` 记录，`audit invariants` 会报「产物陈旧」。
 
 ## 验收
 
@@ -68,7 +68,7 @@
 
 ```bash
 cd finkb
-../.venv/bin/python -m pytest -q     # 当前基线：261 passed
+../.venv/bin/python -m pytest -q     # 当前基线：278 passed
 ```
 
 - 全部测试必须**离线可跑**，不得依赖网络或 API key
