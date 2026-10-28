@@ -700,11 +700,13 @@ def _check_cash_flow_table(section: str, table: LogicalTable) -> Check:
     if None in (inflow, outflow, net):
         return Check(f"现金流量表·{section}", False, f"{short}：行存在但取不到数值")
 
-    delta = inflow - outflow - net
+    # 流出按绝对值算：银行、保险的现金流量表把流出印成 (596,456) 这种负数，
+    # 而制造业印成正数。`inflow - abs(outflow)` 两种写法都对。
+    delta = inflow - abs(outflow) - net
     return Check(
         f"现金流量表·{section}",
         abs(delta) < 1,
-        f"{_money(inflow)} − {_money(outflow)} = {_money(inflow - outflow)}，"
+        f"{_money(inflow)} − {_money(abs(outflow))} = {_money(inflow - abs(outflow))}，"
         f"表列净额 {_money(net)}（{short}）",
     )
 

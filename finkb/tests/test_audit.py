@@ -645,3 +645,24 @@ def test_balance_sheet_tolerates_rounding_but_not_a_misread_digit() -> None:
     assert all(check.ok for check in rounded)
     broken = audit.check_balance_sheet(sheet(214_943_407_193, 105_259_714_163, 109_683_692_932))
     assert not all(check.ok for check in broken)
+
+
+def test_cash_flow_accepts_outflows_printed_as_negative() -> None:
+    """银行把流出印成负数 (596,456)，制造业印成正数 596,456，两种都要对。"""
+    import audit
+
+    def statement(outflow_cell: str):
+        return audit.LogicalTable(
+            logical_id="d#P1_T01#S01", parent_id="d#P1_T01", header=["项目", "本期"],
+            header_source="self", section_path=[],
+            rows=[
+                ["经营活动现金流入小计", "730,917"],
+                ["经营活动现金流出小计", outflow_cell],
+                ["经营活动产生的现金流量净额", "134,461"],
+            ],
+            page_start=1, page_end=1, row_range=(0, 3), kind="data",
+        )
+
+    assert audit.check_cash_flow([statement("596,456")])[0].ok
+    assert audit.check_cash_flow([statement("-596,456")])[0].ok
+    assert audit.check_cash_flow([statement("-596,457")])[0].ok is False
