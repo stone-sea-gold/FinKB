@@ -1974,3 +1974,57 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+def find_unaccounted_rows(parsed_dir: Path) -> list[dict]:
+    """找出既没进任何逻辑表、也没被当成分节标题的原始行。
+
+    一行的去向只有四种：进了某张逻辑表、成了段内表头、成了分节标题、
+    或者是中间吸收掉的重复表头。四种都不属于的行才是真的不见了。
+    """
+    _, _, stitched, logical = _analyze(parsed_dir)
+    headers = {tuple(c.strip() for c in table.header) for table in logical if table.header}
+    by_parent: dict[str, list] = {}
+    for table in logical:
+        by_parent.setdefault(table.parent_id, []).append(table)
+
+    lost: list[dict] = []
+    for table in stitched:
+        covered: set[int] = set()
+        for table_logical in by_parent.get(table.parent_id, []):
+            start, end = table_logical.row_range
+            covered |= set(range(start, end))
+        section = {index for index, _ in table.section_rows}
+        for index in sorted(set(range(len(table.rows))) - covered - section):
+            cells = tuple(cell.strip() for cell in table.rows[index])
+            if sum(1 for cell in cells if cell) <= 1:
+                continue
+            if cells in headers:
+                continue
+            lost.append(
+                {
+                    "table": table.parent_id,
+                    "row": index,
+                    "cells": [cell for cell in cells if cell][:6],
+                }
+            )
+    return lost
+
+
+def render_row_report(root: Path) -> str:
+    lines = ["# 行去向核查", ""]
+    total = 0
+    for parsed_dir in sorted(root.iterdir()):
+        if not parsed_dir.is_dir() or parsed_dir.name.startswith("_"):
+            continue
+        if not (parsed_dir / "content_list.json").exists():
+            continue
+        lost = find_unaccounted_rows(parsed_dir)
+        total += len(lost)
+        lines.append(f"## {parsed_dir.name}：{len(lost)} 行")
+        for item in lost[:12]:
+            lines.append(f"- `{item['table']}` r{item['row']}：{' | '.join(item['cells'])}")
+        lines.append("")
+    lines.insert(2, f"全语料 {total} 行既没进逻辑表、也不是分节标题或重复表头。")
+    lines.insert(3, "")
+    return "\n".join(lines)

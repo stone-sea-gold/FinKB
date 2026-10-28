@@ -666,3 +666,47 @@ def test_cash_flow_accepts_outflows_printed_as_negative() -> None:
     assert audit.check_cash_flow([statement("596,456")])[0].ok
     assert audit.check_cash_flow([statement("-596,456")])[0].ok
     assert audit.check_cash_flow([statement("-596,457")])[0].ok is False
+
+
+def test_unaccounted_rows_ignores_section_and_repeated_header(tmp_path) -> None:
+    """分节标题行既不进表也不算丢——只有既没进表、也不是分节标题的才算。"""
+    from finkb.common.models import LogicalTable, StitchedTable
+    import audit
+
+    table = StitchedTable(
+        table_id="d#P1_T01",
+        parent_id="d#P1_T01",
+        doc_id="d",
+        page_start=1,
+        page_end=1,
+        header=["项目", "金额"],
+        source_tables=[],
+        rows=[["项目", "金额"], ["其中：", ""], ["营业成本", "60"]],
+        section_rows=[(1, "其中：")],
+    )
+    logical = [
+        LogicalTable(
+            logical_id="d#P1_T01#S01",
+            parent_id="d#P1_T01",
+            header=["项目", "金额"],
+            header_source="self",
+            section_path=[],
+            rows=[],
+            page_start=1,
+            page_end=1,
+            row_range=(0, 3),
+        )
+    ]
+    parsed = tmp_path / "d"
+    parsed.mkdir()
+    (parsed / "content_list.json").write_text("[]", encoding="utf-8")
+    original = audit._analyze
+    audit._analyze = lambda _dir: (None, [], [table], logical)
+    try:
+        assert audit.find_unaccounted_rows(parsed) == []
+        table.rows.append(["营业外收入", "5"])
+        assert [item["row"] for item in audit.find_unaccounted_rows(parsed)] == [3]
+    finally:
+        audit._analyze = original
+
+
