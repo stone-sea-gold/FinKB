@@ -365,6 +365,17 @@ def _cell_columns(raw_row: list[tuple[str, int, int]]) -> list[tuple[int, int, s
     return spans
 
 
+
+def _alternating_kv_row(row: list[str]) -> bool:
+    """一行里并排放着多组「键|值」——键短、值非空，且至少有 2 组。"""
+    cells = [cell.strip() for cell in row]
+    while cells and not cells[-1]:
+        cells.pop()
+    if len(cells) < 4 or len(cells) % 2:
+        return False
+    keys, values = cells[0::2], cells[1::2]
+    return all(len(key) <= 14 for key in keys) and all(values)
+
 def _looks_like_header_row(
     rows: list[list[str]],
     has_th: list[bool],
@@ -403,7 +414,23 @@ def _looks_like_header_row(
     kv_shaped = _kv_row(raw_rows[index]) and (
         index + 1 < len(raw_rows) and _kv_row(raw_rows[index + 1])
     )
-    if first_non_empty >= 2 and first_numeric == 0 and lookahead_numeric and not kv_shaped:
+    if not kv_shaped and len(row) == 2 and len(row[1].strip()) > 12:
+        # 两列表里「短标签 + 长值」也是键值行（实测 P5-P6_T06 的
+        # ``统一社会信用代码 | 9150000020286320X6``）；真表头的第二格是
+        # ``重要性标准``「金额」这种短列名。
+        kv_shaped = True
+    # 放宽「后面有数值」：不止纯数值，任何含数字的格都算。整表纯文字的表
+    # （税种/税率、折旧年限、研发项目）靠这一条才能拿到表头——它们的数值格
+    # 是「6、7、9、13」「33-50 年」这种，不满足纯数值。
+    lookahead_digit = lookahead_numeric or any(
+        any(ch.isdigit() for ch in cell) for following in rows[index + 1 :] for cell in following
+    )
+    if (
+        first_non_empty >= 2
+        and first_numeric == 0
+        and lookahead_digit
+        and not kv_shaped
+    ):
         return True
 
     # 纯文本表兜底：整表没有任何数值时上一条失效。此时若首行所有非空单元格

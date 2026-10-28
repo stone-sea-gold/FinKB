@@ -366,3 +366,26 @@ def test_two_kv_rows_are_not_a_header() -> None:
         ["披露索引", "巨潮资讯网", ""],
         ["资产占比", "100%", ""],
     ]
+
+
+def test_header_without_pure_number_still_counts() -> None:
+    """整表没有纯数值（税率写「6、7、9、13」）也要认出表头。"""
+    from finkb.parser.markdown_blocks import html_table_layout
+
+    html = (
+        "<table><tr><td>税种</td><td>计税依据</td><td>税率</td></tr>"
+        "<tr><td>增值税</td><td>按应税收入计缴</td><td>6、7、9、13</td></tr>"
+        "<tr><td>消费税</td><td>按应税销售收入计缴</td><td>1、3、5</td></tr></table>"
+    )
+    assert html_table_layout(html).header == ["税种", "计税依据", "税率"]
+
+
+def test_two_column_kv_pair_is_not_a_header() -> None:
+    """两列表里「短标签 + 长值」仍是键值对。"""
+    from finkb.parser.markdown_blocks import html_table_layout
+
+    html = (
+        "<table><tr><td>统一社会信用代码</td><td>9150000020286320X6</td></tr>"
+        "<tr><td>公司中文名称</td><td>重庆长安汽车股份有限公司</td></tr></table>"
+    )
+    assert not html_table_layout(html).header
