@@ -348,3 +348,21 @@ def test_cross_page_repeated_header_is_a_second_layer() -> None:
     # 补上第一层空着的列名，同名列在压平时去重
     assert layout.header == ["股东名称", "持股比例", "数量"]
     assert layout.rows == [["比亚迪", "17.99%", "1,783"]]
+
+
+def test_two_kv_rows_are_not_a_header() -> None:
+    """「标签 + 跨列的值」连着两行是键值对，不是双层表头（长安 T51）。"""
+    from finkb.parser.markdown_blocks import html_table_layout
+
+    html = (
+        "<table><tr><td>披露日期</td><td colspan='2'>2026年4月11日</td></tr>"
+        "<tr><td>披露索引</td><td colspan='2'>巨潮资讯网</td></tr>"
+        "<tr><td>资产占比</td><td colspan='2'>100%</td></tr></table>"
+    )
+    layout = html_table_layout(html)
+    assert not layout.header
+    assert layout.rows == [
+        ["披露日期", "2026年4月11日", ""],
+        ["披露索引", "巨潮资讯网", ""],
+        ["资产占比", "100%", ""],
+    ]

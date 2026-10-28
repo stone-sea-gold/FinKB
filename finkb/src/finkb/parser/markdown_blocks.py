@@ -394,7 +394,16 @@ def _looks_like_header_row(
     lookahead_numeric = any(
         _is_pure_number(cell) for following in rows[index + 1 :] for cell in following
     )
-    if first_non_empty >= 2 and first_numeric == 0 and lookahead_numeric:
+    # 「标签 + 一个跨满剩余宽度的值」是键值行，不是表头（实测长安 T51：
+    # ``内部控制评价报告全文披露日期 | 2026年4月11日(colspan=2)``，被当成表头后
+    # 整张表按列读，两行键值对变成列名、后面的多列表被压成同一张）。
+    def _kv_row(cells: list[tuple[str, int, int]]) -> bool:
+        return len(cells) == 2 and cells[1][2] > 1
+
+    kv_shaped = _kv_row(raw_rows[index]) and (
+        index + 1 < len(raw_rows) and _kv_row(raw_rows[index + 1])
+    )
+    if first_non_empty >= 2 and first_numeric == 0 and lookahead_numeric and not kv_shaped:
         return True
 
     # 纯文本表兜底：整表没有任何数值时上一条失效。此时若首行所有非空单元格
