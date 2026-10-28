@@ -55,6 +55,26 @@ finkb/
 └── data/{raw,parsed,parent_store}/
 ```
 
+## 一条命令验收
+
+```bash
+scripts/check.sh            # 单元测试 + 22 份产物的守恒律
+```
+
+想单独看某一项：
+
+```bash
+python tools/audit.py corpus                       # 22 份的体检表（有表头率/裸表/守恒律/数字异常）
+python tools/audit.py invariants --doc data/parsed/002594_2025_年报   # 单份 16 条守恒律
+python tools/audit.py verify-cells --doc ... --pdf ...               # 数字是否都能在 PDF 原文找到
+python tools/audit.py recall --doc ... --pdf ...                     # 原文的数字是否都进了表
+python tools/audit.py rowspan --doc ...                              # rowspan 展开前后对照
+python tools/audit.py headers --doc ...                              # 多层表头逐张对照
+python tools/audit.py diff --before a.json --after b.json            # 两次快照的字段级差异
+```
+
+`verify-cells` / `recall` 需要 PDF 与 `PyMuPDF`（已装）；其余全离线。
+
 ## 运行测试
 
 ```bash
