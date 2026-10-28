@@ -496,9 +496,14 @@ def _extra_header_layers(
         # 上一层在某一列**空着**（没有分组名）时，这一层给该列取名不算「细分」，
         # 不阻止多行判定；只有「上一层有名字、这一层却不在分组区间内」才算异常。
         parent = rows[index]
+        single = {
+            begin
+            for begin, end, text in _cell_columns(raw_rows[index])
+            if end - begin == 1 and text.strip()
+        }
         uncovered = {
             column
-            for column in own_columns - covered
+            for column in own_columns - covered - single
             if column < len(parent) and parent[column].strip()
         }
         if uncovered:

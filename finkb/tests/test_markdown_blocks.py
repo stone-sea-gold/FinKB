@@ -302,3 +302,30 @@ def test_empty_first_cell_header_needs_a_populated_first_column() -> None:
     layout = html_table_layout(html)
 
     assert not layout.header
+
+def test_single_column_group_can_be_renamed_in_layer_two() -> None:
+    """上层既有 colspan 分组、又有整列一格（本次变动），下层照样能给它取新名。
+
+    MinerU 对「一列就是一组」的列不写 colspan，若 R2 要求「下层每一列都必须落在
+    某个分组区间内」，这种表就整层丢掉，压平后 `本次变动前` 会重复出现在两列上。
+    """
+    html = (
+        '<table><tr><td rowspan="2">股份性质</td><td colspan="2">本次变动前</td>'
+        '<td>本次变动</td><td colspan="2">本次变动后</td></tr>'
+        '<tr><td>数量(股)</td><td>比例</td><td>送红股及资本公积金转增股本(股)</td>'
+        '<td>数量(股)</td><td>比例</td></tr>'
+        '<tr><td>有限售条件股份</td><td>648,851,914</td><td>21.35%</td>'
+        '<td>1,297,703,828</td><td>1,946,555,742</td><td>21.35%</td></tr></table>'
+    )
+    layout = html_table_layout(html)
+
+    assert len(layout.header_rows) == 2
+    assert layout.header == [
+        "股份性质",
+        "本次变动前/数量(股)",
+        "本次变动前/比例",
+        "本次变动/送红股及资本公积金转增股本(股)",
+        "本次变动后/数量(股)",
+        "本次变动后/比例",
+    ]
+    assert layout.rows == [["有限售条件股份", "648,851,914", "21.35%", "1,297,703,828", "1,946,555,742", "21.35%"]]
