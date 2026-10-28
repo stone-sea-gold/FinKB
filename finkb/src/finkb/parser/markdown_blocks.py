@@ -366,15 +366,31 @@ def _cell_columns(raw_row: list[tuple[str, int, int]]) -> list[tuple[int, int, s
 
 
 
+_YEAR_RE = re.compile(r"\d{4}\s*年")
+
+
 def _alternating_kv_row(row: list[str]) -> bool:
-    """一行里并排放着多组「键|值」——键短、值非空，且至少有 2 组。"""
+    """一行里并排放着多组「键|值」——键短、值里带数字，且至少有 2 组。
+
+    要求「值里有数字」是为了和真表头分开：``接待时间|接待地点|接待方式``
+    同样是「短词 | 短词」，但一格数字都没有；而 ``股票简称|长安汽车、长安B``
+    ``股票代码|000625、200625`` 的右半边必然带代码或日期。
+    """
     cells = [cell.strip() for cell in row]
     while cells and not cells[-1]:
         cells.pop()
     if len(cells) < 4 or len(cells) % 2:
         return False
     keys, values = cells[0::2], cells[1::2]
-    return all(len(key) <= 14 for key in keys) and all(values)
+    if not all(len(key) <= 14 for key in keys) or not all(values):
+        return False
+    if any(any(ch.isdigit() for ch in key) for key in keys):
+        # 键本身带数字就不是键（``中国|130,796,138,817|79.75%|…`` 是数据行）
+        return False
+    if any(_YEAR_RE.search(cell) for cell in cells):
+        # 期间/年份表头（``项目|2025年|2024年|同比``）也是「短词夹值」，不能算
+        return False
+    return any(any(ch.isdigit() for ch in value) for value in values)
 
 def _looks_like_header_row(
     rows: list[list[str]],
@@ -414,6 +430,8 @@ def _looks_like_header_row(
     kv_shaped = _kv_row(raw_rows[index]) and (
         index + 1 < len(raw_rows) and _kv_row(raw_rows[index + 1])
     )
+    if not kv_shaped and _alternating_kv_row(row):
+        kv_shaped = True
     if not kv_shaped and len(row) == 2 and len(row[1].strip()) > 12:
         # 两列表里「短标签 + 长值」也是键值行（实测 P5-P6_T06 的
         # ``统一社会信用代码 | 9150000020286320X6``）；真表头的第二格是
