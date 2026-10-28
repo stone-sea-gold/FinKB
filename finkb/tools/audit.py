@@ -1269,13 +1269,95 @@ def _sampled_rows(table: StitchedTable, limit: int = 6) -> list[str]:
 
 
 def _pdf_page_texts(pdf_path: Path) -> list[str] | None:
-    """逐页取文本并归一化；没装 pypdf 就返回 None。"""
+    """逐页取文本并归一化；两个库都没有就返回 None。
+
+    优先 PyMuPDF：pypdf 对部分年报取不全表格文字（000625 半年报第 5 页「主要财务
+    指标」整表取不到），会把「数值回查」误报成解析错误。
+    """
+    try:
+        import pymupdf
+    except ImportError:
+        pymupdf = None
+    if pymupdf is not None:
+        with pymupdf.open(str(pdf_path)) as document:
+            return [_normalize(page.get_text()) for page in document]
     try:
         from pypdf import PdfReader
     except ImportError:
         return None
     reader = PdfReader(str(pdf_path))
     return [_normalize(page.extract_text() or "") for page in reader.pages]
+
+
+MIN_VERIFY_DIGITS = 6
+
+
+def _digit_signature(cell: str) -> str | None:
+    """单元格里数字的「纯数字指纹」，用来回查 PDF 文本。
+
+    只取位数够长的数字：位数太短的（年份、个位数）在整页文本里到处都能命中，
+    查了也没有信息量。
+    """
+    if _parse_number(cell) is None:
+        return None
+    digits = re.sub(r"\D", "", cell)
+    return digits if len(digits) >= MIN_VERIFY_DIGITS else None
+
+
+def verify_cells(
+    parsed_dir: Path,
+    pdf_path: Path,
+    sample_per_table: int = 12,
+) -> list[dict]:
+    """逐表抽样，把数值回查到 PDF 原文（返回明细、最佳偏移、各偏移命中数）。
+
+    这是唯一能从**外部**证明「单元格没被解析错、页码区间没错」的检查：
+    数字必须在它声称的那几页里出现。查不到就是真问题——页码错了，或者值被改了。
+    """
+    _, _, _, logical = _analyze(parsed_dir)
+    pages = _pdf_page_texts(pdf_path)
+    if pages is None:
+        raise RuntimeError("需要 pypdf 才能回查 PDF 文本")
+
+    results: list[dict] = []
+    offsets = {shift: [0, 0] for shift in (-1, 0, 1)}
+    for table in logical:
+        span = pages[table.page_start - 1 : table.page_end]
+        haystack = "".join(re.sub(r"\D", "", text) for text in span)
+        signatures = []
+        for row in table.rows:
+            for cell in row:
+                signature = _digit_signature(cell)
+                if signature is not None and signature not in signatures:
+                    signatures.append(signature)
+        if not signatures:
+            continue
+        step = max(1, len(signatures) // sample_per_table)
+        sample = signatures[::step][:sample_per_table]
+        missing = [sig for sig in sample if sig not in haystack]
+        for shift, tally in offsets.items():
+            window = "".join(
+                re.sub(r"\D", "", text)
+                for text in pages[
+                    max(0, table.page_start - 1 + shift) : table.page_end + shift
+                ]
+            )
+            for sig in sample:
+                tally[0] += 1
+                if sig in window:
+                    tally[1] += 1
+        results.append(
+            {
+                "logical_id": table.logical_id,
+                "kind": table.kind,
+                "page_start": table.page_start,
+                "page_end": table.page_end,
+                "checked": len(sample),
+                "missing": missing,
+            }
+        )
+    best_shift = max(offsets, key=lambda shift: offsets[shift][1] / max(offsets[shift][0], 1))
+    return results, best_shift, offsets
 
 
 def collect_page_spans(parsed_dir: Path, pdf_path: Path | None = None) -> list[PageSpan]:
@@ -1391,6 +1473,58 @@ def render_page_span_report(parsed_dir: Path, pdf_path: Path | None = None) -> s
             "",
         ]
     return "\n".join(lines)
+
+
+def _cmd_verify_cells(args: argparse.Namespace) -> int:
+    """把每个逻辑表的抽样数值回查到 PDF 文本。"""
+    results, best_shift, offsets = verify_cells(Path(args.doc), Path(args.pdf))
+    total = sum(item["checked"] for item in results)
+    miss = sum(len(item["missing"]) for item in results)
+    lines = [
+        f"# 数值回查：{Path(args.doc).name}",
+        "",
+        f"- 参与核对的表：**{len(results)}** 张",
+        f"- 抽样数值：**{total}** 个，查不到 **{miss}** 个"
+        f"（命中率 **{(total - miss) * 100 // max(total, 1)}%**）",
+        "",
+        "**页码偏移自检**（把每张表的检索窗口整体平移 ±1 页再查一遍）："
+        + "、".join(
+            f"{shift:+d} 页 {tally[1] * 100 // max(tally[0], 1)}%"
+            for shift, tally in sorted(offsets.items())
+        )
+        + f"；最佳偏移 **{best_shift:+d}**。"
+        + (
+            "偏移非 0 说明本文件的表页码与 PDF 物理页存在系统性错位。"
+            if best_shift != 0
+            else "偏移 0 最佳，页码与 PDF 物理页一致。"
+        ),
+        "",
+        "## 有缺失的表",
+        "",
+        "| 表号 | 类型 | 页码 | 抽检 | 缺失 | 缺失的数字 |",
+        "| --- | --- | --- | --- | --- | --- |",
+    ]
+    for item in sorted(results, key=lambda r: -len(r["missing"])):
+        if not item["missing"]:
+            continue
+        short = item["logical_id"].split("#", 1)[1]
+        pages = f"{item['page_start']}"
+        if item["page_end"] != item["page_start"]:
+            pages = f"{item['page_start']}-{item['page_end']}"
+        shown = "、".join(item["missing"][:4])
+        lines.append(
+            f"| `{short}` | {item['kind']} | {pages} | {item['checked']} | "
+            f"{len(item['missing'])} | {shown} |"
+        )
+    if miss == 0:
+        lines.append("| —— | —— | —— | —— | 0 | 全部命中 |")
+    text = "\n".join(lines) + "\n"
+    if args.out:
+        Path(args.out).write_text(text, encoding="utf-8")
+        print(f"写入 {args.out}")
+    else:
+        print(text)
+    return 0 if miss == 0 else 4
 
 
 def _cmd_page_spans(args: argparse.Namespace) -> int:
@@ -1531,6 +1665,12 @@ def build_parser() -> argparse.ArgumentParser:
         description="审计与核验：快照 / 对照 / 守恒律 / 人工核验清单",
     )
     sub = parser.add_subparsers(dest="command", required=True)
+
+    cells = sub.add_parser("verify-cells", help="数值回查 PDF 原文")
+    cells.add_argument("--doc", required=True)
+    cells.add_argument("--pdf", required=True)
+    cells.add_argument("--out")
+    cells.set_defaults(func=_cmd_verify_cells)
 
     spans = sub.add_parser("page-spans", help="跨页表页码区间核验")
     spans.add_argument("--doc", required=True, help="已解析目录")

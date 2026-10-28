@@ -541,3 +541,17 @@ def test_blank_subtotal_counts_as_zero() -> None:
     assert audit._amount_in_column(table, "不存在的行", 1) is None
     check = audit._check_cash_flow_table("筹资活动", table)
     assert check.ok, check.detail
+
+
+def test_digit_signature_skips_short_numbers() -> None:
+    """年份这类短数字在整页文本里到处命中，不参与回查。"""
+    assert audit._digit_signature("2025年") is None
+    assert audit._digit_signature("1,234") is None
+    assert audit._digit_signature("190,501,783,194.92") == "19050178319492"
+
+
+def test_digit_signature_ignores_formatting() -> None:
+    """千分位、负号、百分号都不影响数字指纹。"""
+    assert audit._digit_signature("-2,533,491,781.73") == audit._digit_signature(
+        "(2,533,491,781.73)"
+    )
