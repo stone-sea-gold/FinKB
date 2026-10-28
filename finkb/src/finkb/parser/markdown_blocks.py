@@ -446,12 +446,11 @@ def _carried_columns(raw_rows: list[list[tuple[str, int, int]]], target: int) ->
     return carried
 
 
-def _extra_header_layers(
+def _count_header_layers(
     raw_rows: list[list[tuple[str, int, int]]],
     rows: list[list[str]],
     start: int,
     width: int,
-    limit: int = 2,
 ) -> int:
     """数出表头在 ``start`` 之外还有几层。
 
@@ -466,8 +465,9 @@ def _extra_header_layers(
     """
     layers = 0
     index = start
-    while layers < limit and index + 1 < len(raw_rows):
-        groups = [cell for cell in _cell_columns(raw_rows[index]) if cell[1] - cell[0] > 1]
+    while index + 1 < len(raw_rows):
+        here = _cell_columns_at(raw_rows, index)
+        groups = [cell for cell in here if cell[1] - cell[0] > 1]
         if not groups:
             break
         if len(groups) == 1 and groups[0][0] == 0 and groups[0][1] == width:
@@ -498,7 +498,7 @@ def _extra_header_layers(
         parent = rows[index]
         single = {
             begin
-            for begin, end, text in _cell_columns(raw_rows[index])
+            for begin, end, text in here
             if end - begin == 1 and text.strip()
         }
         uncovered = {
@@ -515,8 +515,40 @@ def _extra_header_layers(
     return layers
 
 
+def _cell_columns_at(
+    raw_rows: list[list[tuple[str, int, int]]], target: int
+) -> list[tuple[int, int, str]]:
+    """第 ``target`` 行每个**自有**单元格的真实列区间。
+
+    不能用 :func:`_cell_columns` 那种「从 0 开始数」的算法：上一行 ``rowspan`` 下发的
+    单元格也占着列，从 0 起数会让本行整体左移。这里走一遍与
+    :func:`_expand_merged_cells` 完全相同的列游标，保证三者不失步。
+    """
+    pending: dict[tuple[int, int], str] = {}
+    ranges: list[tuple[int, int, str]] = []
+    for index in range(target + 1):
+        queue = list(raw_rows[index])
+        column = 0
+        while True:
+            if (index, column) in pending:
+                pending.pop((index, column))
+                column += 1
+            elif queue:
+                text, rowspan, colspan = queue.pop(0)
+                for down in range(1, rowspan):
+                    for across in range(colspan):
+                        pending[(index + down, column + across)] = ""
+                if index == target:
+                    ranges.append((column, column + colspan, text))
+                column += colspan
+            else:
+                break
+    return ranges
+
+
 def _header_cell(
-    raw_row: list[tuple[str, int, int]],
+    raw_rows: list[list[tuple[str, int, int]]],
+    position: int,
     expanded: list[str],
     column: int,
 ) -> str:
@@ -526,8 +558,9 @@ def _header_cell(
     否则 ``快报产量/本报告期`` 会退化成 ``本报告期``，分组信息整层丢失。
     不含 ``colspan`` 的层直接读展开行（那里已经处理好 ``rowspan`` 进位）。
     """
+    raw_row = raw_rows[position]
     if any(colspan > 1 for _, _, colspan in raw_row):
-        for begin, end, text in _cell_columns(raw_row):
+        for begin, end, text in _cell_columns_at(raw_rows, position):
             if begin <= column < end:
                 return text.strip()
     return expanded[column].strip() if column < len(expanded) else ""
@@ -548,7 +581,7 @@ def _flatten_header(
     for column in range(width):
         parts: list[str] = []
         for position in positions:
-            cell = _header_cell(raw_rows[position], rows[position], column)
+            cell = _header_cell(raw_rows, position, rows[position], column)
             # rowspan 会把同一文本下发到多行，压平时不能重复
             if cell and (not parts or parts[-1] != cell):
                 parts.append(cell)
@@ -599,7 +632,7 @@ def html_table_layout(html: str) -> TableLayout:
 
     header_rows: list[list[str]] = []
     if start < len(rows) and _looks_like_header_row(rows, kept_th, kept_raw, start):
-        layers = 1 + _extra_header_layers(kept_raw, rows, start, width)
+        layers = 1 + _count_header_layers(kept_raw, rows, start, width)
         header_rows = [rows[start + offset] for offset in range(layers)]
 
     data_start = start + len(header_rows)
