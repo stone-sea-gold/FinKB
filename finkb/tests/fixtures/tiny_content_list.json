@@ -1,0 +1,38 @@
+[
+  {
+    "type": "text",
+    "text": "第四节 经营情况讨论与分析",
+    "text_level": 1,
+    "page_idx": 0
+  },
+  {
+    "type": "text",
+    "text": "单位：千元",
+    "page_idx": 0
+  },
+  {
+    "type": "text",
+    "text": "2025 年",
+    "page_idx": 0
+  },
+  {
+    "type": "text",
+    "text": "营业收入构成如下：",
+    "page_idx": 0
+  },
+  {
+    "type": "table",
+    "page_idx": 0,
+    "table_body": "<table><tr><td>项目</td><td>金额</td><td>占比(%)</td></tr><tr><td>整车</td><td>1,000</td><td>60.0</td></tr><tr><td>零部件</td><td>500</td><td>30.0</td></tr><tr><td>其他</td><td>166</td><td>10.0</td></tr><tr><td>合计</td><td>1,666</td><td>100.0</td></tr></table>"
+  },
+  {
+    "type": "table",
+    "page_idx": 1,
+    "table_body": "<table><tr><td>项目</td><td>期末余额</td><td>期初余额</td></tr><tr><td>货币资金</td><td>8,000</td><td>7,000</td></tr><tr><td>应收账款</td><td>2,000</td><td>1,800</td></tr>"
+  },
+  {
+    "type": "text",
+    "text": "上述数据未经审计。",
+    "page_idx": 1
+  }
+]
