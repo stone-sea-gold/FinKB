@@ -49,6 +49,17 @@ DEFAULT_STATUS_PATH = "/api/v4/extract/task/{task_id}"
 DEFAULT_UPLOAD_URLS_PATH = "/api/v4/file-urls/batch"
 DEFAULT_BATCH_RESULT_PATH = "/api/v4/extract-results/batch/{batch_id}"
 
+# 一次 309 页的批量解析要跑十几分钟，中间遇到一次读超时不该让整份文档作废。
+# 这三个数只是运维参数（试几次、隔多久），不是解析判据。
+RETRY_ATTEMPTS = 3
+RETRY_BACKOFF_SECONDS = 3.0
+_TRANSIENT_ERRORS = (
+    requests.exceptions.ReadTimeout,
+    requests.exceptions.ConnectTimeout,
+    requests.exceptions.ConnectionError,
+    requests.exceptions.ChunkedEncodingError,
+)
+
 
 class MineruError(RuntimeError):
     """MinerU 调用失败。"""
@@ -188,16 +199,35 @@ class MineruClient:
     # -- 传输层：单独抽出，便于单测 monkeypatch，无需真实网络 --------------- #
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         url = path if path.startswith("http") else f"{self.config.base_url}{path}"
-        response = self.session.request(
-            method,
-            url,
-            headers=self.config.headers,
-            timeout=self.config.request_timeout,
-            **kwargs,
+        response = self._send(
+            lambda: self.session.request(
+                method,
+                url,
+                headers=self.config.headers,
+                timeout=self.config.request_timeout,
+                **kwargs,
+            ),
+            f"{method} {url}",
         )
         if response.status_code >= 400:
             raise MineruError(f"{method} {url} 失败：HTTP {response.status_code} {response.text[:200]}")
         return response.json()
+
+    def _send(self, call: Any, what: str) -> Any:
+        """带退避重试的 HTTP 调用：读超时、断连、5xx 都重试，4xx 直接报错。"""
+        for attempt in range(1, RETRY_ATTEMPTS + 1):
+            try:
+                response = call()
+            except _TRANSIENT_ERRORS as exc:
+                if attempt == RETRY_ATTEMPTS:
+                    raise MineruError(f"{what} 连续 {RETRY_ATTEMPTS} 次超时或断连：{exc}") from exc
+                time.sleep(RETRY_BACKOFF_SECONDS * attempt)
+                continue
+            if response.status_code >= 500 and attempt < RETRY_ATTEMPTS:
+                time.sleep(RETRY_BACKOFF_SECONDS * attempt)
+                continue
+            return response
+        raise AssertionError("unreachable")
 
     # -- 公开 API ----------------------------------------------------------- #
     def submit_url(self, file_url: str, **extra: Any) -> str:
@@ -262,10 +292,13 @@ class MineruClient:
         否则 OSS 预签名校验失败，返回 403 SignatureDoesNotMatch。
         """
         with open(pdf_path, "rb") as handle:
-            response = self.session.put(
-                upload_url,
-                data=handle,
-                timeout=self.config.poll_timeout,
+            response = self._send(
+                lambda: self.session.put(
+                    upload_url,
+                    data=handle,
+                    timeout=self.config.poll_timeout,
+                ),
+                "上传",
             )
         if response.status_code >= 400:
             raise MineruError(
@@ -315,7 +348,10 @@ class MineruClient:
         """下载结果 zip 并解压到 ``dest``。"""
         dest.mkdir(parents=True, exist_ok=True)
         zip_path = dest / "result.zip"
-        response = self.session.get(zip_url, timeout=self.config.request_timeout)
+        response = self._send(
+            lambda: self.session.get(zip_url, timeout=self.config.request_timeout),
+            "下载结果",
+        )
         if response.status_code >= 400:
             raise MineruError(f"下载失败：HTTP {response.status_code}")
         zip_path.write_bytes(response.content)

@@ -930,3 +930,55 @@ def test_caption_candidate_below_the_table_is_ignored() -> None:
     table = _only_table_block(content_list)
 
     assert table.caption == "公司前 5 大客户资料"
+
+
+class _FlakySession:
+    """前 n 次抛读超时，之后返回正常响应。"""
+
+    def __init__(self, failures: int) -> None:
+        self.failures = failures
+        self.calls = 0
+
+    def request(self, *args: object, **kwargs: object) -> object:
+        import requests
+
+        self.calls += 1
+        if self.calls <= self.failures:
+            raise requests.exceptions.ReadTimeout("read timed out")
+        return _FakeResponse({"data": {"task_id": "t-1"}})
+
+
+class _FakeResponse:
+    status_code = 200
+    text = ""
+
+    def __init__(self, payload: dict) -> None:
+        self._payload = payload
+
+    def json(self) -> dict:
+        return self._payload
+
+
+def test_transient_timeout_is_retried(monkeypatch) -> None:
+    """一次读超时不该让整份文档作废（309 页那趟就是这么挂的）。"""
+    import finkb.parser.mineru_client as mc
+
+    monkeypatch.setattr(mc, "RETRY_BACKOFF_SECONDS", 0.0)
+    session = _FlakySession(failures=2)
+    client = mc.MineruClient(mc.MineruConfig(token="x"), session=session)  # type: ignore[arg-type]
+
+    assert client.submit_url("https://example.com/a.pdf") == "t-1"
+    assert session.calls == 3
+
+
+def test_persistent_timeout_fails_with_a_clear_message(monkeypatch) -> None:
+    import pytest
+
+    import finkb.parser.mineru_client as mc
+
+    monkeypatch.setattr(mc, "RETRY_BACKOFF_SECONDS", 0.0)
+    session = _FlakySession(failures=99)
+    client = mc.MineruClient(mc.MineruConfig(token="x"), session=session)  # type: ignore[arg-type]
+
+    with pytest.raises(mc.MineruError, match="连续 3 次超时或断连"):
+        client.submit_url("https://example.com/a.pdf")
