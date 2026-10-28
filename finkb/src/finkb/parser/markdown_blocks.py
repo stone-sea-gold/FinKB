@@ -329,12 +329,6 @@ def _is_pure_number(text: str) -> bool:
     return bool(_PURE_NUMBER_RE.match(stripped))
 
 
-#: 表头推断的向前探测行数。用于「期间表头 + 小计行」形态：
-#: P137 首行是 ``['', '2025年', '2024年']``，紧邻的第二行却是分类标签
-#: ``一、经营活动产生的现金流量:``（纯文本、无数值）。只看第二行会漏判，
-#: 必须向后看几行才能确认「这是一张以期间为列的表」。
-HEADER_LOOKAHEAD_ROWS = 3
-
 #: 「首格为空的表头」里其余单元格的长度上限。比对标题的 12 字宽——财务报表的
 #: 列名常是「稳定期的关键参数的确定依据」这种长短语，超过 20 字基本是被截断的
 #: 正文残句（实测 P53-P55），不能当列名。
@@ -390,13 +384,15 @@ def _looks_like_header_row(
     # 纯数值分布推断（vlm 后端无任何表头标记）。三条护栏缺一不可：
     #   ① 至少 2 个非空单元格 —— 全宽单格是「表标题」而不是表头（实测 P89）；
     #   ② 本行没有纯数值 —— 有数值说明是数据行；
-    #   ③ 向后看 HEADER_LOOKAHEAD_ROWS 行内有数值 —— 兜住「期间表头 + 小计行」。
+    #   ③ 后面任意一行有数值 —— 兜住两种形态：一是「期间表头 + 小计行」（P137 首行是
+    #      ``['', '2025年', '2024年']``，紧邻的第二行却是分类标签）；二是开头几行
+    #      恰好全空、数值从第四行才出现（601127 年报 P131 的 ``项目|期末余额|期初余额``，
+    #      前三行「定期存款/委托贷款/债券投资」的值都为空）。**不设探测窗口**：曾经
+    #      用的「向后 3 行」是个从单份文档数出来的数，换个文档就漏。
     first_non_empty = sum(1 for cell in row if cell.strip())
     first_numeric = sum(1 for cell in row if _is_pure_number(cell))
     lookahead_numeric = any(
-        _is_pure_number(cell)
-        for following in rows[index + 1 : index + 1 + HEADER_LOOKAHEAD_ROWS]
-        for cell in following
+        _is_pure_number(cell) for following in rows[index + 1 :] for cell in following
     )
     if first_non_empty >= 2 and first_numeric == 0 and lookahead_numeric:
         return True
