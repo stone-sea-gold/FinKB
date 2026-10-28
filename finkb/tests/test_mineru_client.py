@@ -523,14 +523,29 @@ def test_standalone_period_label_is_attached_to_the_table() -> None:
     assert table.period_label == "2025 年"
 
 
-def test_period_label_must_be_adjacent() -> None:
-    """中间夹了别的正文，标签就不属于这张表。"""
+def test_period_label_reaches_past_a_unit_line() -> None:
+    """单位行也是表的元数据，它挡在中间不该把期间标签隔断（实测漏收 22 张）。"""
     content_list = [
         {"type": "text", "text": "2025 年", "page_idx": 0},
         {"type": "text", "text": "单位：千元", "page_idx": 0},
         {
             "type": "table",
             "table_body": "<table><tr><td>合计</td><td>1</td></tr></table>",
+            "page_idx": 0,
+        },
+    ]
+
+    assert _only_table_block(content_list).period_label == "2025 年"
+
+
+def test_period_label_stops_at_a_description() -> None:
+    """中间夹着一句说明文，那期间标签属于上一张表，不能拿来用。"""
+    content_list = [
+        {"type": "text", "text": "2024 年", "page_idx": 0},
+        {"type": "text", "text": "单项计提坏账准备的应收账款情况如下：", "page_idx": 0},
+        {
+            "type": "table",
+            "table_body": "<table><tr><td>名称</td><td>账面余额</td></tr></table>",
             "page_idx": 0,
         },
     ]
@@ -850,3 +865,68 @@ def test_period_range_label_is_a_period_not_a_caption() -> None:
     table = _only_table_block(content_list)
     assert table.period_label == "2025 年 1—12 月"
     assert table.caption == "主营业务分行业情况"
+
+
+def _last_table_block(content_list: list[dict[str, object]]):
+    pages = content_list_to_pages(content_list, DOC)
+    tables = [block.table for page in pages for block in page.blocks if block.table is not None]
+    assert tables, "用例里没有表格块"
+    return tables[-1]
+
+
+def test_sentence_above_the_table_is_not_a_caption() -> None:
+    """P105_T94：句子是正文说明，真名在它上面那层标题里。"""
+    content_list = [
+        {
+            "type": "text",
+            "text": "按照信用风险特征组合计提坏账准备的组合类别及确定依据",
+            "text_level": 2,
+            "page_idx": 0,
+        },
+        {"type": "text", "text": "√适用 □不适用", "page_idx": 0},
+        {
+            "type": "text",
+            "text": "本集团以共同信用风险特征为依据将应收账款分为不同组别。",
+            "page_idx": 0,
+        },
+        {"type": "table", "table_body": TABLE_HTML, "page_idx": 0},
+    ]
+    table = _only_table_block(content_list)
+
+    assert table.caption == ""
+    assert table.caption_source == "heading"
+
+
+def test_tiny_fragment_does_not_block_the_caption_scan() -> None:
+    """P167_T193：表上方那个「无」是溢出的数据格，跳过它就该看到上一张表。"""
+    content_list = [
+        {"type": "table", "table_body": TABLE_HTML, "page_idx": 0},
+        {"type": "text", "text": "无", "page_idx": 1, "bbox": [104, 743, 127, 757]},
+        {
+            "type": "table",
+            "table_body": "<table><tr><td>一、不能重分类进损益</td><td>1</td></tr></table>",
+            "page_idx": 1,
+            "bbox": [11, 82, 954, 552],
+        },
+    ]
+    table = _last_table_block(content_list)
+
+    assert table.caption == ""
+    assert table.caption_source == "adjacent_table"
+
+
+def test_caption_candidate_below_the_table_is_ignored() -> None:
+    """赛力斯 p72：列表里排在表格前面，版面坐标却在表格下方，不能当表名。"""
+    content_list = [
+        {"type": "text", "text": "公司前 5 大客户资料", "page_idx": 0, "bbox": [100, 100, 300, 120]},
+        {"type": "table", "table_body": TABLE_HTML, "page_idx": 0, "bbox": [100, 200, 800, 400]},
+        {
+            "type": "text",
+            "text": "前十名股东转融通出借归还情况",
+            "page_idx": 0,
+            "bbox": [100, 633, 300, 650],
+        },
+    ]
+    table = _only_table_block(content_list)
+
+    assert table.caption == "公司前 5 大客户资料"

@@ -479,6 +479,15 @@ _BOX_NO_ANSWER_RE = re.compile("\uf052\\s*否")
 #: 不是表名——P8 的释义表曾跨页吃到上一页备查文件目录的最后一条。
 _LIST_ITEM_RE = re.compile(r"^[一二三四五六七八九十]+、")
 
+#: 以句号收尾的是整句正文说明，不是表名。表格上方常有一句「本集团以…为依据
+#: 将应收账款分为不同组别。」，真名在它上面一层的标题里（实测 P105/P106/P187
+#: 三张表的表名都被这种句子挡住了）。遇到句子要继续往前找，不能就此收工。
+_SENTENCE_TAIL = "。"
+
+#: 表名的最小长度。``无``「是」「否」这类一两个字的块是表格溢出的数据格，
+#: 不可能是表名（P167_T193 就被自己溢出来的一个「无」挡住了）。
+_MIN_CAPTION_CHARS = 3
+
 #: 目录行（``第一节 释义....5``）。出现在表格上方是版面残留，不是表名。
 _TOC_RE = re.compile(r"\.{4,}")
 
@@ -618,17 +627,16 @@ def content_list_to_pages(
             table = _table_block_from_item(item, meta, block_index, heading_run)
             if table is not None:
                 last_table = table
-                if prev_kind == "text" and not prev_noise and _PERIOD_LABEL_RE.match(prev_text):
-                    # 期间标签是表格的元数据，不是正文里独立的一句话
-                    table.period_label = prev_text.strip()
-                table.caption, table.caption_source = _resolve_caption(history, page_no)
+                top = _block_top(item)
+                table.period_label = _resolve_period(history, page_no, top)
+                table.caption, table.caption_source = _resolve_caption(history, page_no, top)
                 # 表格块保留 Markdown 文本形态，便于落盘与人工核对
                 text = html_table_to_markdown(
                     str(item.get("table_body") or item.get("html") or "")
                 ) or text
 
-        prev_kind, prev_text, prev_noise = kind, text.strip(), item_type in _NOISE_TYPES
-        history.append((kind, text.strip(), prev_noise, page_no))
+        prev_noise = item_type in _NOISE_TYPES
+        history.append((kind, text.strip(), prev_noise, page_no, _block_top(item)))
 
         if kind == "heading":
             # 只有**紧邻**表格的连续标题块才可能是被拆散的表头
@@ -662,19 +670,57 @@ def _is_box_line(text: str) -> bool:
     return bool(_BOX_LINE_RE.search(stripped)) and len(stripped) <= _BOX_LINE_MAX_CHARS
 
 
+def _block_top(item: dict[str, object]) -> float:
+    """块的上边距。
+
+    MinerU 的内容列表**不是版面序**：页眉页脚统一追加到该页末尾，个别正文块
+    也会排错（实测赛力斯 p72/p167 两处，表格上方那一块其实在页面底部）。
+    回溯表名/期间时靠它确认候选确实位于表格之上。取不到坐标时返回 ``-1``，
+    等于「不做位置校验」，保持离线构造的用例可用。
+    """
+    bbox = item.get("bbox")
+    if isinstance(bbox, list) and len(bbox) >= 2 and isinstance(bbox[1], (int, float)):
+        return float(bbox[1])
+    return -1.0
+
+
+def _resolve_period(
+    history: list[tuple[str, str, bool, int, float]], page_no: int, table_top: float
+) -> str:
+    """回溯最近的期间标签。
+
+    只跳过单位行与复选框——它们是表格自己的元数据，挡在中间不该把期间隔断
+    （实测因此漏收 22 张）。遇到别的块就收工，免得把上一张表的年份安到这张表上。
+    """
+    for kind, text, is_noise, page, top in reversed(history):
+        if is_noise:
+            continue
+        stripped = text.strip()
+        if not stripped:
+            continue
+        if page == page_no and 0 <= table_top < top:
+            continue  # 列表序靠前，但物理上在表格下方
+        if _UNIT_LINE_RE.match(stripped) or _is_box_line(stripped):
+            continue
+        if _PERIOD_LABEL_RE.match(stripped):
+            return stripped
+        return ""
+    return ""
+
+
 def _resolve_caption(
-    history: list[tuple[str, str, bool, int]], page_no: int
+    history: list[tuple[str, str, bool, int, float]], page_no: int, table_top: float
 ) -> tuple[str, str]:
     """从表格之前的内容块里回溯，找出这张表的**表外标题**。
 
-    ``history`` 的元素是 ``(kind, text, is_noise, page)``，按出现顺序排列。
+    ``history`` 的元素是 ``(kind, text, is_noise, page, top)``，按出现顺序排列。
 
     Returns:
         ``(caption, caption_source)``；``caption_source`` 的取值见
         :attr:`finkb.common.models.TableBlock.caption_source`。
     """
     skip_next_text = False
-    for kind, text, is_noise, page in reversed(history):
+    for kind, text, is_noise, page, top in reversed(history):
         if is_noise:
             continue
         if kind in {"table", "image", "code"}:
@@ -682,6 +728,8 @@ def _resolve_caption(
         stripped = text.strip()
         if not stripped:
             continue
+        if page == page_no and 0 <= table_top < top:
+            continue  # 列表序靠前，但物理上在表格下方
         if _PERIOD_LABEL_RE.match(stripped) or _UNIT_LINE_RE.match(stripped):
             continue  # 已经是表的元数据，不是表名
         if _TOC_RE.search(stripped):
@@ -707,8 +755,15 @@ def _resolve_caption(
             # 「五、在香港…公布的公司 2025 年年报。」这类编号列表项属于正文，
             # 不是表名（P8 的释义表吃到了上一页备查文件目录的最后一条）
             return "", "missing"
+        if stripped.endswith(_SENTENCE_TAIL):
+            # 整句是正文说明，真名在它上面（P105/P106/P187）
+            continue
+        if len(stripped) < _MIN_CAPTION_CHARS:
+            continue  # 「无」「是」这类溢出格，不可能是表名
         if len(stripped) > _CAPTION_MAX_CHARS:
-            return "", "missing"
+            # 长段落同样不是表名，继续往前找（P150 的「14、固定资产」被三段
+            # 正文挡在后面，提前收工会把表名判成「没有」）
+            continue
         if stripped.endswith(("：", ":")) or _CAPTION_HINT_RE.search(stripped):
             return stripped, "self"
         return stripped, "text"
