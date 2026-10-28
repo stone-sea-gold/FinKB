@@ -3,6 +3,8 @@
 本文件面向**在此目录工作的 AI agent**。开始任何任务前先读
 [`DEVLOG.md`](./DEVLOG.md)。
 
+- **改了 `src/finkb/common/models.py` 或 `src/finkb/parser/*.py` 之后，必须重跑全部 18 份文档**（`--reuse-content-list`，不耗 MinerU 额度）。产物版本由 `report.json` 的 `pipeline_fingerprint` 记录，`audit invariants` 会报「产物陈旧」。
+
 ## 开工前
 
 1. 读 `DEVLOG.md` §1（项目是什么）、§2（当前状态）、§4（模块边界）

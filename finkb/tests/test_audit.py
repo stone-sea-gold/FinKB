@@ -555,3 +555,35 @@ def test_digit_signature_ignores_formatting() -> None:
     assert audit._digit_signature("-2,533,491,781.73") == audit._digit_signature(
         "(2,533,491,781.73)"
     )
+
+def test_pipeline_fingerprint_is_stable_hex():
+    from finkb.version import pipeline_fingerprint
+
+    value = pipeline_fingerprint()
+    assert value == pipeline_fingerprint()
+    assert len(value) == 12 and all(ch in "0123456789abcdef" for ch in value)
+
+
+def test_parse_fingerprint_flags_missing_stamp(tmp_path):
+    (tmp_path / "report.json").write_text("{}", encoding="utf-8")
+    check = audit._check_fingerprint(tmp_path)
+    assert not check.ok
+    assert "无版本戳" in check.detail
+
+
+def test_parse_fingerprint_flags_old_stamp(tmp_path):
+    (tmp_path / "report.json").write_text(
+        '{"pipeline_fingerprint": "000000000000"}', encoding="utf-8"
+    )
+    check = audit._check_fingerprint(tmp_path)
+    assert not check.ok
+    assert "需重跑" in check.detail
+
+
+def test_parse_fingerprint_accepts_current_stamp(tmp_path):
+    from finkb.version import pipeline_fingerprint
+
+    (tmp_path / "report.json").write_text(
+        '{"pipeline_fingerprint": "%s"}' % pipeline_fingerprint(), encoding="utf-8"
+    )
+    assert audit._check_fingerprint(tmp_path).ok

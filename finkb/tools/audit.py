@@ -780,6 +780,29 @@ def check_balance_sheet(logical: list[LogicalTable]) -> list[Check]:
     ]
 
 
+def _check_fingerprint(parsed_dir: Path) -> Check:
+    """产物是否由当前代码生成。
+
+    没有这把尺子，"改了判据但没重跑" 是查不出来的：`_analyze()` 从 `content_list.json`
+    现算，永远不读磁盘上的 `logical_tables/*.md`，所以指标看着没变、产物其实全是旧的。
+    """
+    from finkb.version import pipeline_fingerprint
+
+    report_path = parsed_dir / "report.json"
+    if not report_path.exists():
+        return Check("解析版本", False, "缺 report.json")
+    try:
+        recorded = json.loads(report_path.read_text(encoding="utf-8")).get("pipeline_fingerprint")
+    except (OSError, json.JSONDecodeError) as exc:
+        return Check("解析版本", False, f"report.json 读不出来：{exc}")
+    current = pipeline_fingerprint()
+    if recorded is None:
+        return Check("解析版本", False, f"产物无版本戳（当前 {current}），需重跑")
+    if recorded != current:
+        return Check("解析版本", False, f"产物版本 {recorded} ≠ 当前 {current}，需重跑")
+    return Check("解析版本", True, current)
+
+
 def check_invariants(
     parsed_dir: Path,
     before: dict | None = None,
@@ -793,6 +816,7 @@ def check_invariants(
     """
     current, pages, stitched, logical = _analyze(parsed_dir)
     checks: list[Check] = []
+    checks.append(_check_fingerprint(parsed_dir))
     allowed = set(allow_digest)
 
     # 1. 数值不变性 / 2. 页码不变性（需要基线快照）

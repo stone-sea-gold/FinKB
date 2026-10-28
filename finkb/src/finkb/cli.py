@@ -28,6 +28,7 @@ import sys
 from pathlib import Path
 
 from finkb.common.models import StitchedTable
+from finkb.version import pipeline_fingerprint
 from finkb.parser.mineru_client import (
     DEFAULT_PAGE_LIMIT,
     MineruClient,
@@ -235,6 +236,7 @@ def run_parse(args: argparse.Namespace) -> int:
 
     report = {
         "doc_id": doc_id,
+        "pipeline_fingerprint": pipeline_fingerprint(),
         "source": document.source,
         "pdf": str(pdf_path),
         "pages": len(document.pages),
