@@ -1819,6 +1819,67 @@ def _cmd_recall(args: argparse.Namespace) -> int:
     return 0 if result["covered"] == result["total"] else 4
 
 
+def _cmd_corpus(args: argparse.Namespace) -> int:
+    """把整份语料过一遍：守恒律、数字格式异常、表头覆盖率，合成一张表。
+
+    每改一版解析代码就跑一次，比逐份点命令快得多；哪一份退步一眼能看见。
+    """
+    root = Path(args.root)
+    rows = []
+    for doc in sorted(p for p in root.iterdir() if p.is_dir() and not p.name.startswith("_")):
+        if not (doc / "content_list.json").exists():
+            continue
+        snapshot, pages, _, logical = _analyze(doc)
+        checks = check_invariants(doc)
+        failed = [check for check in checks if not check.ok]
+        with_header = sum(1 for table in logical if table.header)
+        rows.append(
+            {
+                "doc": doc.name,
+                "pages": len(pages),
+                "logical": len(logical),
+                "header": with_header,
+                "bare": len(logical) - with_header,
+                "invariants": len(checks) - len(failed),
+                "total_invariants": len(checks),
+                "numbers": len(find_malformed_numbers(logical)),
+                "failures": [f"{check.name}：{check.detail}" for check in failed],
+            }
+        )
+
+    total_tables = sum(row["logical"] for row in rows)
+    total_header = sum(row["header"] for row in rows)
+    lines = [
+        "# 语料体检",
+        "",
+        f"共 {len(rows)} 份、{total_tables} 张逻辑表，"
+        f"有表头 {total_header}（{total_header / total_tables:.1%}）"
+        if total_tables
+        else "# 语料体检\n\n（没有找到已解析的文档）",
+        "",
+        "| 文档 | 页 | 逻辑表 | 有表头 | 裸表 | 守恒律 | 数字异常 |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for row in rows:
+        lines.append(
+            f"| `{row['doc']}` | {row['pages']} | {row['logical']} | {row['header']} | "
+            f"{row['bare']} | {row['invariants']}/{row['total_invariants']} | {row['numbers']} |"
+        )
+    broken = [row for row in rows if row["failures"]]
+    if broken:
+        lines += ["", "## 未通过的守恒律", ""]
+        for row in broken:
+            for failure in row["failures"]:
+                lines.append(f"- `{row['doc']}` — {failure}")
+    text = "\n".join(lines) + "\n"
+    if args.out:
+        target = Path(args.out)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+    print(text)
+    return 0 if not broken else 4
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="审计与核验：快照 / 对照 / 守恒律 / 人工核验清单",
@@ -1843,6 +1904,10 @@ def build_parser() -> argparse.ArgumentParser:
     spans.add_argument("--out", help="报告输出路径（.md），省略则打印到标准输出")
     spans.set_defaults(func=_cmd_page_spans)
 
+    corpus = sub.add_parser("corpus", help="整份语料的体检表")
+    corpus.add_argument("--root", default="data/parsed")
+    corpus.add_argument("--out")
+    corpus.set_defaults(func=_cmd_corpus)
     numbers = sub.add_parser("numbers", help="数字格式异常（千分位粘连、小数逗号）")
     numbers.add_argument("--doc", required=True)
     numbers.add_argument("--out")
