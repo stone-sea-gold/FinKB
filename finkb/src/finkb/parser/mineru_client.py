@@ -128,6 +128,7 @@ class ParsedDocument:
     markdown: str
     content_list: list[dict[str, Any]] = field(default_factory=list)
     source: str = "mineru"
+    page_offset: int = 0
 
     def to_page_anchored_markdown(self) -> str:
         """把页面 IR 渲染回页码锚定 Markdown（L0 的落盘格式）。"""
@@ -326,8 +327,18 @@ class MineruClient:
         return extract_dir
 
     # -- 解析结果 ----------------------------------------------------------- #
-    def parse_extracted(self, extract_dir: Path, doc_id: str) -> ParsedDocument:
-        """把解压后的目录解析为 :class:`ParsedDocument`。"""
+    def parse_extracted(
+        self,
+        extract_dir: Path,
+        doc_id: str,
+        pdf_path: Path | None = None,
+        page_ranges: str | None = None,
+    ) -> ParsedDocument:
+        """把解压后的目录解析为 :class:`ParsedDocument`。
+
+        给了 ``pdf_path`` 就先做页码校准：MinerU 漏页时 ``page_idx`` 会比物理页小，
+        不校准的话整份文档的表格页码会集体偏一页（见 :func:`detect_page_offset`）。
+        """
         md_files = sorted(extract_dir.rglob("*.md"))
         json_files = sorted(extract_dir.rglob("*content_list.json"))
         if not md_files:
@@ -338,8 +349,16 @@ class MineruClient:
         if json_files:
             content_list = json.loads(json_files[0].read_text(encoding="utf-8"))
 
+        offset = 0
+        if content_list and pdf_path is not None:
+            offset, _ = detect_page_offset(content_list, pdf_path)
+            if offset:
+                content_list = shift_page_idx(content_list, offset)
+
         pages = (
-            content_list_to_pages(content_list, doc_id)
+            content_list_to_pages(
+                content_list, doc_id, use_page_number_map=page_ranges is not None
+            )
             if content_list
             else parse_page_anchored_markdown(markdown, default_doc=doc_id)
         )
@@ -349,6 +368,7 @@ class MineruClient:
             markdown=markdown,
             content_list=content_list,
             source="mineru",
+            page_offset=offset,
         )
 
     def parse_pdf(
@@ -365,7 +385,9 @@ class MineruClient:
         self.upload_file(upload_url, pdf_path)
         zip_url = self.wait_for_batch(batch_id)
         extract_dir = self.download_zip(zip_url, workdir / doc_id)
-        return self.parse_extracted(extract_dir, doc_id)
+        return self.parse_extracted(
+            extract_dir, doc_id, pdf_path=pdf_path, page_ranges=page_ranges
+        )
 
     def parse_pdf_split(
         self,
@@ -391,11 +413,15 @@ class MineruClient:
             )
             batches.append((start, list(part.content_list)))
         merged = merge_batches(batches)
+        offset, _ = detect_page_offset(merged, pdf_path)
+        if offset:
+            merged = shift_page_idx(merged, offset)
         return ParsedDocument(
             doc_id=doc_id,
             pages=content_list_to_pages(merged, doc_id),
             markdown="",
             content_list=merged,
+            page_offset=offset,
         )
 
     def parse_url(self, file_url: str, doc_id: str, workdir: Path) -> ParsedDocument:
@@ -567,14 +593,114 @@ def _is_heading(item: dict[str, Any]) -> bool:
     return item_type == "text" and item.get("text_level") is not None
 
 
+_DIGIT_RE = re.compile(r"\D")
+_PAGE_OFFSET_RANGE = 3
+_MIN_OFFSET_DIGITS = 6
+_OFFSET_SAMPLE_PER_TABLE = 6
+
+
+def extract_page_texts(pdf_path: Path) -> list[str] | None:
+    """逐页取纯文本，只留数字（用于页码校准）；没有可用库时返回 ``None``。
+
+    优先 PyMuPDF：pypdf 对部分年报取不全表格文字（000625 半年报第 4 页「主要财务
+    指标」整表取不到），会让校准得出错误偏移。
+    """
+    try:
+        import pymupdf
+    except ImportError:
+        pymupdf = None
+    if pymupdf is not None:
+        with pymupdf.open(str(pdf_path)) as document:
+            return [_DIGIT_RE.sub("", page.get_text()) for page in document]
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        return None
+    reader = PdfReader(str(pdf_path))
+    return [_DIGIT_RE.sub("", page.extract_text() or "") for page in reader.pages]
+
+
+def _table_digit_samples(content_list: list[dict[str, Any]]) -> list[tuple[int, list[str]]]:
+    """每张表取几个够长数字的指纹，连同它自称的页码。"""
+    samples: list[tuple[int, list[str]]] = []
+    for item in content_list:
+        if str(item.get("type")) != "table":
+            continue
+        html = str(item.get("table_body") or item.get("html") or "")
+        found: list[str] = []
+        for cell in re.findall(r"<td[^>]*>(.*?)</td>", html, re.S):
+            digits = _DIGIT_RE.sub("", cell)
+            if len(digits) >= _MIN_OFFSET_DIGITS and digits not in found:
+                found.append(digits)
+        if found:
+            step = max(1, len(found) // _OFFSET_SAMPLE_PER_TABLE)
+            samples.append((int(item.get("page_idx", 0)) + 1, found[::step][: _OFFSET_SAMPLE_PER_TABLE]))
+    return samples
+
+
+def shift_page_idx(content_list: list[dict[str, Any]], offset: int) -> list[dict[str, Any]]:
+    """把 ``page_idx`` 整体平移——校准后的 ``content_list`` 要能原样落盘复用。"""
+    shifted: list[dict[str, Any]] = []
+    for item in content_list:
+        copy = dict(item)
+        copy["page_idx"] = int(item.get("page_idx", 0)) + offset
+        shifted.append(copy)
+    return shifted
+
+
+def detect_page_offset(
+    content_list: list[dict[str, Any]],
+    pdf_path: Path,
+) -> tuple[int, str]:
+    """表页码与 PDF 物理页不一致时，算出该补几页。
+
+    典型成因：MinerU 漏掉封面之类的首页，``page_idx`` 因此比物理页小——000625
+    半年报 136 页只处理了 135 页，每张表都早了一页。按「把抽样数字挪到
+    ±N 页再查一遍」挑命中最多的偏移；命中率不够（<80%）就不猜，返回 0。
+    """
+    samples = _table_digit_samples(content_list)
+    texts = extract_page_texts(pdf_path) if pdf_path.exists() else None
+    if texts is None:
+        total = pdf_page_count(pdf_path)
+        mineru_pages = max((int(i.get("page_idx", 0)) for i in content_list), default=-1) + 1
+        offset = max(0, total - mineru_pages)
+        return (offset if 0 < offset <= _PAGE_OFFSET_RANGE else 0), "page_count"
+    if not samples:
+        return 0, "inconclusive"
+
+    scored: dict[int, list[int]] = {}
+    for shift in range(-_PAGE_OFFSET_RANGE, _PAGE_OFFSET_RANGE + 1):
+        hit = seen = 0
+        for page_no, digits in samples:
+            window = "".join(texts[max(0, page_no - 1 + shift) : page_no + shift])
+            for digit in digits:
+                seen += 1
+                if digit in window:
+                    hit += 1
+        scored[shift] = [hit, seen]
+
+    best = max(scored, key=lambda shift: scored[shift][0] / max(scored[shift][1], 1))
+    hit, seen = scored[best]
+    if seen == 0 or hit * 5 < seen * 4:
+        return 0, "inconclusive"
+    return best, "verified"
+
+
 def content_list_to_pages(
     content_list: list[dict[str, Any]],
     doc_id: str,
+    page_offset: int = 0,
+    use_page_number_map: bool = False,
 ) -> list[Page]:
     """把 MinerU 的 ``content_list.json`` 转成按页组织的 ``Page``。
 
-    **物理页码优先取 ``page_number`` 块的真实值**，其次才退回 ``page_idx + 1``。
-    原因见 :func:`_build_page_number_map`——分页解析时 ``page_idx`` 会从 0 重编号。
+    **整份解析时页码就是 ``page_idx + 1``**；只有按页范围解析（``--pages``）
+    才需要 ``page_number`` 块把重编号的 ``page_idx`` 还原成真实页，由
+    ``use_page_number_map`` 打开。原因见 :func:`_build_page_number_map`。
+
+    早先无条件用 ``page_number``，在有封面的文档上会整体偏一页：000625 半年报的
+    正文页码从 1 开始（第 2 页才是第 1 页），照抄「页脚写几就是第几页」会让每张表
+    的页码都小 1。
 
     页眉/页脚/页码块按 MinerU 的类型标签**直接标记为 ``is_noise=True``**，
     不需要统计推断。
@@ -584,7 +710,7 @@ def content_list_to_pages(
     """
     pages: dict[int, Page] = {}
     current_section: str | None = None
-    page_map = _build_page_number_map(content_list)
+    page_map = _build_page_number_map(content_list) if use_page_number_map else {}
     last_table: TableBlock | None = None
     tables_on_page: dict[int, int] = {}
     heading_run: list[str] = []
@@ -595,7 +721,7 @@ def content_list_to_pages(
 
     for item in content_list:
         raw_page_idx = int(item.get("page_idx", 0))
-        page_no = page_map.get(raw_page_idx, raw_page_idx + 1)
+        page_no = page_map.get(raw_page_idx, raw_page_idx + 1) + page_offset
         item_type = str(item.get("type", "text"))
         text = _item_text(item)
         if not text.strip():

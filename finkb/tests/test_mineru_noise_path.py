@@ -203,9 +203,26 @@ def test_page_number_type_overrides_renumbered_page_idx() -> None:
         {"type": "text", "text": "第二页正文", "page_idx": 1},
         {"type": "page_number", "text": "44", "page_idx": 1},
     ]
-    pages = content_list_to_pages(content_list, DOC)
+    pages = content_list_to_pages(content_list, DOC, use_page_number_map=True)
 
     assert [p.number for p in pages] == [43, 44]
+
+
+def test_full_parse_ignores_page_number_offset() -> None:
+    """整份解析时不该照抄页脚：有封面的文档页脚比物理页小 1。
+
+    000625 半年报的正文页码从 1 开始（第 2 页才是第 1 页），照抄会让每张表都早
+    一页——23% 的数值回查命中率就是这么来的。
+    """
+    content_list = [
+        {"type": "text", "text": "正文", "page_idx": 0},
+        {"type": "page_number", "text": "4", "page_idx": 0},
+        {"type": "text", "text": "第二页正文", "page_idx": 1},
+        {"type": "page_number", "text": "5", "page_idx": 1},
+    ]
+    pages = content_list_to_pages(content_list, DOC)
+
+    assert [p.number for p in pages] == [1, 2]
 
 
 def test_page_idx_used_when_page_number_missing() -> None:

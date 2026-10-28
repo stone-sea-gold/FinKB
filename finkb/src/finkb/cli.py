@@ -33,6 +33,8 @@ from finkb.parser.mineru_client import (
     MineruClient,
     chunk_ranges,
     content_list_to_pages,
+    detect_page_offset,
+    shift_page_idx,
     MineruConfig,
     MineruError,
     OfflinePdfParser,
@@ -135,14 +137,19 @@ def run_parse(args: argparse.Namespace) -> int:
         # 不必重新调用 MinerU，既省额度又能快速验证修复效果。
         reuse_file = Path(reuse_path).expanduser().resolve()
         content_list = json.loads(reuse_file.read_text(encoding="utf-8"))
+        offset, offset_source = detect_page_offset(content_list, pdf_path)
+        if offset:
+            content_list = shift_page_idx(content_list, offset)
         document = ParsedDocument(
             doc_id=doc_id,
             pages=content_list_to_pages(content_list, doc_id),
             markdown="",
             content_list=content_list,
             source="mineru-reuse",
+            page_offset=offset,
         )
         print(f"模式     : 复用已有解析结果 {reuse_file}")
+        print(f"页码校准 : {offset:+d} 页（{offset_source}）")
     elif args.offline:
         print("模式     : 离线（pypdf 兜底，无表格结构）")
         document: ParsedDocument = OfflinePdfParser(doc_id).parse(pdf_path)
