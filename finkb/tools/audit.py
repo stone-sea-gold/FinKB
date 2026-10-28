@@ -1897,12 +1897,11 @@ def _cmd_recall(args: argparse.Namespace) -> int:
     return 0 if result["covered"] == result["total"] else 4
 
 
-def _cmd_corpus(args: argparse.Namespace) -> int:
-    """把整份语料过一遍：守恒律、数字格式异常、表头覆盖率，合成一张表。
+BASELINE_SCHEMA = 1
 
-    每改一版解析代码就跑一次，比逐份点命令快得多；哪一份退步一眼能看见。
-    """
-    root = Path(args.root)
+
+def collect_corpus(root: Path) -> list[dict]:
+    """把整份语料过一遍，返回每份文档的指标行。"""
     rows = []
     for doc in sorted(p for p in root.iterdir() if p.is_dir() and not p.name.startswith("_")):
         if not (doc / "content_list.json").exists():
@@ -1924,16 +1923,87 @@ def _cmd_corpus(args: argparse.Namespace) -> int:
                 "failures": [f"{check.name}：{check.detail}" for check in failed],
             }
         )
+    return rows
+
+
+def compare_with_baseline(rows: list[dict], baseline: dict) -> list[str]:
+    """对照基线找退步，返回人话说明的列表（空列表表示没有退步）。
+
+    只报**变差**：新增文档、表头变多、表数因判据改进而变化都不算。表数变化单独提
+    一句是为了让人看见「这个改动动了结构」，不一定是退步。
+    """
+    saved = baseline.get("docs", {})
+    current = {row["doc"]: row for row in rows}
+    problems: list[str] = []
+    for doc, old in saved.items():
+        row = current.get(doc)
+        if row is None:
+            problems.append(f"`{doc}` 从语料里消失了")
+            continue
+        if row["header"] < old["header"]:
+            problems.append(
+                f"`{doc}` 有表头 {old['header']} → {row['header']}（退步 {old['header'] - row['header']} 张）"
+            )
+        if row["invariants"] < old["invariants"]:
+            problems.append(
+                f"`{doc}` 守恒律通过 {old['invariants']} → {row['invariants']}"
+            )
+    return problems
+
+
+def write_baseline(rows: list[dict], target: Path) -> None:
+    """把当前指标存成基线文件（进 git，供下一版对照）。"""
+    payload = {
+        "schema": BASELINE_SCHEMA,
+        "docs": {
+            row["doc"]: {
+                "pages": row["pages"],
+                "logical": row["logical"],
+                "header": row["header"],
+                "invariants": row["invariants"],
+                "total_invariants": row["total_invariants"],
+            }
+            for row in rows
+        },
+    }
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _cmd_baseline(args: argparse.Namespace) -> int:
+    """写入或展示语料基线。"""
+    rows = collect_corpus(Path(args.root))
+    target = Path(args.out)
+    write_baseline(rows, target)
+    print(f"基线已写入 {target}（{len(rows)} 份）")
+    return 0
+
+
+def _cmd_corpus(args: argparse.Namespace) -> int:
+    """把整份语料过一遍：守恒律、数字格式异常、表头覆盖率，合成一张表。
+
+    每改一版解析代码就跑一次，比逐份点命令快得多；哪一份退步一眼能看见。
+    """
+    rows = collect_corpus(Path(args.root))
+    problems: list[str] = []
+    if args.baseline:
+        path = Path(args.baseline)
+        if path.exists():
+            problems = compare_with_baseline(rows, json.loads(path.read_text(encoding="utf-8")))
+        else:
+            print(f"（基线 {path} 不存在，跳过对照）")
 
     total_tables = sum(row["logical"] for row in rows)
     total_header = sum(row["header"] for row in rows)
     lines = [
         "# 语料体检",
         "",
-        f"共 {len(rows)} 份、{total_tables} 张逻辑表，"
-        f"有表头 {total_header}（{total_header / total_tables:.1%}）"
-        if total_tables
-        else "# 语料体检\n\n（没有找到已解析的文档）",
+        (
+            f"共 {len(rows)} 份、{total_tables} 张逻辑表，"
+            f"有表头 {total_header}（{total_header / total_tables:.1%}）"
+            if total_tables
+            else "# 语料体检\n\n（没有找到已解析的文档）"
+        ),
         "",
         "| 文档 | 页 | 逻辑表 | 有表头 | 裸表 | 守恒律 | 数字异常 |",
         "| --- | --- | --- | --- | --- | --- | --- |",
@@ -1949,13 +2019,15 @@ def _cmd_corpus(args: argparse.Namespace) -> int:
         for row in broken:
             for failure in row["failures"]:
                 lines.append(f"- `{row['doc']}` — {failure}")
+    if problems:
+        lines += ["", "## 相对基线退步", ""] + [f"- {item}" for item in problems]
     text = "\n".join(lines) + "\n"
     if args.out:
         target = Path(args.out)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text, encoding="utf-8")
     print(text)
-    return 0 if not broken else 4
+    return 0 if not broken and not problems else 4
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1985,7 +2057,13 @@ def build_parser() -> argparse.ArgumentParser:
     corpus = sub.add_parser("corpus", help="整份语料的体检表")
     corpus.add_argument("--root", default="data/parsed")
     corpus.add_argument("--out")
+    corpus.add_argument("--baseline", help="对照基线 JSON；退步时退出码 4")
     corpus.set_defaults(func=_cmd_corpus)
+
+    baseline = sub.add_parser("baseline", help="写入语料基线（供以后对照退步）")
+    baseline.add_argument("--root", default="data/parsed")
+    baseline.add_argument("--out", default="config/corpus-baseline.json")
+    baseline.set_defaults(func=_cmd_baseline)
     numbers = sub.add_parser("numbers", help="数字格式异常（千分位粘连、小数逗号）")
     numbers.add_argument("--doc", required=True)
     numbers.add_argument("--out")

@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -710,3 +711,55 @@ def test_unaccounted_rows_ignores_section_and_repeated_header(tmp_path) -> None:
         audit._analyze = original
 
 
+
+
+def test_baseline_flags_a_header_drop() -> None:
+    """有表头的张数变少就是退步——这是本项目唯一直接反映解析质量的数。"""
+    baseline = {"docs": {"d": {"header": 10, "invariants": 13, "logical": 20, "pages": 9}}}
+    rows = [{"doc": "d", "header": 8, "invariants": 13, "logical": 20, "pages": 9}]
+    problems = audit.compare_with_baseline(rows, baseline)
+    assert problems and "10 → 8" in problems[0]
+
+
+def test_baseline_ignores_improvements_and_new_documents() -> None:
+    """表头变多、新增文档都不算退步，否则基线会天天报警。"""
+    baseline = {"docs": {"d": {"header": 10, "invariants": 13, "logical": 20, "pages": 9}}}
+    rows = [
+        {"doc": "d", "header": 12, "invariants": 13, "logical": 22, "pages": 9},
+        {"doc": "new", "header": 1, "invariants": 13, "logical": 3, "pages": 2},
+    ]
+    assert audit.compare_with_baseline(rows, baseline) == []
+
+
+def test_baseline_flags_a_document_that_disappeared() -> None:
+    """语料里的文档消失（路径写错、产物被删）必须报出来。"""
+    baseline = {"docs": {"gone": {"header": 5, "invariants": 13, "logical": 5, "pages": 3}}}
+    problems = audit.compare_with_baseline([], baseline)
+    assert problems and "消失了" in problems[0]
+
+
+def test_baseline_roundtrip_keeps_only_the_numbers_that_matter(tmp_path) -> None:
+    """基线文件只存判断退步需要的数，不存明细——它要进 git，不能太大。"""
+    rows = [
+        {
+            "doc": "d",
+            "pages": 9,
+            "logical": 20,
+            "header": 10,
+            "bare": 10,
+            "invariants": 13,
+            "total_invariants": 13,
+            "numbers": 0,
+            "failures": [],
+        }
+    ]
+    target = tmp_path / "baseline.json"
+    audit.write_baseline(rows, target)
+    saved = json.loads(target.read_text(encoding="utf-8"))
+    assert saved["docs"]["d"] == {
+        "pages": 9,
+        "logical": 20,
+        "header": 10,
+        "invariants": 13,
+        "total_invariants": 13,
+    }

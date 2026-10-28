@@ -341,6 +341,29 @@ MinerU 对跨页的宽表常常把两页并进**同一个**表格块，下一页
 属于用副作用换副作用。第一版就是在 `html_table_layout` 里删的，`test_two_kv_rows_are_not_a_header`
 与 `test_stitched_rows_have_uniform_width` 同时红——两个测试正好各自扑到一边。
 
+### ADR-028 语料基线：让「这一版比上一版好」变成可判定的事
+
+**背景**：每改一版都能报出「有表头 94.2%」，但没有人记得上一版是多少。二十几轮下来，
+`corpus` 输出的数字是**状态**不是**变化**——改坏了也能看到一张漂亮的表。
+
+**决定**：`tools/audit.py baseline` 把 22 份文档的 `pages / logical / header /
+invariants` 写进 `config/corpus-baseline.json`（进 git，约 3KB）；`corpus --baseline`
+对照它，**只在变差时报错**：
+
+- 某份有表头张数减少 → 报「10 → 8（退步 2 张）」
+- 某份守恒律通过数减少 → 报出来
+- 某份文档从语料里消失 → 报出来（路径写错、产物被误删都会这样）
+
+表头变多、新增文档、表数因判据改进而变**都不报**——那是改进，不是退步。
+
+**为什么只存这五个数**：基线要进 git、要被 review。明细（每张表的表号）在
+`data/reports/` 里，基线只回答「有没有变差」。
+
+**失效条件**：基线是**在同一份 `content_list.json` 上**算出来的。换了 MinerU 版本、
+重新解析出新的 `content_list.json`，基线就该重写（`audit baseline` 直接覆盖）。
+
+`scripts/check.sh` 已接上，退步时整条命令退出码 4。
+
 ## 1. 项目是什么（30 秒版）
 
 **FinKB** 是一个 A 股财报知识库系统，目标是把传统 RAG 的检索能力与 LLM Wiki 的
