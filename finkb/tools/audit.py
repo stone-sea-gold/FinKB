@@ -836,6 +836,74 @@ def _check_fingerprint(parsed_dir: Path) -> Check:
     return Check("解析版本", True, current)
 
 
+
+def _check_row_accounting(parsed_dir: Path) -> Check:
+    """每一行都必须有去处：进逻辑表、当段表头、当分节标题。"""
+    lost = find_unaccounted_rows(parsed_dir)
+    if not lost:
+        return Check("行去向", True, "所有原始行都归到了逻辑表、表头或分节标题")
+    sample = "；".join(f"{item['table']} r{item['row']}" for item in lost[:3])
+    return Check("行去向", False, f"{len(lost)} 行没有去处：{sample}")
+
+
+def find_unaccounted_rows(parsed_dir: Path) -> list[dict]:
+    """找出既没进任何逻辑表、也没被当成分节标题或表头的原始行。
+
+    一行的去向有五种：进了某张逻辑表、成了该段的表头、成了分节标题、
+    成了前面某段的表头（多行表头）、或者是重复表头被吸收。五种都不属于
+    的行才是真的不见了。
+    """
+    _, _, stitched, logical = _analyze(parsed_dir)
+    by_parent: dict[str, list] = {}
+    for table in logical:
+        by_parent.setdefault(table.parent_id, []).append(table)
+
+    lost: list[dict] = []
+    for table in stitched:
+        segments = sorted(by_parent.get(table.parent_id, []), key=lambda t: t.row_range[0])
+        covered: set[int] = set()
+        end_of_previous = 0
+        for segment in segments:
+            start, end = segment.row_range
+            covered |= set(range(start, end))
+            # 段前到上一段结束之间是这一段的表头行（可能是多行）
+            covered |= set(range(end_of_previous, start))
+            end_of_previous = end
+        section = {index for index, _ in table.section_rows}
+        for index in sorted(set(range(len(table.rows))) - covered - section):
+            cells = tuple(cell.strip() for cell in table.rows[index])
+            if sum(1 for cell in cells if cell) <= 1:
+                continue
+            lost.append(
+                {
+                    "table": table.parent_id,
+                    "row": index,
+                    "cells": [cell for cell in cells if cell][:6],
+                }
+            )
+    return lost
+
+
+def render_row_report(root: Path) -> str:
+    lines = ["# 行去向核查", ""]
+    total = 0
+    for parsed_dir in sorted(root.iterdir()):
+        if not parsed_dir.is_dir() or parsed_dir.name.startswith("_"):
+            continue
+        if not (parsed_dir / "content_list.json").exists():
+            continue
+        lost = find_unaccounted_rows(parsed_dir)
+        total += len(lost)
+        lines.append(f"## {parsed_dir.name}：{len(lost)} 行")
+        for item in lost[:12]:
+            lines.append(f"- `{item['table']}` r{item['row']}：{' | '.join(item['cells'])}")
+        lines.append("")
+    lines.insert(2, f"全语料 {total} 行既没进逻辑表、也不是分节标题或重复表头。")
+    lines.insert(3, "")
+    return "\n".join(lines)
+
+
+
 def check_invariants(
     parsed_dir: Path,
     before: dict | None = None,
@@ -850,6 +918,7 @@ def check_invariants(
     current, pages, stitched, logical = _analyze(parsed_dir)
     checks: list[Check] = []
     checks.append(_check_fingerprint(parsed_dir))
+    checks.append(_check_row_accounting(parsed_dir))
     allowed = set(allow_digest)
 
     # 1. 数值不变性 / 2. 页码不变性（需要基线快照）
@@ -1975,56 +2044,3 @@ def main(argv: list[str] | None = None) -> int:
 if __name__ == "__main__":
     raise SystemExit(main())
 
-
-def find_unaccounted_rows(parsed_dir: Path) -> list[dict]:
-    """找出既没进任何逻辑表、也没被当成分节标题的原始行。
-
-    一行的去向只有四种：进了某张逻辑表、成了段内表头、成了分节标题、
-    或者是中间吸收掉的重复表头。四种都不属于的行才是真的不见了。
-    """
-    _, _, stitched, logical = _analyze(parsed_dir)
-    headers = {tuple(c.strip() for c in table.header) for table in logical if table.header}
-    by_parent: dict[str, list] = {}
-    for table in logical:
-        by_parent.setdefault(table.parent_id, []).append(table)
-
-    lost: list[dict] = []
-    for table in stitched:
-        covered: set[int] = set()
-        for table_logical in by_parent.get(table.parent_id, []):
-            start, end = table_logical.row_range
-            covered |= set(range(start, end))
-        section = {index for index, _ in table.section_rows}
-        for index in sorted(set(range(len(table.rows))) - covered - section):
-            cells = tuple(cell.strip() for cell in table.rows[index])
-            if sum(1 for cell in cells if cell) <= 1:
-                continue
-            if cells in headers:
-                continue
-            lost.append(
-                {
-                    "table": table.parent_id,
-                    "row": index,
-                    "cells": [cell for cell in cells if cell][:6],
-                }
-            )
-    return lost
-
-
-def render_row_report(root: Path) -> str:
-    lines = ["# 行去向核查", ""]
-    total = 0
-    for parsed_dir in sorted(root.iterdir()):
-        if not parsed_dir.is_dir() or parsed_dir.name.startswith("_"):
-            continue
-        if not (parsed_dir / "content_list.json").exists():
-            continue
-        lost = find_unaccounted_rows(parsed_dir)
-        total += len(lost)
-        lines.append(f"## {parsed_dir.name}：{len(lost)} 行")
-        for item in lost[:12]:
-            lines.append(f"- `{item['table']}` r{item['row']}：{' | '.join(item['cells'])}")
-        lines.append("")
-    lines.insert(2, f"全语料 {total} 行既没进逻辑表、也不是分节标题或重复表头。")
-    lines.insert(3, "")
-    return "\n".join(lines)
