@@ -232,6 +232,37 @@ def classify_cut(
     return SectionCut(row_index, text, "data", False, "后继为数据行，按分节标签处理")
 
 
+
+def _absorb_repeated_header(
+    header: list[str] | None, segment: list[list[str]]
+) -> tuple[list[str] | None, list[list[str]], int]:
+    """把段首「重复打印的表头」并回列名，不让它冒充数据行。
+
+    MinerU 对跨页的宽表常常把两页并进同一个表格块，下一页又打了一遍表头；那一行
+    与列名在**多列上同名**，真正的数据行不会这样。吸收时顺带用它的内容补上列名里
+    空着的格子——「表头中间有空洞」正是同一件事的另一半。
+    """
+    if header is None:
+        return header, segment, 0
+    head = list(header)
+    dropped = 0
+    while segment:
+        row = segment[0]
+        repeated = sum(
+            1
+            for column, cell in enumerate(row)
+            if column < len(head) and cell.strip() and cell.strip() == head[column].strip()
+        )
+        if repeated < 2:
+            break
+        for column, cell in enumerate(row):
+            if column < len(head) and not head[column].strip() and cell.strip():
+                head[column] = cell.strip()
+        segment = segment[1:]
+        dropped += 1
+    return head, segment, dropped
+
+
 def _section_kind(
     own_header: bool,
     cut: SectionCut | None,
@@ -451,6 +482,9 @@ def split_sections(
         segment = rows[start:end]
         if not segment:
             return
+        header, segment, dropped = _absorb_repeated_header(header, segment)
+        if not segment:
+            return
         kind = _section_kind(header_source == "self", cut, segment, header)
         seq += 1
         result.tables.append(
@@ -463,7 +497,7 @@ def split_sections(
                 rows=segment,
                 page_start=table.page_start,
                 page_end=table.page_end,
-                row_range=(origin[start][0], origin[end - 1][1]),
+                row_range=(origin[start + dropped][0], origin[end - 1][1]),
                 kind=kind,
                 # 段自带表头时，那一行已经被切进 rows，层数信息在这里没有意义；
                 # 只有继承父表表头的段才拿得到父表的多层表头原貌。

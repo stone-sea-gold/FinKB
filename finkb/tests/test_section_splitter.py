@@ -14,6 +14,21 @@ from finkb.parser.section_splitter import (
 DOC = "002594_2025_年报"
 
 
+def test_section_absorbs_a_repeated_header_row() -> None:
+    """段首重复打印的表头并回列名，不当数据行；顺带补上列名的空洞。"""
+    from finkb.parser.section_splitter import _absorb_repeated_header
+
+    header = ["股东名称", "持股比例", ""]
+    segment = [
+        ["股东名称", "持股比例", "数量"],
+        ["比亚迪", "17.99%", "1,783"],
+    ]
+    new_header, rows, dropped = _absorb_repeated_header(header, segment)
+    assert dropped == 1
+    assert new_header == ["股东名称", "持股比例", "数量"]
+    assert rows == [["比亚迪", "17.99%", "1,783"]]
+
+
 def make_table(
     rows: list[list[str]],
     header: list[str] | None = None,

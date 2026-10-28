@@ -329,3 +329,22 @@ def test_single_column_group_can_be_renamed_in_layer_two() -> None:
         "本次变动后/比例",
     ]
     assert layout.rows == [["有限售条件股份", "648,851,914", "21.35%", "1,297,703,828", "1,946,555,742", "21.35%"]]
+
+
+def test_cross_page_repeated_header_is_a_second_layer() -> None:
+    """同一张表在下一页又打了一遍表头，MinerU 并成一个表格块后它成了「数据行」。
+
+    判据是同名——真正的数据行不会和列名一个字不差地重名。
+    """
+    html = """
+    <table>
+      <tr><td>股东名称</td><td>持股比例</td><td></td></tr>
+      <tr><td>股东名称</td><td>持股比例</td><td>数量</td></tr>
+      <tr><td>比亚迪</td><td>17.99%</td><td>1,783</td></tr>
+    </table>
+    """
+    layout = html_table_layout(html)
+    assert len(layout.header_rows) == 2
+    # 补上第一层空着的列名，同名列在压平时去重
+    assert layout.header == ["股东名称", "持股比例", "数量"]
+    assert layout.rows == [["比亚迪", "17.99%", "1,783"]]

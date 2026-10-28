@@ -458,7 +458,8 @@ def _count_header_layers(
 
     * **R1** 当前层存在 ``colspan>1`` 的分组格，且不是「单格跨满全宽」；
     * **R2** 下一层的每个自有单元格都落在这些分组格覆盖的列区间内；
-    * **R3** 下一层的自有单元格里没有纯数值。
+    * **R3** 下一层的自有单元格里没有纯数值；
+    * **R4** 下一层与上一层在至少两列上**同名**（跨页重复打印的表头）。
 
     R2 + R3 合起来表达的是「上一层在做分组，下一层在做细分」——这正是双层
     表头的定义。任何一层不满足就停下，宁可不合并也不硬压。
@@ -466,6 +467,24 @@ def _count_header_layers(
     layers = 0
     index = start
     while index + 1 < len(raw_rows):
+        # **R4 跨页重复表头**：同一张表在下一页又打了一遍表头，MinerU 把两页并进同一个
+        # 表格块，重复的表头就成了「数据行」。判据是这一行与上一层在多列上**同名**——
+        # 真正的数据行不会这样做。吸收成表头层后，压平会把两条同名列去重、
+        # 也会把「上层留空、下一层才有名字」的列名补上。
+        upper = rows[index]
+        lower = rows[index + 1]
+        repeated = sum(
+            1
+            for column, cell in enumerate(lower)
+            if cell.strip()
+            and column < len(upper)
+            and cell.strip() == upper[column].strip()
+        )
+        if repeated >= 2:
+            layers += 1
+            index += 1
+            continue
+
         here = _cell_columns_at(raw_rows, index)
         groups = [cell for cell in here if cell[1] - cell[0] > 1]
         if not groups:
