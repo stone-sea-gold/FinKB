@@ -20,6 +20,7 @@ import httpx
 
 from finkb.fact_engine.metric_dict import Metric
 from finkb.fact_engine.selector import SourceTable, norm_label
+from finkb.fact_engine.verifier import parse_number
 
 SYSTEM_PROMPT = """你是财务报表结构化助手。你只做一件事：把表格里“明确写出来的数字”对到给定指标字典。
 
@@ -80,7 +81,7 @@ class LLMClient:
             ],
             "response_format": {"type": "json_object"},
             "temperature": 0,
-            "max_tokens": 4000,
+            "max_tokens": 16000,
         }
         resp = self._client.post(
             f"{self.config.base_url}/v1/chat/completions",
@@ -95,6 +96,13 @@ class LLMClient:
         resp.raise_for_status()
         content = resp.json()["choices"][0]["message"]["content"]
         return json.loads(_strip_fence(content))
+
+
+def _normalize_item(item: dict) -> dict:
+    """模型偶尔把 ``metric_id`` 写成 ``metric``，统一回规范键名。"""
+    if isinstance(item, dict) and "metric_id" not in item and "metric" in item:
+        item["metric_id"] = item.pop("metric")
+    return item
 
 
 def _strip_fence(text: str) -> str:
@@ -128,13 +136,16 @@ def column_periods(header: list[str], doc_period: str, kind: str = "other") -> d
         if not t or any(k in t for k in ("增减", "变动", "占比", "附注")):
             continue
         if any(k in t for k in ("年初至", "前三季度", "前三季", "1-9月")):
-            out[i] = flow
+            m = re.search(r"(19\d{2}|20\d{2})", t)
+            out[i] = f"{m.group(1)}Q1-Q3" if m and int(m.group(1)) != year0 else flow
             continue
         if "年初" in t or "期初" in t:
-            out[i] = f"{year0 - 1}"
+            m = re.search(r"(19\d{2}|20\d{2})", t)
+            out[i] = f"{int(m.group(1)) - 1}" if m else f"{year0 - 1}"
             continue
         if "年末" in t or "期末" in t:
-            out[i] = doc_period
+            m = re.search(r"(19\d{2}|20\d{2})", t)
+            out[i] = m.group(1) if m and int(m.group(1)) != year0 else doc_period
             continue
         m = re.search(r"(19\d{2}|20\d{2})", t)
         if "12月31日" in t and m:
@@ -158,6 +169,43 @@ def column_periods(header: list[str], doc_period: str, kind: str = "other") -> d
             out[i] = prev_flow if (suffix == "Q3" and (kind in ("is", "cf") or has_cumulative)) else f"{year0 - 1}{suffix}"
     return out
 
+KEY_ROWS = {
+    "summary": ("营业收入", "营业总收入", "净利润", "资产总计"),
+    "bs": ("资产总计", "资产合计", "负债合计", "所有者权益合计", "股东权益合计"),
+    "is": ("营业收入", "营业总收入", "净利润"),
+    "cf": ("经营活动产生的现金流量净额",),
+}
+
+
+def missing_columns(table: SourceTable, periods: dict[int, str], obs: list[dict]) -> list[int]:
+    """有数、但一条观测都没落到的期间列——静默漏列的检测面。
+
+    只按「关键行」判断，避免把整列空白的附注列当成漏抽。
+    """
+    hit: set[int] = set()
+    for item in obs:
+        try:
+            hit.add(int(item["col"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+    keys = KEY_ROWS.get(table.kind, ())
+    if not keys:
+        return []
+    key_rows = [r for r in table.rows if any(k in norm_label(str(r[0])) for k in keys)]
+    gaps = []
+    for col in periods:
+        if col in hit:
+            continue
+        rows = key_rows
+        if not rows:  # 关键行名不匹配时退回「这一列有没有数」：至少 3 个数值才算有数据
+            rows = table.rows
+            if sum(1 for r in rows if col < len(r) and parse_number(r[col]) is not None) < 3:
+                continue
+        if any(col < len(row) and parse_number(row[col]) is not None for row in rows):
+            gaps.append(col)
+    return gaps
+
+
 def build_prompt(table: SourceTable, metrics: list[Metric], periods: dict[int, str]) -> str:
     metric_lines = "\n".join(
         f"{m.metric_id} | {m.metric_name} | {'/'.join(m.aliases) or '无'}" for m in metrics
@@ -178,7 +226,11 @@ def build_prompt(table: SourceTable, metrics: list[Metric], periods: dict[int, s
 
 
 def extract_table(
-    client: LLMClient, table: SourceTable, metrics: list[Metric]
+    client: LLMClient,
+    table: SourceTable,
+    metrics: list[Metric],
+    only_cols: list[int] | None = None,
+    nudge: str | None = None,
 ) -> tuple[list[dict], dict[int, str]]:
     """返回 (observations, 列期间映射)。解析失败时抛 ``ValueError``。"""
     periods = column_periods(table.header, table.period, table.kind)
@@ -190,8 +242,15 @@ def extract_table(
         periods = column_periods(table.header, table.period, table.kind)
     if not periods:
         raise ValueError(f"{table.logical_id}: 表头没有可识别的期间列 {table.header}")
-    payload = client.chat_json(SYSTEM_PROMPT, build_prompt(table, metrics, periods))
+    user = build_prompt(table, metrics, periods)
+    if only_cols:
+        user += "\n\n上一次输出漏掉了这些有数据的列，请只补这些列的观测：" + "、".join(
+            f"col {c}（{periods[c]}）" for c in only_cols
+        )
+    if nudge:
+        user += "\n\n" + nudge
+    payload = client.chat_json(SYSTEM_PROMPT, user)
     obs = payload.get("observations")
     if not isinstance(obs, list):
         raise ValueError(f"{table.logical_id}: 返回体缺 observations")
-    return obs, periods
+    return [_normalize_item(item) for item in obs], periods

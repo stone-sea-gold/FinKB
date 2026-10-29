@@ -37,7 +37,7 @@ def parse_number(text: object) -> float | None:
 
 def unit_factor(unit_of_account: str) -> float:
     """账面单位 → 元 的倍数。"""
-    return {"元": 1.0, "千元": 1e3, "万元": 1e4, "亿元": 1e8}[unit_of_account]
+    return {"元": 1.0, "千元": 1e3, "万元": 1e4, "百万元": 1e6, "亿元": 1e8}[unit_of_account]
 
 
 def norm_value(value: float, metric: Metric, unit_of_account: str) -> float:
@@ -121,3 +121,41 @@ def is_key_row(label: str, metric: Metric) -> bool:
     text = norm_label(label)
     names = [metric.metric_name, *metric.aliases]
     return any(norm_label(n) and norm_label(n) in text for n in names)
+
+
+def repair(
+    obs: dict,
+    table: SourceTable,
+    metrics: dict[str, Metric],
+    periods: dict[int, str],
+    unit_of_account: str,
+) -> Verified | None:
+    """模型抄错数字时的确定性修复：行标签对得上，就直接读单元格。
+
+    只在「行标签确实是这个指标」时生效——模型指错行时不修，交给 unseen 池。
+    """
+    try:
+        metric = metrics[str(obs["metric_id"])]
+        row = int(obs["row"])
+        col = int(obs["col"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not (0 <= row < len(table.rows)) or not (1 <= col < len(table.rows[row])):
+        return None
+    if not is_key_row(str(table.rows[row][0]), metric):
+        return None
+    if periods.get(col) is None:
+        return None
+    cell_num = parse_number(table.rows[row][col])
+    if cell_num is None:
+        return None
+    return Verified(
+        metric=metric,
+        period=periods[col],
+        value_raw=cell_num,
+        raw_text=table.rows[row][col].strip(),
+        value_norm=norm_value(cell_num, metric, unit_of_account),
+        match_level="repaired",
+        row=row,
+        col=col,
+    )

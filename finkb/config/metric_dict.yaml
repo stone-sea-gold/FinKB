@@ -99,3 +99,40 @@ metrics:
     unit_default: 元/股
     category: 每股
     aliases: [基本每股收益（元/股）, 基本每股收益(元/股)]
+
+  # ── 银行 / 保险 / 券商（2026-10-29 跨行业验证补的通用科目） ──────────
+  - metric_id: total_equity
+    metric_name: 股东权益合计
+    unit_default: 亿元
+    category: 资产
+    aliases: [所有者权益合计, 股东权益合计, 所有者权益（或股东权益）合计]
+
+  - metric_id: net_interest_income
+    metric_name: 利息净收入
+    unit_default: 亿元
+    category: 盈利
+    aliases: [净利息收入, 利息净收入]
+
+  - metric_id: fee_commission_income
+    metric_name: 手续费及佣金净收入
+    unit_default: 亿元
+    category: 盈利
+    aliases: [手续费及佣金净收入, 手续费净收入]
+
+  - metric_id: customer_deposits
+    metric_name: 吸收存款
+    unit_default: 亿元
+    category: 结构
+    aliases: [吸收存款, 客户存款, 吸收存款及同业存放]
+
+  - metric_id: loans_advances
+    metric_name: 发放贷款和垫款
+    unit_default: 亿元
+    category: 资产
+    aliases: [发放贷款和垫款, 发放贷款及垫款, 贷款和垫款]
+
+  - metric_id: insurance_revenue
+    metric_name: 保险服务收入
+    unit_default: 亿元
+    category: 盈利
+    aliases: [保险服务收入, 保险业务收入, 已赚保费]

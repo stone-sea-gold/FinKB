@@ -154,6 +154,23 @@ def test_column_periods_q3_income_is_cumulative():
     }
 
 
+def test_column_periods_year_end_columns_keep_their_year():
+    # 「2023年末」不能被当成当年期末；拆表后这类表头才露出来
+    assert column_periods(["", "2025年末", "2024年末", "2023年末"], "2025", "bs") == {
+        1: "2025",
+        2: "2024",
+        3: "2023",
+    }
+
+
+def test_column_periods_prior_year_cumulative_label():
+    # 601127 三季报利润表：表头带年份但写「前三季度」，不能一律当成当年
+    assert column_periods(["项目", "2025年前三季度(1-9月)", "2024年前三季度(1-9月)"], "2025Q3", "is") == {
+        1: "2025Q1-Q3",
+        2: "2024Q1-Q3",
+    }
+
+
 def test_column_periods_q1_uses_quarter_labels():
     assert column_periods(["项目", "本报告期", "上年同期"], "2025Q1", "summary") == {
         1: "2025Q1",
@@ -183,3 +200,67 @@ def test_infer_unit_uses_cumulative_revenue_for_q3():
         kind_hint="is",
     )
     assert infer_unit([summary, income]) == "元"
+
+
+def test_missing_columns_flags_silent_gap():
+    from finkb.fact_engine.extractor import missing_columns
+
+    table = make_table(
+        [["营业收入", "100", "90"], ["净利润", "10", "9"]],
+        ["项目", "2025年", "2024年"],
+        section="主要会计数据",
+    )
+    periods = column_periods(table.header, "2025", "summary")
+    assert missing_columns(table, periods, [{"col": 1, "metric_id": "revenue"}]) == [2]
+    assert missing_columns(table, periods, [{"col": 1}, {"col": 2}]) == []
+
+
+def test_repair_reads_cell_when_model_mistypes():
+    from finkb.fact_engine.verifier import repair
+
+    table = make_table(
+        [["营业收入", "1,234.5", "1,000.0"], ["营业成本", "-", "800.0"]],
+        ["项目", "2025年", "2024年"],
+        section="主要会计数据",
+    )
+    periods = column_periods(table.header, "2025", "summary")
+    metrics = {"revenue": REVENUE}
+    assert verify({"metric_id": "revenue", "row": 0, "col": 1, "value_raw": "1,234.0"}, table, metrics, periods, "元")[0] is None
+    fixed = repair({"metric_id": "revenue", "row": 0, "col": 1, "value_raw": "1,234.0"}, table, metrics, periods, "元")
+    assert fixed is not None and fixed.value_raw == 1234.5 and fixed.match_level == "repaired"
+    # 行标签对不上（把营业成本当营业收入）不修
+    assert repair({"metric_id": "revenue", "row": 1, "col": 1}, table, metrics, periods, "元") is None
+
+
+def test_split_header_blocks_splits_embedded_header():
+    """银行「经营业绩 + 规模指标」拼表：第二段表头要把期间换掉。"""
+    from finkb.fact_engine.selector import SourceTable, split_header_blocks
+
+    table = SourceTable(
+        doc_id="x_2025_半年报",
+        company="x",
+        company_name="X",
+        period="2025H1",
+        report_date="2025-08-31",
+        logical_id="x#P7_T01",
+        page=7,
+        section="主要会计数据",
+        header=["(人民币百万元)", "2025年1-6月", "2024年1-6月"],
+        rows=[
+            ["营业收入", "169,969", "172,945"],
+            ["(人民币百万元)", "2025年6月30日", "2024年12月31日"],
+            ["总资产", "12,657,151", "12,152,036"],
+        ],
+    )
+    blocks = split_header_blocks(table)
+    assert len(blocks) == 2
+    assert blocks[0].header[1] == "2025年1-6月"
+    assert blocks[1].header[1] == "2025年6月30日"
+    assert blocks[1].rows == [["总资产", "12,657,151", "12,152,036"]]
+
+
+def test_normalize_item_accepts_metric_key():
+    from finkb.fact_engine.extractor import _normalize_item
+
+    item = _normalize_item({"metric": "cash", "row": 0, "col": 1, "value_raw": "1"})
+    assert item["metric_id"] == "cash" and "metric" not in item

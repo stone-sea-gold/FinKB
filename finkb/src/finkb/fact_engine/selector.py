@@ -26,7 +26,7 @@ from __future__ import annotations
 import csv
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 FINKB_ROOT = Path(__file__).resolve().parents[3]
@@ -34,8 +34,10 @@ REPO_ROOT = FINKB_ROOT.parent
 
 BS_ANCHORS = (
     "资产总计",
+    "资产合计",
     "负债合计",
     "所有者权益合计",
+    "股东权益合计",
     "流动资产合计",
     "流动负债合计",
     "非流动资产合计",
@@ -50,6 +52,39 @@ _NORM = re.compile(r"[\s\u3000（）()：:，,]")
 def norm_label(text: object) -> str:
     """行标签归一：去空白、去中英文括号与冒号逗号，便于包含匹配。"""
     return _NORM.sub("", str(text or ""))
+
+
+_HEADER_PERIOD = re.compile(r"(19|20)\d{2}\s*年|本报告期|年初至|期末|上年同期|本期")
+_NUMBER_ONLY = re.compile(r"[\d,.\-()（）%]+")
+
+
+def split_header_blocks(table: SourceTable) -> list[SourceTable]:
+    """拆开「一张表里又嵌了一段表头」的情况。
+
+    银行的主要会计数据常把「经营业绩（1–6 月）」和「规模指标（期末余额）」拼在
+    同一张表里，第二段自带表头行。只认第一个表头会把 2024-12-31 的余额当成
+    2024 年 1–6 月，单位对、期间错，逐字反查也发现不了。
+    """
+    blocks: list[SourceTable] = []
+    header = list(table.header)
+    rows: list[list[str]] = []
+
+    def flush() -> None:
+        if rows:
+            blocks.append(replace(table, header=list(header), rows=list(rows)))
+            rows.clear()
+
+    for row in table.rows:
+        cells = [str(c).strip() for c in row]
+        hits = sum(1 for c in cells[1:] if c and _HEADER_PERIOD.search(c))
+        numeric = any(_NUMBER_ONLY.fullmatch(c) for c in cells[1:] if c)
+        if hits >= 2 and not numeric:
+            flush()
+            header = cells
+            continue
+        rows.append(row)
+    flush()
+    return blocks or [table]
 
 
 @dataclass
@@ -162,6 +197,36 @@ def load_tables(doc_dir: Path, manifest: dict | None = None) -> list[SourceTable
     return sorted(groups.values(), key=lambda t: (t.page, t.logical_id))
 
 
+def _bs_blocks(by_page: list[SourceTable]) -> list[list[SourceTable]]:
+    """同章节、相邻页的资产负债表父表并成一块。
+
+    银行/保险把资产、负债与权益分在两三页，单张父表凑不齐锚点；
+    合并后再判，合并报表才不会漏选。
+    """
+    blocks: list[list[SourceTable]] = []
+    i = 0
+    while i < len(by_page):
+        head = by_page[i]
+        if "资产负债表" not in head.section or any(k in head.section for k in ("母公司", "公司资产")):
+            i += 1
+            continue
+        block = [head]
+        labels = head.labels
+        j = i
+        while j + 1 < len(by_page):
+            nxt = by_page[j + 1]
+            if nxt.section == head.section and nxt.page - by_page[j].page <= 1:
+                block.append(nxt)
+                labels += nxt.labels
+                j += 1
+            else:
+                break
+        if sum(1 for a in BS_ANCHORS if a in labels) >= 3 and sum(len(t.rows) for t in block) >= 15:
+            blocks.append(block)
+        i = j + 1
+    return blocks
+
+
 def select_tables(parents: list[SourceTable]) -> list[SourceTable]:
     """从父表列表里选出三表 + 主要会计数据，返回**逻辑子表**（保持行顺序）。"""
     by_page = sorted(parents, key=lambda t: (t.page, t.logical_id))
@@ -173,22 +238,30 @@ def select_tables(parents: list[SourceTable]) -> list[SourceTable]:
             picked.append(t)
             break
 
-    # 资产负债表：资产表 → 权益/负债表为止
-    bs_count = 0
-    started = False
-    for t in by_page:
-        if t.kind != "bs":
-            continue
-        if not started:
-            if "资产总计" not in t.labels:
+    # 资产负债表：优先整块取同章节相邻页（银行/保险把资产与权益分页）
+    picked_bs = False
+    for block in _bs_blocks(by_page):
+        labels = "".join(t.labels for t in block)
+        if "资产总计" in labels or "资产合计" in labels:
+            picked.extend(block[:4])
+            picked_bs = True
+            break
+    if not picked_bs:
+        bs_count = 0
+        started = False
+        for t in by_page:
+            if t.kind != "bs":
                 continue
-            started = True
-        picked.append(t)
-        bs_count += 1
-        if "所有者权益合计" in t.labels or "负债合计" in t.labels:
-            break
-        if bs_count >= 4:
-            break
+            if not started:
+                if "资产总计" not in t.labels:
+                    continue
+                started = True
+            picked.append(t)
+            bs_count += 1
+            if "所有者权益合计" in t.labels or "负债合计" in t.labels:
+                break
+            if bs_count >= 4:
+                break
 
     # 利润表：行数最多的一张
     is_candidates = [t for t in by_page if t.kind == "is"]

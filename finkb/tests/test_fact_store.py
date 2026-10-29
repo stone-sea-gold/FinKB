@@ -39,7 +39,7 @@ def _fact(store: FactStore, **overrides) -> int:
 
 def test_default_dict_loads():
     metrics = load_metric_dict()
-    assert len(metrics) == 15
+    assert len(metrics) >= 15
     ids = [m.metric_id for m in metrics]
     assert len(ids) == len(set(ids))
     revenue = next(m for m in metrics if m.metric_id == "revenue")
@@ -79,10 +79,11 @@ def test_duplicate_id_rejected(tmp_path):
 
 def test_store_loads_metric_dict():
     with FactStore() as store:
-        n = store.load_metric_dict(load_metric_dict(DEFAULT_METRIC_DICT))
-        assert n == 15
+        metrics = load_metric_dict(DEFAULT_METRIC_DICT)
+        n = store.load_metric_dict(metrics)
+        assert n == len(metrics)
         rows = store.metrics()
-        assert len(rows) == 15
+        assert len(rows) == n
         assert {r[0] for r in rows} >= {"revenue", "net_profit", "roe_weighted"}
 
 
