@@ -763,36 +763,76 @@ def _money(value: float) -> str:
     return f"{value:,.2f}" if value != int(value) else f"{value:,.0f}"
 
 
+def _balance_rows(
+    logical: list[LogicalTable], labels: tuple[str, ...]
+) -> list[tuple[LogicalTable, str, float]]:
+    """把文档里所有「资产总计 / 负债合计 / 权益合计」行都收集起来。
+
+    一个文档里这些行往往不止一处：财务报表正文一套，母公司报表一套，还常有
+    「资产构成」这种**看起来一样但口径不同**的汇总表（万科的「资产总计 102,062,283.15」
+    是万元口径的占比表）。哪一套才是资产负债表，只看行名判断不出来。
+    """
+    found: list[tuple[LogicalTable, str, float]] = []
+    for table in logical:
+        for row in table.rows:
+            label = row[0].strip() if row else ""
+            if label in labels:
+                # 取**该行最左边**的金额格：两期并排时左列是本期，且避开了
+                # 「附注」列里的 62、61 这种小序号（坑-38）
+                money = [c for c in row[1:] if _looks_like_money(c)]
+                numeric = [c for c in row[1:] if _parse_number(c) is not None]
+                for cell in money or numeric:
+                    value = _parse_number(cell)
+                    if value is not None:
+                        found.append((table, label, float(value.rstrip("%"))))
+                    break
+    return found
+
+
 def check_balance_sheet(logical: list[LogicalTable]) -> list[Check]:
     """资产负债表：资产总计 = 负债合计 + 权益合计。
 
-    三项**不要求在同一张逻辑表里**：一张物理表被切成「资产 / 负债 / 权益」
-    三段是常见排版（赛力斯 2025 年报的 ``#S02`` / ``#S04`` / ``#S05``）。
-    查找顺序是「资产总计所在的那张物理表」→「全文档第一张」，
-    这样合并报表优先于母公司报表，也不改变旧文档的取表结果。
-    """
-    anchor = _locate_row(logical, "资产总计")
-    if anchor is None:
-        return [Check("资产负债表恒等式", False, "未找到资产总计")]
-    assets, assets_label = anchor
-    sibling = assets.parent_id
+    三项**不要求在同一张逻辑表里**：一张物理表被切成「资产 / 负债 / 权益」三段是
+    常见排版（赛力斯 2025 年报的 ``#S02`` / ``#S04`` / ``#S05``）。
 
-    liability = _locate_row(logical, "负债合计", sibling) or _locate_row(logical, "负债合计")
-    equity = _locate_row(logical, _EQUITY_TOTAL_LABELS, sibling) or _locate_row(
-        logical, _EQUITY_TOTAL_LABELS
-    )
-    if liability is None or equity is None:
+    **选哪一套用恒等式自己挑**：把所有候选按三元组枚举，取残差最小的一组，同
+    物理表的组合优先。只按行名取第一条会踩到「资产构成表」——万科的勾稽表里
+    ``资产总计 102,062,283.15``（万元口径），真报表是 ``1,020,622,831,532.86``。
+    恒等式本身就是最好的筛选器：拿错一套三元组，残差会大到离谱。
+    """
+    assets_rows = _balance_rows(logical, ("资产总计",))
+    if not assets_rows:
+        return [Check("资产负债表恒等式", False, "未找到资产总计")]
+    liability_rows = _balance_rows(logical, ("负债合计",))
+    equity_rows = _balance_rows(logical, _EQUITY_TOTAL_LABELS)
+    if not liability_rows or not equity_rows:
         return [Check("资产负债表恒等式", False, "未找到负债合计或权益合计")]
 
-    liability_table, liability_label = liability
-    equity_table, equity_label = equity
+    matching: list[tuple[bool, float, tuple, tuple, tuple]] = []
+    for asset in assets_rows:
+        for liability in liability_rows:
+            for equity in equity_rows:
+                delta = asset[2] - liability[2] - equity[2]
+                tolerance = abs(asset[2]) * 1e-10
+                same_parent = (
+                    asset[0].parent_id == liability[0].parent_id == equity[0].parent_id
+                )
+                matching.append(
+                    (abs(delta) <= tolerance, abs(delta) / max(abs(asset[2]), 1.0), asset, liability, equity)
+                )
+    # 合并报表的资产总计一定 ≥ 母公司报表，所以「等式成立且资产最大」的那一组就是
+    # 合并报表；等式都不成立时退回残差最小的一组，把差额报出来。
+    consistent = [item for item in matching if item[0]]
+    if consistent:
+        best = max(consistent, key=lambda item: item[2][2])
+    else:
+        best = min(matching, key=lambda item: item[1])
 
-    total_assets = _row_value(assets, assets_label, _first_numeric_column(assets))
-    total_liab = _row_value(liability_table, liability_label, _first_numeric_column(liability_table))
-    total_equity = _row_value(equity_table, equity_label, _first_numeric_column(equity_table))
-
-    if None in (total_assets, total_liab, total_equity):
-        return [Check("资产负债表恒等式", False, "行存在但取不到数值")]
+    _, _, (assets, assets_label, total_assets), (liability_table, liability_label, total_liab), (
+        equity_table,
+        equity_label,
+        total_equity,
+    ) = best
 
     delta = total_assets - total_liab - total_equity
     aliased = "" if equity_label == "股东权益合计" else f"，权益行作「{equity_label}」"

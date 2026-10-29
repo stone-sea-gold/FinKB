@@ -1,6 +1,15 @@
 {
   "schema": 1,
   "docs": {
+    "000002_2025_年报": {
+      "pages": 298,
+      "logical": 260,
+      "header": 248,
+      "invariants": 16,
+      "total_invariants": 16,
+      "verify_checked": 2021,
+      "verify_missing": 0
+    },
     "000625_2025_一季报": {
       "pages": 12,
       "logical": 16,
@@ -107,6 +116,15 @@
       "invariants": 13,
       "total_invariants": 13,
       "verify_checked": 1708,
+      "verify_missing": 0
+    },
+    "600030_2025_年报": {
+      "pages": 389,
+      "logical": 325,
+      "header": 299,
+      "invariants": 13,
+      "total_invariants": 13,
+      "verify_checked": 2464,
       "verify_missing": 0
     },
     "600036_2025_半年报": {
