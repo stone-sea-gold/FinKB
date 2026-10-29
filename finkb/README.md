@@ -1,13 +1,13 @@
-# FinKB — Phase 0（数据地基）
+# FinKB — Phase 0 完成 / Phase 1 开工
 
-A 股财报知识库，架构见 [`../FinKB-方案v2.md`](../FinKB-方案v2.md)（v2.1）。
+A 股财报知识库，架构见 [`../FinKB-方案v2.md`](../FinKB-方案v2.md)（v2.2）。
 
 > 📓 **接手项目请先读 [`DEVLOG.md`](./DEVLOG.md)** —— 那里记录当前状态、设计决策、
 > 踩过的坑与未验证项。本 README 只讲「怎么用」，DEVLOG 讲「为什么这样」。
 > 工作约定见 [`AGENTS.md`](./AGENTS.md)。
 
-当前实现范围：**Phase 0 — L0 凭证层**
-（解析 → 页码锚定 → 页眉页脚清洗 → 跨页表格缝合 → StitchedTable）。
+当前实现范围：**Phase 0 — L0 凭证层**（解析 → 页码锚定 → 页眉页脚清洗 → 跨页表格缝合 →
+物理表切分为逻辑表 → 审计）；**Phase 1 已跑通 L1**：三家 18 份 → 555 条事实，抽取器 + 逐字反查 + 单位归一。
 
 ## 数据格式分层（重要）
 
@@ -45,26 +45,33 @@ StitchedTable                     缝合产物，交给 L1
 finkb/
 ├── src/finkb/
 │   ├── common/models.py            # Page / Block / TableBlock / StitchedTable
+│   ├── fact_engine/                 # L1：选表 / 抽取 / 逐字反查 / DuckDB 仓储
+│   │   ├── metric_dict.py          # YAML → Metric；单位族由 unit_default 推导
+│   │   └── store.py                # metric_dict / facts / relations / unmatched_pool
 │   └── parser/
 │       ├── markdown_blocks.py      # 页码锚定 Markdown 解析；HTML 表格 → 行/网格
 │       ├── noise_filter.py         # 运行页眉/页脚与残留页码清洗
 │       ├── table_stitcher.py       # ★ 跨页表格缝合
-│       ├── pipeline.py             # 解析 → 清洗 → 缝合 端到端入口
+│       ├── section_splitter.py     # 物理表 → 逻辑表切分 + 表头继承
+│       ├── pipeline.py             # 解析 → 清洗 → 缝合 → 切分 端到端入口
 │       └── mineru_client.py        # MinerU 客户端 + content_list 适配 + pypdf 兜底
-├── tests/                          # 74 项测试，全部离线可跑
-└── data/{raw,parsed,parent_store}/
+├── tests/                          # 312 项测试，全部离线可跑
+├── scripts/check.sh                # 一条命令验收（测试 + 语料基线）
+├── config/corpus-baseline.json     # 25 文档 × 5 个数字的退步基线
+├── config/metric_dict.yaml        # L1 指标字典 v0（15 个直接披露指标）
+└── data/parsed/                    # 解析产物（不进 git）
 ```
 
 ## 一条命令验收
 
 ```bash
-scripts/check.sh            # 单元测试 + 22 份产物的守恒律
+scripts/check.sh            # 单元测试 + 25 份产物的守恒律
 ```
 
 想单独看某一项：
 
 ```bash
-python tools/audit.py corpus                       # 22 份的体检表（有表头率/裸表/守恒律/数字异常）
+python tools/audit.py corpus                       # 25 份的体检表（有表头率/裸表/守恒律/数字异常）
 python tools/audit.py invariants --doc data/parsed/002594_2025_年报   # 单份 16 条守恒律
 python tools/audit.py verify-cells --doc ... --pdf ...               # 数字是否都能在 PDF 原文找到
 python tools/audit.py recall --doc ... --pdf ...                     # 原文的数字是否都进了表
@@ -114,6 +121,8 @@ Token 从 <https://mineru.net/apiManage/token> 获取。
 | `MINERU_LANGUAGE` | | `ch` | PaddleOCR 语言码，中文是 `ch` 不是 `zh` |
 | `MINERU_POLL_INTERVAL` | | `3` | 轮询间隔（秒） |
 | `MINERU_POLL_TIMEOUT` | | `900` | 轮询总超时（秒） |
+
+> 本项目 `config/.env` 固定 `vlm`（ADR-016）：`pipeline` 后端会丢列，只作为成本备选。
 
 临时覆盖（不写文件）：
 
@@ -208,18 +217,19 @@ result.stitch.records           # 审计记录（页码序列 + 缝合理由）
 - 页码是长块里的一行 → 只在文本块头/尾 `scan_*_lines` 范围内生效；
 - 页码是**独立块**（MinerU 常见）→ 整块只有一个非空行时单独立判定。
 
-## 已验证
+## 已验证（25 份 / 10 家公司）
 
 | 项 | 结果 |
 |---|---|
-| 测试 | **74 项通过**，离线，0.46s |
-| 真实 PDF 页数 | `002594_2025_年报.pdf` → 268 页，页码 1..268 |
-| 运行页眉识别 | 签名 `比亚迪股份有限公司#年年度报告全文` 命中 **268/268** 页 |
-| 真实清洗效果 | 剥离 **534 行**噪音，覆盖 268 页 |
-| 真实跨页表定位 | P43 页尾「境内外股票 / 02676 / 纳芯微」→ P44 页首「债券 / 019742」，同一张证券投资表，14 列 |
-| 清洗后 P44 首块 | 直接以 `债券 019742 24 特国 01 …` 开头（页眉与页码均已剥离） |
-| 三页链式缝合 | `#P42-P44_T01`，5 行，`to_markdown()` 正确还原 |
-| MinerU 路径（构造数据） | 页眉独立块被识别；无 `<th>` 的续接表正确保持 `header=None` 并缝合 |
+| 测试 | **312 项通过**，离线 |
+| 语料 | 25 份 / 10 家公司 / 3877 页 / 6 类版式 |
+| 逻辑表 | 4982 张；有表头 **4683（94.0%）** |
+| 守恒律 | **307/307**（年报 16 条 / 半年报 13 条 / 季报 10 条） |
+| 数值回查 | 29608 个抽样中 4 个查不到（99.99%，均为 MinerU 粘格） |
+| 跨页缝合 | 23 张；列数不一致拒绝 20 条，逐条带原因 |
+| 原文召回 | 18 份实测 100%：PDF 里的数字没有整表丢失 |
+
+以上数字由 `python tools/audit.py corpus` 复现；退步由 `config/corpus-baseline.json` 判定。
 
 ## 按 MinerU 实测规范做的三处修正
 
@@ -234,17 +244,21 @@ result.stitch.records           # 审计记录（页码序列 + 缝合理由）
 
 ## 已知限制
 
-- `html_table_to_markdown` 不展开 `rowspan` / `colspan`，合并表头会被压平。
-- `OfflinePdfParser` 只做逐页纯文本，**不含表格结构，不可用于 L1 抽取**，
-  仅用于链路验证与测试。
-- MinerU 端点取自第三方实测规范，**本项目尚未真实联调**；`MineruConfig` 中所有
-  路径均可覆盖，首次接入请用小文件验证。
-- **真实年报的跨页表缝合尚未在 MinerU 输出上端到端验证**——目前 P43→P44 的结论
-  来自 pypdf 文本层观察，表格结构仍需 MinerU 产出后才能跑通完整链路。
+- **纯文字表头**：首行与数据行 HTML 同构，无法自动判定；裸表 299 张里约一半是键值表，
+  真实缺口需人工标注。
+- **宽表逐页丢空列**：如股东权益变动表某页 16 列、下一页 15 列，列数判据会拒绝缝合并告警；
+  数据不丢，但分片没有列名。**不猜对齐**（坑-40）。
+- **4 个数字无法回查**：都是 MinerU 把两格粘成一格，上游 OCR 问题，不是本项目解析错误。
+- `OfflinePdfParser` 只做逐页纯文本，**不含表格结构，不可用于 L1 抽取**，仅用于链路验证与测试。
+- P6 已定：L1 直接以 `LogicalTable`（含页码/表头/行）为输入，不再产出按页 JSON（ADR-029）。
 
 ## 下一步（Phase 1）
 
-1. `src/finkb/fact_engine/duckdb_manager.py` —— `metric_dict` / `facts` / `relations` /
-   `unmatched_pool` + `facts_dedup` / `v_company_annual_wide` 视图
-2. 两段式抽取（补丁 P1）：LLM 摘录 Observation → Python 反查原文 + 归一化
-3. `tests/test_fact_extraction.py` —— ≥10 个关键数值与原文绝对一致，`exact` 匹配率 ≥80%
+0. ✅ 已完成：`LLM_API_KEY` 已配置并联调（chat 模型，用于语义对齐；**不是** embedding key）；
+   `metric_dict` 15 项已建（先覆盖 3 家整车，再按行业扩到银行/保险）
+1. ✅ `fact_engine/{metric_dict,store}.py`：`metric_dict` / `facts` / `facts_dedup` /
+   `relations` / `unmatched_pool` 均已落库
+2. ✅ 两段式抽取（补丁 P1）：`selector.py` 选表 → LLM 只摘录 Observation →
+   `verifier.py` 回单元格逐字核对 + 单位归一 → `ingest.py` 写库
+3. ✅ 三家 18 份（含季报）跑通：555 条事实，`unmatched_pool` 1 条（LLM 数字误读，被逐字反查拦下），
+   2025 毛利率一条 SQL 出结果；单份抽取+入库 21–55 秒

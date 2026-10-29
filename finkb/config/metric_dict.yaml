@@ -1,0 +1,101 @@
+# L1 指标字典 v0（2026-10-29）
+#
+# 范围：三家整车（002594 比亚迪 / 601127 赛力斯 / 000625 长安），只收
+# **财报里直接披露**的指标。毛利率、同比这类衍生值不进字典——它们由 SQL 视图算。
+#
+# `unit_default` 同时决定 `unit_family` 与 `norm_unit`（映射见 metric_dict.py），
+# 所以这里不重复写这两个字段：
+#   亿元 → money/亿元    %  → percent/%    元/股 → ratio/元/股    辆 → count/个
+#
+# `aliases` 是给 LLM 对齐用的非标写法，宁多勿少；匹配时先精确、再去空白/全角。
+
+metrics:
+  - metric_id: revenue
+    metric_name: 营业总收入
+    unit_default: 亿元
+    category: 盈利
+    aliases: [营业收入, 营业总收入, 一、营业总收入, 其中：营业收入, 主营业务收入, 营收]
+
+  - metric_id: net_profit
+    metric_name: 归属于上市公司股东的净利润
+    unit_default: 亿元
+    category: 盈利
+    aliases: [归母净利润, 归属于母公司股东的净利润, 归属于上市公司股东净利润, 归属于母公司所有者的净利润]
+
+  - metric_id: net_profit_deducted
+    metric_name: 归属于上市公司股东的扣除非经常性损益的净利润
+    unit_default: 亿元
+    category: 盈利
+    aliases: [扣非归母净利润, 扣除非经常性损益后归属于上市公司股东的净利润, 扣除非经常性损益后的净利润]
+
+  - metric_id: operating_profit
+    metric_name: 营业利润
+    unit_default: 亿元
+    category: 盈利
+    aliases: [三、营业利润]
+
+  - metric_id: total_profit
+    metric_name: 利润总额
+    unit_default: 亿元
+    category: 盈利
+    aliases: [四、利润总额]
+
+  - metric_id: operating_cost
+    metric_name: 营业成本
+    unit_default: 亿元
+    category: 盈利
+    aliases: [其中：营业成本, 主营业务成本, 营业总成本]
+
+  - metric_id: ocf
+    metric_name: 经营活动产生的现金流量净额
+    unit_default: 亿元
+    category: 现金流
+    aliases: [经营活动现金流量净额, 经营活动产生的现金流量净额（元）, 经营活动现金净流量]
+
+  - metric_id: total_assets
+    metric_name: 资产总额
+    unit_default: 亿元
+    category: 资产
+    aliases: [总资产, 资产合计, 资产总计]
+
+  - metric_id: net_assets
+    metric_name: 归属于上市公司股东的净资产
+    unit_default: 亿元
+    category: 资产
+    aliases: [归母净资产, 归属于母公司所有者权益合计, 归属于上市公司股东的所有者权益]
+
+  - metric_id: total_liabilities
+    metric_name: 负债总额
+    unit_default: 亿元
+    category: 资产
+    aliases: [总负债, 负债合计, 负债总计]
+
+  - metric_id: cash
+    metric_name: 货币资金
+    unit_default: 亿元
+    category: 资产
+    aliases: [货币资金余额]
+
+  - metric_id: inventory
+    metric_name: 存货
+    unit_default: 亿元
+    category: 资产
+    aliases: [存货净额]
+
+  - metric_id: rd_expense
+    metric_name: 研发投入
+    unit_default: 亿元
+    category: 研发
+    aliases: [研发费用, 研发投入金额, 研发投入总额, 研发投入合计]
+
+  - metric_id: roe_weighted
+    metric_name: 加权平均净资产收益率
+    unit_default: "%"
+    category: 每股
+    aliases: [加权平均净资产收益率（%）, 加权平均净资产收益率(%)]
+
+  - metric_id: eps_basic
+    metric_name: 基本每股收益
+    unit_default: 元/股
+    category: 每股
+    aliases: [基本每股收益（元/股）, 基本每股收益(元/股)]
