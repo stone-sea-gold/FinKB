@@ -777,3 +777,17 @@ def test_baseline_flags_new_unverifiable_numbers() -> None:
     rows = [{"doc": "d", "header": 10, "invariants": 13, "verify_missing": 4}]
     problems = audit.compare_with_baseline(rows, baseline)
     assert problems and "1 → 4" in problems[0]
+
+
+def test_dash_placeholder_counts_as_zero(_make_table=None) -> None:
+    """报表里的 ``-`` 表示「本期无金额」，与空单元格同义，必须按 0 参与恒等式。
+
+    中国神华 2025 年报母公司现金流量表的「筹资活动现金流入小计」就是 ``-``，
+    按「取不到数值」处理会让整张表的恒等式失败。
+    """
+    table = make_table(
+        [["筹资活动现金流入小计", "", "-"], ["偿还债务支付的现金", "", "(95,019)"]],
+        header=["", "附注", "2025年度"],
+    )
+    assert audit._amount_in_column(table, "筹资活动现金流入小计", 2) == 0.0
+    assert audit._amount_in_column(table, "偿还债务支付的现金", 2) == -95019.0

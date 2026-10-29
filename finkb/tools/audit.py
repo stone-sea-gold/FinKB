@@ -660,11 +660,16 @@ def _first_numeric_column(table: LogicalTable) -> int:
     return best
 
 
+_ZERO_MARKERS = {"-", "--", "—", "——", "/", "－", "－"}
+
+
 def _amount_in_column(table: LogicalTable, label: str, column: int) -> float | None:
-    """取指定行在指定列上的金额；**单元格为空**（不是缺行）时记 0。
+    """取指定行在指定列上的金额；**单元格为空或破折号**（不是缺行）时记 0。
 
     母公司现金流量表常整段留空（本期没有筹资流入），PDF 原文就是空的，
     按 0 处理才符合恒等式；真丢数据时等式仍然对不上，不会被掩盖。
+    报表里的 ``-`` / ``—`` / ``/`` 表示「本期无金额」，与空单元格同义
+    （中国神华 2025 年报的筹资流入小计就是 ``-``）。
     """
     for row in table.rows:
         if not row or row[0].strip() != label:
@@ -673,7 +678,7 @@ def _amount_in_column(table: LogicalTable, label: str, column: int) -> float | N
             number = _parse_number(row[column])
             if number is not None:
                 return float(number.rstrip("%"))
-            if not row[column].strip():
+            if not row[column].strip() or row[column].strip() in _ZERO_MARKERS:
                 return 0.0
         return None
     return None
