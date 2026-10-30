@@ -309,3 +309,55 @@ def test_expense_metric_stored_positive(tmp_path):
     stats = write_document(store, [(table, [{"metric_id": "operating_cost", "row": 0, "col": 1, "value_raw": "(100)"}], {1: "2025"})], [cost], "元")
     assert stats["facts"] == 1
     assert store.conn.execute("select value_raw, value_norm from facts").fetchone() == (100.0, 1e-06)
+
+
+def _page_table(rows, section, page, header=("项目", "2025年"), tid=None):
+    from dataclasses import replace
+
+    t = make_table(rows, list(header), section=section, kind_hint=tid or f"t{page}")
+    return replace(t, page=page)
+
+
+def test_bs_split_pages_merged_by_content():
+    """资产负债表被切成「资产/负债/权益」三页、页标题只有日期，也要拼成整张。"""
+    filler = [[f"资产项目{i}", "1"] for i in range(8)]
+    p1 = _page_table([["资产", "1"], ["货币资金", "2"], ["流动资产合计", "3"]] + filler, "2025 年 12 月 31 日", 10, tid="bs1")
+    p2 = _page_table([["非流动资产", "4"]] + filler + [["资产总计", "5"]], "中信证券股份有限公司", 11, tid="bs2")
+    p3 = _page_table([["负债", "6"]] + filler + [["负债合计", "7"]], "中信证券股份有限公司", 12, tid="bs3")
+    p4 = _page_table([["股东权益", "8"], ["归属于母公司股东权益合计", "9"], ["少数股东权益", "10"], ["负债和股东权益总计", "11"]], "2025 年 12 月 31 日", 13, tid="bs4")
+    picked = select_tables([p1, p2, p3, p4])
+    assert [t.logical_id for t in picked] == ["bs1", "bs2", "bs3", "bs4"]
+
+
+def test_cf_truncated_page_gets_continuation():
+    """现金流量表首页只到「经营活动净额」，投资活动在下一页，也要接上。"""
+    first = _page_table(
+        [["销售商品、提供劳务收到的现金", "1"]] + [[f"经营{i}", "1"] for i in range(9)] + [["经营活动产生的现金流量净额", "5"]],
+        "合并现金流量表", 20, tid="cf1")
+    second = _page_table(
+        [["收回投资收到的现金", "1"]] + [[f"投资{i}", "1"] for i in range(9)] + [["投资活动产生的现金流量净额", "2"]],
+        "合并现金流量表(续)", 21, tid="cf2")
+    picked = select_tables([first, second])
+    assert [t.logical_id for t in picked] == ["cf1", "cf2"]
+
+
+def test_bs_missing_first_page_recovered():
+    """首页被标成审计段落、从「非流动资产」开始，要向前补回流动资产页。"""
+    filler = [[f"项目{i}", "1"] for i in range(8)]
+    p0 = _page_table([["流动资产", "1"], ["货币资金", "2"], ["流动资产合计", "3"]] + filler, "六、注册会计师对财务报表审计的责任 (续)", 30, tid="bs0")
+    p1 = _page_table([["非流动资产", "4"]] + filler + [["资产总计", "5"]], "合并资产负债表(续)", 31, tid="bs1")
+    p2 = _page_table([["负债", "6"]] + filler + [["负债合计", "7"]], "合并资产负债表(续)", 32, tid="bs2")
+    p3 = _page_table([["股东权益", "8"], ["少数股东权益", "9"], ["负债和股东权益总计", "10"]], "合并资产负债表(续)", 33, tid="bs3")
+    picked = select_tables([p0, p1, p2, p3])
+    assert [t.logical_id for t in picked] == ["bs0", "bs1", "bs2", "bs3"]
+
+
+def test_page_unit_reads_chinese_note(tmp_path):
+    from finkb.fact_engine.ingest import page_unit
+
+    (tmp_path / "page_anchored.md").write_text(
+        '<!-- META: {"doc": "x", "page": 8, "section": "主要会计数据"} -->\n单位：百万元\n',
+        encoding="utf-8",
+    )
+    assert page_unit(tmp_path, 8) == "百万元"
+    assert page_unit(tmp_path, 9) is None

@@ -34,15 +34,21 @@ _CALIBER = "合并报表"
 _POSITIVE_METRICS = {"operating_cost", "rd_expense"}
 
 
+_UNIT_NOTE = re.compile(r"(?:金额)?单位\s*[:：为]?\s*(?:人民币)?\s*(百万元|千元|万元|元)")
+
+
 def page_unit(doc_dir: Path, page: int) -> str | None:
-    """从 page_anchored.md 的「金额单位为人民币百万元」这类说明里取单位。"""
+    """从页面正文的「单位：百万元」「金额单位：人民币百万元」取记账单位。
+
+    同一页可能有多段，取第一个像单位说明的；认不出返回 None，交给别的信号。
+    """
     md = doc_dir / "page_anchored.md"
     if not md.exists():
         return None
     for segment in md.read_text(encoding="utf-8").split("<!-- META:"):
-        if f'"page": {page},' not in segment or "单位" not in segment:
+        if f'"page": {page},' not in segment:
             continue
-        m = re.search(r"人民币?\s*(百万元|千元|万元|元)", segment)
+        m = _UNIT_NOTE.search(segment)
         if m:
             return m.group(1)
     return None
@@ -161,7 +167,11 @@ def _extract_table(client: LLMClient, table, metrics) -> tuple[list[dict], dict[
 
 
 def write_document(
-    store: FactStore, extracted: list[Extraction], metrics: list[Metric], unit: str
+    store: FactStore,
+    extracted: list[Extraction],
+    metrics: list[Metric],
+    unit: str,
+    table_units: dict[str, str] | None = None,
 ) -> dict[str, int]:
     """把一份文档的抽取结果写库；返回计数。"""
     stats = {
@@ -177,9 +187,14 @@ def write_document(
     seen: set[tuple[str, str]] = set()
     for table, obs, periods in extracted:
         # 单位优先看表头/行标签：主要会计数据有的把「(千元)」写在行标签里
-        # （美的），表头只有年份列。都没有时，summary 按「元」，三表用公司单位。
+        # （美的），表头只有年份列；其次看这一页正文的单位说明（神华/银行写
+        # 「单位：百万元」），最后 summary 按「元」、三表用公司单位。
         labelled = unit_from_text(" ".join(table.header)) or unit_from_labels(table.rows)
-        table_unit = labelled or ("元" if table.kind == "summary" else unit)
+        table_unit = (
+            labelled
+            or (table_units or {}).get(table.logical_id)
+            or ("元" if table.kind == "summary" else unit)
+        )
         stats["observations"] += len(obs)
         stats["column_gaps"] += len(missing_columns(table, periods, obs))
         for item in obs:
@@ -245,11 +260,13 @@ def ingest_documents(
             results[doc.name] = {"error": items}
             continue
         tables = [t for t, _obs, _p in items]
-        statements = [t for t in tables if t.kind != "summary"] or tables
+        # 每张表各自认一次页面单位：summary 与三表可能不在同一页，单位也可能不同。
+        table_units = {t.logical_id: u for t in tables if (u := page_unit(doc, t.page))}
+        # 文档级单位取任一页的说明；都没有才退回「summary 对利润表」的数量级推断。
         unit = (
-            (page_unit(doc, statements[0].page) if statements else None)
+            next(iter(table_units.values()), None)
             or infer_unit(tables)
             or units.get(doc.name.split("_")[0], "元")
         )
-        results[doc.name] = write_document(store, items, metrics, unit)
+        results[doc.name] = write_document(store, items, metrics, unit, table_units)
     return results

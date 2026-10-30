@@ -244,6 +244,173 @@ def _is_parent(t: SourceTable) -> bool:
     return any(k in s for k in ("公司资产", "公司利润表", "公司现金流量表"))
 
 
+_FAMILY_NAME = {"bs": "资产负债表", "is": "利润表", "cf": "现金流量表"}
+# 页面标题不可靠：有的把整张报表的续页写成单位说明、甚至写成审计责任段落。
+# 这些章节只可能是附注/分析，不能当作报表的起点或续页。
+_NOTE_SECTIONS = ("附注", "补充资料", "主营业务分析", "财务指标", "分季度", "非经常性损益")
+# 报表续页的首行（上一页在「非流动资产」「三、营业利润」处断开时）。
+_CONT_START = {
+    "bs": ("非流动资产", "负债和股东权益", "负债", "股东权益"),
+    "is": ("三、营业利润", "营业利润", "四、净利润", "净利润", "其他综合收益", "综合收益总额"),
+    "cf": ("收回投资收到的现金", "投资活动", "吸收投资收到的现金", "筹资活动", "汇率变动"),
+}
+# 报表在续页上重新以这些行开头时，说明是另一张表（合并 → 母公司）。
+_STATEMENT_START = {
+    "bs": ("资产",),
+    "is": ("一、营业收入", "营业收入", "营业总收入"),
+    "cf": ("销售商品", "销售商品、提供劳务收到的现金", "为交易目的"),
+}
+# 一张报表在单页上排到这些行，说明这半张已经结束。
+_TERMINAL = {
+    "bs": ("负债和股东权益总计",),
+    "is": ("净利润", "综合收益总额"),
+    "cf": ("年末现金及现金等价物余额", "现金及现金等价物净增加额"),
+}
+_CALIBER = ("少数股东权益", "归属于母公司", "少数股东损益")
+
+
+def _has_note_section(t: SourceTable) -> bool:
+    return any(k in t.section for k in _NOTE_SECTIONS)
+
+
+def _family_match(t: SourceTable, family: str) -> bool:
+    """粗判一张表是否属于某类报表（只看内容，不看章节）。"""
+    lab = t.labels
+    if family == "bs":
+        return any(a in lab for a in BS_ANCHORS)
+    if family == "is":
+        return ("营业收入" in lab or "营业总收入" in lab or "利润表" in t.section)
+    return (
+        bool(_CF_NET.search(lab))
+        or "现金流量表" in t.section
+        # 续页只剩投资/筹资活动，没有「经营活动净额」可认，靠这两个锚点接上。
+        or "投资活动" in lab
+        or "筹资活动" in lab
+        or "现金及现金等价物" in lab
+    )
+
+
+def _seed(t: SourceTable, family: str) -> bool:
+    """报表的「种子页」：带足以定性的锚点，且不是母公司/附注。"""
+    if _is_parent(t) or _has_note_section(t):
+        return False
+    lab = t.labels
+    if family == "bs":
+        return "资产总计" in lab or "负债和股东权益总计" in lab
+    if family == "is":
+        return ("营业收入" in lab or "营业总收入" in lab) and len(t.rows) >= 10
+    return bool(_CF_NET.search(lab)) and len(t.rows) >= 8
+
+
+def _is_terminal(t: SourceTable, family: str) -> bool:
+    lab = t.labels
+    return any(a in lab for a in _TERMINAL[family])
+
+
+def _first_label(t: SourceTable) -> str:
+    return str(t.rows[0][0]).strip() if t.rows else ""
+
+
+def _statement_runs(by_page: list[SourceTable], family: str) -> list[list[SourceTable]]:
+    """把跨页切开的同一张报表按页序拼成一组。
+
+    规则不依赖 section 是否写着报表名：种子页看内容锚点，向后续页只要
+    「相邻页 + 同类内容 + 不是母公司/附注」；若续页标题明确写着报表名就直接接，
+    否则只在「上一页尚未结束 + 下一页首行是续页行」时接。向前同理，
+    用于补回第一页被标成审计段落的情况（神华 P147）。
+    """
+    name = _FAMILY_NAME[family]
+    runs: list[list[SourceTable]] = []
+    seen: set[str] = set()
+    for i, t in enumerate(by_page):
+        if not _seed(t, family):
+            continue
+        start = i
+        while start > 0:
+            prev, cur = by_page[start - 1], by_page[start]
+            if cur.page - prev.page != 1:
+                break
+            if _is_parent(prev) or _has_note_section(prev) or not _family_match(prev, family):
+                break
+            if _first_label(cur) not in _CONT_START[family] and name not in cur.section:
+                break
+            start -= 1
+        end = i
+        while end + 1 < len(by_page):
+            cur, nxt = by_page[end], by_page[end + 1]
+            if nxt.page - cur.page != 1:
+                break
+            if _is_parent(nxt) or _has_note_section(nxt) or not _family_match(nxt, family):
+                break
+            if name in nxt.section:
+                pass  # 「合并利润表（续）」这类明确续页，直接接
+            else:
+                if _is_terminal(cur, family) or _first_label(nxt) in _STATEMENT_START[family]:
+                    break
+                if _first_label(nxt) not in _CONT_START[family]:
+                    break
+            end += 1
+        run = by_page[start : end + 1]
+        key = run[0].logical_id
+        if key not in seen:
+            seen.add(key)
+            runs.append(run)
+    return runs
+
+
+def _complete(run: list[SourceTable], family: str) -> bool:
+    lab = "".join(t.labels for t in run)
+    rows = sum(len(t.rows) for t in run)
+    if family == "bs":
+        return "资产总计" in lab and ("负债合计" in lab or "负债和股东权益总计" in lab) and rows >= 20
+    if family == "is":
+        return ("营业收入" in lab or "营业总收入" in lab) and ("净利润" in lab or "营业利润" in lab) and rows >= 15
+    return bool(_CF_NET.search(lab)) and ("投资活动" in lab or "筹资活动" in lab) and rows >= 15
+
+
+def _best_run(by_page: list[SourceTable], family: str) -> list[SourceTable]:
+    """在完整的候选块里挑合并口径：有少数股东/归母线的最优，其次章节带「合并」。"""
+    best: list[SourceTable] = []
+    best_score = -1
+    for run in _statement_runs(by_page, family):
+        if not _complete(run, family):
+            continue
+        lab = "".join(t.labels for t in run)
+        score = sum(len(t.rows) for t in run)
+        if any(m in lab for m in _CALIBER):
+            score += 100
+        if any("合并" in t.section for t in run):
+            score += 10
+        if score > best_score:
+            best, best_score = run, score
+    return best
+
+
+def _repair_family(
+    by_page: list[SourceTable], family: str, picked: list[SourceTable]
+) -> list[SourceTable]:
+    """旧规则有明显缺口时，用整块拼接结果替换；否则原样返回。"""
+    run = _best_run(by_page, family)
+    if not run:
+        return picked
+    lab = "".join(t.labels for t in picked)
+    if family == "bs":
+        broken = (
+            not picked
+            or "资产总计" not in lab
+            or _first_label(picked[0]) in ("非流动资产", "负债和股东权益", "负债")
+        )
+    elif family == "is":
+        broken = not picked
+    else:
+        broken = (
+            not picked
+            or ("投资活动" not in lab and "筹资活动" not in lab)
+            or any(k in t.section for t in picked for k in ("主营业务分析", "财务指标"))
+        )
+    return run if broken else picked
+
+
 def select_tables(parents: list[SourceTable]) -> list[SourceTable]:
     """从父表列表里选出三表 + 主要会计数据，返回**逻辑子表**（保持行顺序）。"""
     by_page = sorted(parents, key=lambda t: (t.page, t.logical_id))
@@ -256,14 +423,13 @@ def select_tables(parents: list[SourceTable]) -> list[SourceTable]:
             break
 
     # 资产负债表：优先整块取同章节相邻页（银行/保险把资产与权益分页）
-    picked_bs = False
+    bs: list[SourceTable] = []
     for block in _bs_blocks(by_page):
         labels = "".join(t.labels for t in block)
         if "资产总计" in labels or "资产合计" in labels:
-            picked.extend(block[:4])
-            picked_bs = True
+            bs = block[:4]
             break
-    if not picked_bs:
+    if not bs:
         bs_count = 0
         started = False
         for t in by_page:
@@ -273,7 +439,7 @@ def select_tables(parents: list[SourceTable]) -> list[SourceTable]:
                 if "资产总计" not in t.labels:
                     continue
                 started = True
-            picked.append(t)
+            bs.append(t)
             bs_count += 1
             if "所有者权益合计" in t.labels or "负债合计" in t.labels:
                 break
@@ -282,9 +448,10 @@ def select_tables(parents: list[SourceTable]) -> list[SourceTable]:
 
     # 利润表：优先章节写明「合并」的，其次行数最多；母公司表不参与
     is_candidates = [t for t in by_page if t.kind == "is" and not _is_parent(t)]
+    income: list[SourceTable] = []
     if is_candidates:
         consolidated = [t for t in is_candidates if "合并" in t.section]
-        picked.append(max(consolidated or is_candidates, key=lambda t: len(t.rows)))
+        income = [max(consolidated or is_candidates, key=lambda t: len(t.rows))]
 
     # 现金流量表：排除附注/补充资料与母公司表；优先「合并」章节，其次行数最多
     cf_candidates = [
@@ -295,9 +462,14 @@ def select_tables(parents: list[SourceTable]) -> list[SourceTable]:
         and "附注" not in t.section
         and "补充资料" not in t.section
     ]
+    cash: list[SourceTable] = []
     if cf_candidates:
         consolidated = [t for t in cf_candidates if "合并" in t.section]
-        picked.append(max(consolidated or cf_candidates, key=lambda t: len(t.rows)))
+        cash = [max(consolidated or cf_candidates, key=lambda t: len(t.rows))]
+
+    picked.extend(_repair_family(by_page, "bs", bs))
+    picked.extend(_repair_family(by_page, "is", income))
+    picked.extend(_repair_family(by_page, "cf", cash))
 
     # 返回父表（已合并各逻辑段）：抽取以整张报表为单位，避免把半张表喂给模型
     seen: set[str] = set()
