@@ -435,6 +435,18 @@ def select_tables(parents: list[SourceTable]) -> list[SourceTable]:
             picked.append(t)
             break
 
+    # 主要财务指标：部分文档把每股收益/ROE 单独成表（如 601127 2025 年报的
+    # 「(二) 主要财务指标」），与主要会计数据分开；漏选会静默丢掉 eps/roe。
+    for t in by_page:
+        if t in picked:
+            continue
+        head = str(t.header[0] or "") if t.header else ""
+        if ("主要财务指标" in t.section or "主要财务指标" in head) and (
+            "每股收益" in t.labels or "净资产收益率" in t.labels
+        ):
+            picked.append(t)
+            break
+
     # 资产负债表：优先整块取同章节相邻页（银行/保险把资产与权益分页）
     bs: list[SourceTable] = []
     for block in _bs_blocks(by_page):

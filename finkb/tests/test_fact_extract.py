@@ -399,3 +399,49 @@ def test_statement_unit_from_summary_ratio():
     summary2 = make_table([["营业收入（万元）", "22,282,423.85"]], ["项目", "2025年"], section="主要会计数据", kind_hint="s2")
     stmt2 = make_table([["营业收入", "222,824,238,000"]], ["项目", "2025年"], kind_hint="b2")
     assert _infer_statement_unit([(summary2, [obs(22282423.85)], None), (stmt2, [obs(222824238000.0)], None)]) == "元"
+
+
+def test_indicator_table_selected_with_summary():
+    """主要财务指标单独成表时也要选，否则 eps/roe 会被静默漏掉。"""
+    summary = make_table(
+        [["营业收入", "100"], ["净利润", "10"]],
+        ["项目", "2025年"],
+        section="六、主要会计数据和财务指标",
+        kind_hint="a_summary",
+    )
+    indicator = make_table(
+        [["基本每股收益(元/股)", "1.20"], ["加权平均净资产收益率(%)", "5.50"]],
+        ["主要财务指标", "2025年"],
+        section="(二) 主要财务指标",
+        kind_hint="b_indicator",
+    )
+    picked = select_tables([summary, indicator])
+    assert [t.logical_id for t in picked] == ["a_summary", "b_indicator"]
+
+
+def test_prompt_treats_parenthesized_number_as_negative():
+    """括号是会计负数，不是注释；漏了这条 601127 2023 全年负值会整列丢失。"""
+    from finkb.fact_engine.extractor import SYSTEM_PROMPT
+
+    assert "负数" in SYSTEM_PROMPT and "(1,234)" in SYSTEM_PROMPT
+
+
+def test_subheader_changes_period_for_following_rows():
+    """一季报「本报告期末/上年度末」是第二段表头，后面的余额不能标成上年同期。"""
+    from finkb.fact_engine.extractor import _annotate_periods, column_periods
+
+    table = make_table(
+        [
+            ["营业收入(元)", "1", "2", "-50%"],
+            ["", "本报告期末", "上年度末", "增减"],
+            ["总资产(元)", "902,076,965,000", "883,729,883,000", "2%"],
+        ],
+        ["", "本报告期", "上年同期", "增减"],
+        kind_hint="q1",
+    )
+    table.period = "2026Q1"
+    periods = column_periods(table.header, table.period, "summary")
+    assert periods[2] == "2025Q1"
+    obs = [{"metric_id": "total_assets", "row": 2, "col": 2, "value_raw": "883,729,883,000"}]
+    _annotate_periods(table, obs, periods)
+    assert obs[0]["period"] == "2025"

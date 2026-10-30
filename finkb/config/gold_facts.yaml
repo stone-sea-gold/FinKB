@@ -1,0 +1,509 @@
+# L1 金标事实集：人工从 PDF 文本层抄录，独立于 MinerU 解析结果。
+# 金额单位亿元；roe 为百分点；eps 为元/股。source_doc+page 用于回查。
+# 校验：tools/gold_check.py（check.sh 在 data/facts.duckdb 存在时自动跑）。
+version: 1
+entries:
+  - company: "002594"
+    period: "2025"
+    metric_id: revenue
+    expected: 8039.64958
+    unit: 亿元
+    source_doc: 002594_2025_年报
+    page: 11
+  - company: "002594"
+    period: "2024"
+    metric_id: revenue
+    expected: 7771.02455
+    unit: 亿元
+    source_doc: 002594_2025_年报
+    page: 11
+  - company: "002594"
+    period: "2023"
+    metric_id: revenue
+    expected: 6023.15354
+    unit: 亿元
+    source_doc: 002594_2025_年报
+    page: 11
+  - company: "002594"
+    period: "2025"
+    metric_id: net_profit
+    expected: 326.19022
+    unit: 亿元
+    source_doc: 002594_2025_年报
+    page: 11
+  - company: "002594"
+    period: "2024"
+    metric_id: net_profit
+    expected: 402.54346
+    unit: 亿元
+    source_doc: 002594_2025_年报
+    page: 11
+  - company: "002594"
+    period: "2023"
+    metric_id: net_profit
+    expected: 300.40811
+    unit: 亿元
+    source_doc: 002594_2025_年报
+    page: 11
+  - company: "002594"
+    period: "2025"
+    metric_id: net_profit_deducted
+    expected: 294.45703
+    unit: 亿元
+    source_doc: 002594_2025_年报
+    page: 11
+  - company: "002594"
+    period: "2024"
+    metric_id: net_profit_deducted
+    expected: 369.82887
+    unit: 亿元
+    source_doc: 002594_2025_年报
+    page: 11
+  - company: "002594"
+    period: "2023"
+    metric_id: net_profit_deducted
+    expected: 284.62432
+    unit: 亿元
+    source_doc: 002594_2025_年报
+    page: 11
+  - company: "002594"
+    period: "2025"
+    metric_id: ocf
+    expected: 591.35544
+    unit: 亿元
+    source_doc: 002594_2025_年报
+    page: 11
+  - company: "002594"
+    period: "2024"
+    metric_id: ocf
+    expected: 1334.53873
+    unit: 亿元
+    source_doc: 002594_2025_年报
+    page: 11
+  - company: "002594"
+    period: "2023"
+    metric_id: ocf
+    expected: 1697.25025
+    unit: 亿元
+    source_doc: 002594_2025_年报
+    page: 11
+  - company: "002594"
+    period: "2025"
+    metric_id: eps_basic
+    expected: 3.58
+    unit: "元/股"
+    source_doc: 002594_2025_年报
+    page: 11
+  - company: "002594"
+    period: "2024"
+    metric_id: eps_basic
+    expected: 4.61
+    unit: "元/股"
+    source_doc: 002594_2025_年报
+    page: 11
+  - company: "002594"
+    period: "2023"
+    metric_id: eps_basic
+    expected: 3.44
+    unit: "元/股"
+    source_doc: 002594_2025_年报
+    page: 11
+  - company: "002594"
+    period: "2025"
+    metric_id: roe_weighted
+    expected: 15.31
+    unit: "%"
+    source_doc: 002594_2025_年报
+    page: 11
+  - company: "002594"
+    period: "2024"
+    metric_id: roe_weighted
+    expected: 26.05
+    unit: "%"
+    source_doc: 002594_2025_年报
+    page: 11
+  - company: "002594"
+    period: "2023"
+    metric_id: roe_weighted
+    expected: 24.4
+    unit: "%"
+    source_doc: 002594_2025_年报
+    page: 11
+  - company: "002594"
+    period: "2025"
+    metric_id: total_assets
+    expected: 8837.29883
+    unit: 亿元
+    source_doc: 002594_2025_年报
+    page: 11
+  - company: "002594"
+    period: "2024"
+    metric_id: total_assets
+    expected: 7833.55855
+    unit: 亿元
+    source_doc: 002594_2025_年报
+    page: 11
+  - company: "002594"
+    period: "2023"
+    metric_id: total_assets
+    expected: 6795.4767
+    unit: 亿元
+    source_doc: 002594_2025_年报
+    page: 11
+  - company: "002594"
+    period: "2025"
+    metric_id: net_assets
+    expected: 2462.74606
+    unit: 亿元
+    source_doc: 002594_2025_年报
+    page: 11
+  - company: "002594"
+    period: "2024"
+    metric_id: net_assets
+    expected: 1852.51104
+    unit: 亿元
+    source_doc: 002594_2025_年报
+    page: 11
+  - company: "002594"
+    period: "2023"
+    metric_id: net_assets
+    expected: 1388.10065
+    unit: 亿元
+    source_doc: 002594_2025_年报
+    page: 11
+  - company: "000625"
+    period: "2025"
+    metric_id: revenue
+    expected: 1639.99804
+    unit: 亿元
+    source_doc: 000625_2025_年报
+    page: 7
+  - company: "000625"
+    period: "2024"
+    metric_id: revenue
+    expected: 1597.33034
+    unit: 亿元
+    source_doc: 000625_2025_年报
+    page: 7
+  - company: "000625"
+    period: "2023"
+    metric_id: revenue
+    expected: 1512.97707
+    unit: 亿元
+    source_doc: 000625_2025_年报
+    page: 7
+  - company: "000625"
+    period: "2025"
+    metric_id: net_profit
+    expected: 40.75223
+    unit: 亿元
+    source_doc: 000625_2025_年报
+    page: 7
+  - company: "000625"
+    period: "2024"
+    metric_id: net_profit
+    expected: 73.21364
+    unit: 亿元
+    source_doc: 000625_2025_年报
+    page: 7
+  - company: "000625"
+    period: "2023"
+    metric_id: net_profit
+    expected: 113.27463
+    unit: 亿元
+    source_doc: 000625_2025_年报
+    page: 7
+  - company: "000625"
+    period: "2025"
+    metric_id: net_profit_deducted
+    expected: 27.95025
+    unit: 亿元
+    source_doc: 000625_2025_年报
+    page: 7
+  - company: "000625"
+    period: "2024"
+    metric_id: net_profit_deducted
+    expected: 25.87272
+    unit: 亿元
+    source_doc: 000625_2025_年报
+    page: 7
+  - company: "000625"
+    period: "2023"
+    metric_id: net_profit_deducted
+    expected: 37.81847
+    unit: 亿元
+    source_doc: 000625_2025_年报
+    page: 7
+  - company: "000625"
+    period: "2025"
+    metric_id: ocf
+    expected: 18.35673
+    unit: 亿元
+    source_doc: 000625_2025_年报
+    page: 7
+  - company: "000625"
+    period: "2024"
+    metric_id: ocf
+    expected: 48.49399
+    unit: 亿元
+    source_doc: 000625_2025_年报
+    page: 7
+  - company: "000625"
+    period: "2023"
+    metric_id: ocf
+    expected: 198.61466
+    unit: 亿元
+    source_doc: 000625_2025_年报
+    page: 7
+  - company: "000625"
+    period: "2025"
+    metric_id: eps_basic
+    expected: 0.41
+    unit: "元/股"
+    source_doc: 000625_2025_年报
+    page: 7
+  - company: "000625"
+    period: "2024"
+    metric_id: eps_basic
+    expected: 0.74
+    unit: "元/股"
+    source_doc: 000625_2025_年报
+    page: 7
+  - company: "000625"
+    period: "2023"
+    metric_id: eps_basic
+    expected: 1.15
+    unit: "元/股"
+    source_doc: 000625_2025_年报
+    page: 7
+  - company: "000625"
+    period: "2025"
+    metric_id: roe_weighted
+    expected: 5.3
+    unit: "%"
+    source_doc: 000625_2025_年报
+    page: 7
+  - company: "000625"
+    period: "2024"
+    metric_id: roe_weighted
+    expected: 9.69
+    unit: "%"
+    source_doc: 000625_2025_年报
+    page: 7
+  - company: "000625"
+    period: "2023"
+    metric_id: roe_weighted
+    expected: 16.55
+    unit: "%"
+    source_doc: 000625_2025_年报
+    page: 7
+  - company: "000625"
+    period: "2025"
+    metric_id: total_assets
+    expected: 2029.61073
+    unit: 亿元
+    source_doc: 000625_2025_年报
+    page: 7
+  - company: "000625"
+    period: "2024"
+    metric_id: total_assets
+    expected: 2081.68161
+    unit: 亿元
+    source_doc: 000625_2025_年报
+    page: 7
+  - company: "000625"
+    period: "2023"
+    metric_id: total_assets
+    expected: 1901.71127
+    unit: 亿元
+    source_doc: 000625_2025_年报
+    page: 7
+  - company: "000625"
+    period: "2025"
+    metric_id: net_assets
+    expected: 773.36178
+    unit: 亿元
+    source_doc: 000625_2025_年报
+    page: 7
+  - company: "000625"
+    period: "2024"
+    metric_id: net_assets
+    expected: 765.76225
+    unit: 亿元
+    source_doc: 000625_2025_年报
+    page: 7
+  - company: "000625"
+    period: "2023"
+    metric_id: net_assets
+    expected: 718.5312
+    unit: 亿元
+    source_doc: 000625_2025_年报
+    page: 7
+  - company: "601127"
+    period: "2025"
+    metric_id: revenue
+    expected: 1650.53637
+    unit: 亿元
+    source_doc: 601127_2025_年报
+    page: 7
+  - company: "601127"
+    period: "2024"
+    metric_id: revenue
+    expected: 1451.75822
+    unit: 亿元
+    source_doc: 601127_2025_年报
+    page: 7
+  - company: "601127"
+    period: "2023"
+    metric_id: revenue
+    expected: 358.41958
+    unit: 亿元
+    source_doc: 601127_2025_年报
+    page: 7
+  - company: "601127"
+    period: "2025"
+    metric_id: net_profit
+    expected: 59.56787
+    unit: 亿元
+    source_doc: 601127_2025_年报
+    page: 7
+  - company: "601127"
+    period: "2024"
+    metric_id: net_profit
+    expected: 59.45945
+    unit: 亿元
+    source_doc: 601127_2025_年报
+    page: 7
+  - company: "601127"
+    period: "2023"
+    metric_id: net_profit
+    expected: -24.49687
+    unit: 亿元
+    source_doc: 601127_2025_年报
+    page: 7
+  - company: "601127"
+    period: "2025"
+    metric_id: net_profit_deducted
+    expected: 51.35926
+    unit: 亿元
+    source_doc: 601127_2025_年报
+    page: 7
+  - company: "601127"
+    period: "2024"
+    metric_id: net_profit_deducted
+    expected: 55.73128
+    unit: 亿元
+    source_doc: 601127_2025_年报
+    page: 7
+  - company: "601127"
+    period: "2023"
+    metric_id: net_profit_deducted
+    expected: -48.16609
+    unit: 亿元
+    source_doc: 601127_2025_年报
+    page: 7
+  - company: "601127"
+    period: "2025"
+    metric_id: ocf
+    expected: 289.13743
+    unit: 亿元
+    source_doc: 601127_2025_年报
+    page: 7
+  - company: "601127"
+    period: "2024"
+    metric_id: ocf
+    expected: 225.15265
+    unit: 亿元
+    source_doc: 601127_2025_年报
+    page: 7
+  - company: "601127"
+    period: "2023"
+    metric_id: ocf
+    expected: 63.97612
+    unit: 亿元
+    source_doc: 601127_2025_年报
+    page: 7
+  - company: "601127"
+    period: "2025"
+    metric_id: eps_basic
+    expected: 3.68
+    unit: "元/股"
+    source_doc: 601127_2025_年报
+    page: 7
+  - company: "601127"
+    period: "2024"
+    metric_id: eps_basic
+    expected: 3.94
+    unit: "元/股"
+    source_doc: 601127_2025_年报
+    page: 7
+  - company: "601127"
+    period: "2023"
+    metric_id: eps_basic
+    expected: -1.63
+    unit: "元/股"
+    source_doc: 601127_2025_年报
+    page: 7
+  - company: "601127"
+    period: "2025"
+    metric_id: roe_weighted
+    expected: 23.53
+    unit: "%"
+    source_doc: 601127_2025_年报
+    page: 7
+  - company: "601127"
+    period: "2024"
+    metric_id: roe_weighted
+    expected: 45.43
+    unit: "%"
+    source_doc: 601127_2025_年报
+    page: 7
+  - company: "601127"
+    period: "2023"
+    metric_id: roe_weighted
+    expected: -22.39
+    unit: "%"
+    source_doc: 601127_2025_年报
+    page: 7
+  - company: "601127"
+    period: "2025"
+    metric_id: total_assets
+    expected: 1439.05863
+    unit: 亿元
+    source_doc: 601127_2025_年报
+    page: 7
+  - company: "601127"
+    period: "2024"
+    metric_id: total_assets
+    expected: 943.63959
+    unit: 亿元
+    source_doc: 601127_2025_年报
+    page: 7
+  - company: "601127"
+    period: "2023"
+    metric_id: total_assets
+    expected: 512.44671
+    unit: 亿元
+    source_doc: 601127_2025_年报
+    page: 7
+  - company: "601127"
+    period: "2025"
+    metric_id: net_assets
+    expected: 409.18133
+    unit: 亿元
+    source_doc: 601127_2025_年报
+    page: 7
+  - company: "601127"
+    period: "2024"
+    metric_id: net_assets
+    expected: 122.64245
+    unit: 亿元
+    source_doc: 601127_2025_年报
+    page: 7
+  - company: "601127"
+    period: "2023"
+    metric_id: net_assets
+    expected: 114.05826
+    unit: 亿元
+    source_doc: 601127_2025_年报
+    page: 7

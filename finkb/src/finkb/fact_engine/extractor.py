@@ -29,7 +29,7 @@ SYSTEM_PROMPT = """你是财务报表结构化助手。你只做一件事：把�
 2. 只输出表格单元格里真实存在的数字；不要计算、不要推断、不要用“同比增减”列。
 3. row 是行号（表格最左侧的数字），col 是列号（表头里的数字）；只允许取给出“期间”的列。
 4. value_raw 原样抄该单元格的文本（保留千分位逗号）。
-5. 同一指标在同一列只输出一次；空单元格、横杠、括号注释都不要输出。
+5. 同一指标在同一列只输出一次；空单元格、横杠不要输出。**括号包起来的数字是负数**（如 (1,234) 表示 -1,234），必须原样输出，不要当作括号注释跳过。
 6. 只输出 JSON，不要解释。格式：{"observations":[{"metric_id":"revenue","row":3,"col":2,"value_raw":"803,964,958"}]}"""
 
 
@@ -139,6 +139,10 @@ def column_periods(header: list[str], doc_period: str, kind: str = "other") -> d
             m = re.search(r"(19\d{2}|20\d{2})", t)
             out[i] = f"{m.group(1)}Q1-Q3" if m and int(m.group(1)) != year0 else flow
             continue
+        if "上年度末" in t or "上年末" in t or "上年度期末" in t:
+            m = re.search(r"(19\d{2}|20\d{2})", t)
+            out[i] = f"{int(m.group(1)) - 1}" if m else f"{year0 - 1}"
+            continue
         if "年初" in t or "期初" in t:
             m = re.search(r"(19\d{2}|20\d{2})", t)
             out[i] = f"{int(m.group(1)) - 1}" if m else f"{year0 - 1}"
@@ -225,6 +229,45 @@ def build_prompt(table: SourceTable, metrics: list[Metric], periods: dict[int, s
     )
 
 
+
+def _is_subheader(row: list[str]) -> bool:
+    """表内第二段表头：首格为空、其余格是「本报告期末/上年度末」这类词，没有数字。"""
+    if len(row) < 3 or not row or str(row[0]).strip():
+        return False
+    cells = [str(c).strip() for c in row[1:] if str(c).strip()]
+    return (
+        len(cells) >= 2
+        and not any(re.search(r"\d", c) for c in cells)
+        and any(k in "".join(cells) for k in ("期末", "年末", "期初", "年初"))
+    )
+
+
+def _periods_by_row(table: SourceTable, periods: dict[int, str]) -> list[tuple[int, dict[int, str]]]:
+    """一张表里可能有多段列语义（如先「本报告期/上年同期」再「本报告期末/上年度末」）。"""
+    segments = [(0, periods)]
+    for i, row in enumerate(table.rows):
+        if _is_subheader(row):
+            seg = column_periods([str(c) for c in row], table.period, table.kind)
+            if seg:
+                segments.append((i, seg))
+    return segments
+
+
+def _annotate_periods(table: SourceTable, obs: list[dict], periods: dict[int, str]) -> list[dict]:
+    """按行所在段覆盖期间，避免把「上年度末」的余额标成上年同期。"""
+    segments = _periods_by_row(table, periods)
+    for item in obs:
+        row = item.get("row")
+        if not isinstance(row, int):
+            continue
+        for start, seg in segments:
+            if row >= start:
+                p = seg.get(int(item["col"])) if isinstance(item.get("col"), int) else None
+                if p:
+                    item["period"] = p
+    return obs
+
+
 def extract_table(
     client: LLMClient,
     table: SourceTable,
@@ -253,4 +296,5 @@ def extract_table(
     obs = payload.get("observations")
     if not isinstance(obs, list):
         raise ValueError(f"{table.logical_id}: 返回体缺 observations")
-    return [_normalize_item(item) for item in obs], periods
+    items = [_normalize_item(item) for item in obs]
+    return _annotate_periods(table, items, periods), periods

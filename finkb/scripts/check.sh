@@ -16,3 +16,11 @@ echo "== 单元测试 =="
 echo
 echo "== 全语料守恒律 + 基线对照 =="
 "$PYTHON" tools/audit.py corpus --baseline config/corpus-baseline.json --pdf-root ../raw
+
+echo
+echo "== 金标事实集 =="
+if [ -f data/facts.duckdb ]; then
+  "$PYTHON" tools/gold_check.py --db data/facts.duckdb --gold config/gold_facts.yaml
+else
+  echo "跳过：data/facts.duckdb 不存在"
+fi

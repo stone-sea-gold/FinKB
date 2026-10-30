@@ -88,7 +88,7 @@ def verify(
     if abs(cell_num - claimed) > max(1e-6, abs(cell_num) * 1e-9):
         return None, "literal_not_found"
 
-    period = periods.get(col)
+    period = obs.get("period") or periods.get(col)
     if period is None:
         return None, "schema_invalid"
 
