@@ -361,3 +361,23 @@ def test_page_unit_reads_chinese_note(tmp_path):
     )
     assert page_unit(tmp_path, 8) == "百万元"
     assert page_unit(tmp_path, 9) is None
+
+
+def test_is_prefers_period_statement_over_five_year_summary():
+    """五年摘要（2021–2025）不是当期法定利润表：有当期两列时优先当期表。"""
+    filler = [[f"项目{i}", "1"] for i in range(22)]
+    five_year = make_table(
+        [["营业收入", "1", "2", "3", "4", "5"], ["净利润", "1", "2", "3", "4", "5"]] + filler,
+        ["项目", "2021年", "2022年", "2023年", "2024年", "2025年"],
+        section="合并利润表",
+        kind_hint="is_5y",
+    )
+    current = make_table(
+        [["营业收入", "1", "2"], ["净利润", "1", "2"]] + filler,
+        ["项目", "2025年度", "2024年度"],
+        section="合并利润表",
+        kind_hint="is_cur",
+    )
+    assert five_year.kind == "is" and current.kind == "is"
+    picked = select_tables([five_year, current])
+    assert [t.logical_id for t in picked] == ["is_cur"]

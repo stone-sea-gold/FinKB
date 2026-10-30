@@ -381,6 +381,8 @@ def _best_run(by_page: list[SourceTable], family: str) -> list[SourceTable]:
             score += 100
         if any("合并" in t.section for t in run):
             score += 10
+        if max(_year_span(t.header) for t in run) > 3:
+            score -= 1000  # 多年度摘要表不当期报表，永不胜出
         if score > best_score:
             best, best_score = run, score
     return best
@@ -409,6 +411,17 @@ def _repair_family(
             or any(k in t.section for t in picked for k in ("主营业务分析", "财务指标"))
         )
     return run if broken else picked
+
+
+_YEAR_RE = re.compile(r"(?:19|20)\d{2}")
+
+
+def _year_span(header: list[str]) -> int:
+    """表头里出现过几个不同年份。多年度摘要（5 年）不是当期法定报表。"""
+    years: set[str] = set()
+    for cell in header:
+        years.update(_YEAR_RE.findall(cell or ""))
+    return len(years)
 
 
 def select_tables(parents: list[SourceTable]) -> list[SourceTable]:
@@ -448,10 +461,23 @@ def select_tables(parents: list[SourceTable]) -> list[SourceTable]:
 
     # 利润表：优先章节写明「合并」的，其次行数最多；母公司表不参与
     is_candidates = [t for t in by_page if t.kind == "is" and not _is_parent(t)]
+    # 多年度摘要表（如神华的 2021–2025 五年利润表）不是当期法定报表：
+    # 只在还剩下「当期口径」候选时才把它排除，避免把唯一候选也筛掉。
+    skipped_history = False
+    if len(is_candidates) > 1:
+        current = [t for t in is_candidates if _year_span(t.header) <= 3]
+        if current:
+            skipped_history = any(_year_span(t.header) > 3 for t in is_candidates if t not in current)
+            is_candidates = current
     income: list[SourceTable] = []
     if is_candidates:
         consolidated = [t for t in is_candidates if "合并" in t.section]
         income = [max(consolidated or is_candidates, key=lambda t: len(t.rows))]
+    if skipped_history:
+        # 当期利润表常常还有续页（净利润的分类、其他综合收益），单张会漏「归母净利润」。
+        run = _best_run(by_page, "is")
+        if run:
+            income = run
 
     # 现金流量表：排除附注/补充资料与母公司表；优先「合并」章节，其次行数最多
     cf_candidates = [
