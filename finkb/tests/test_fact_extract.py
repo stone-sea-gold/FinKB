@@ -381,3 +381,21 @@ def test_is_prefers_period_statement_over_five_year_summary():
     assert five_year.kind == "is" and current.kind == "is"
     picked = select_tables([five_year, current])
     assert [t.logical_id for t in picked] == ["is_cur"]
+
+
+def test_statement_unit_from_summary_ratio():
+    """三表单位靠与 summary 的重叠科目反推，而不是页面正文的「单位：元」。"""
+    from finkb.fact_engine.ingest import _infer_statement_unit
+
+    def obs(value):
+        return {"metric_id": "revenue", "value_raw": value}
+
+    # summary 元、三表千元
+    summary = make_table([["营业收入", "803,964,958,000"]], ["项目", "2025年"], section="主要会计数据", kind_hint="s1")
+    stmt = make_table([["营业收入", "803,964,958"]], ["项目", "2025年"], kind_hint="b1")
+    assert _infer_statement_unit([(summary, [obs(803964958000.0)], None), (stmt, [obs(883729883.0)], None)]) == "千元"
+
+    # summary 万元、三表元
+    summary2 = make_table([["营业收入（万元）", "22,282,423.85"]], ["项目", "2025年"], section="主要会计数据", kind_hint="s2")
+    stmt2 = make_table([["营业收入", "222,824,238,000"]], ["项目", "2025年"], kind_hint="b2")
+    assert _infer_statement_unit([(summary2, [obs(22282423.85)], None), (stmt2, [obs(222824238000.0)], None)]) == "元"

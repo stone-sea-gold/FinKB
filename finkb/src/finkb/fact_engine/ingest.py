@@ -118,6 +118,53 @@ def infer_unit(tables: list[SourceTable]) -> str | None:
     return best if abs(ratio - expected) / expected < 0.2 else None
 
 
+def _infer_statement_unit(extracted, table_units: dict[str, str] | None = None) -> str | None:
+    """用「主要会计数据」与三表同一科目的数量级，判定三表的记账单位。
+
+    2026-10-30 全量重灌暴露两件事：① summary 与三表可能用不同单位
+    （比亚迪 summary 元、三表千元；长城 summary 万元、三表元）；
+    ② 页面正文的「单位：元」可能来自同页附注表，不能直接用于报表。
+    因此只用「同一 metric 的数值比」反推，summary 的单位优先看表头/行标签，
+    其次看该页正文；两者都没有才放弃（交给页面单位兜底）。
+    """
+    summary = [(t, obs) for t, obs, _ in extracted if t.kind == "summary"]
+    if not summary:
+        return None
+    unit0 = None
+    for t, _obs in summary:
+        unit0 = (
+            unit_from_text(" ".join(t.header))
+            or unit_from_labels(t.rows)
+            or (table_units or {}).get(t.logical_id)
+        )
+        if unit0:
+            break
+    ref: dict[str, float] = {}
+    for _t, obs in summary:
+        for item in obs:
+            value = parse_number(item.get("value_raw"))
+            if value is not None:
+                ref.setdefault(str(item.get("metric_id", "")), value)
+    stmt: dict[str, float] = {}
+    for t, obs, _ in extracted:
+        if t.kind == "summary":
+            continue
+        for item in obs:
+            value = parse_number(item.get("value_raw"))
+            mid = str(item.get("metric_id", ""))
+            if value is not None and mid in ref:
+                stmt.setdefault(mid, value)
+    for mid in ("revenue", "total_assets", "net_profit", "ocf"):
+        base, raw = ref.get(mid), stmt.get(mid)
+        if not base or not raw:
+            continue
+        target = UNIT_CHOICES[unit0 or "元"] / (raw / base)
+        best = min(UNIT_CHOICES, key=lambda u: abs(target - UNIT_CHOICES[u]))
+        if abs(target / UNIT_CHOICES[best] - 1) < 0.1:
+            return best
+    return None
+
+
 def company_units(docs: list[Path], manifest: dict) -> dict[str, str]:
     """每家公司取第一份能判定的文档推断单位（年报通常在列表最前）。"""
     out: dict[str, str] = {}
@@ -184,6 +231,7 @@ def write_document(
         "column_gaps": 0,
     }
     by_id = {m.metric_id: m for m in metrics}
+    statement_unit = _infer_statement_unit(extracted, table_units)
     seen: set[tuple[str, str]] = set()
     for table, obs, periods in extracted:
         # 单位优先看表头/行标签：主要会计数据有的把「(千元)」写在行标签里
@@ -192,6 +240,7 @@ def write_document(
         labelled = unit_from_text(" ".join(table.header)) or unit_from_labels(table.rows)
         table_unit = (
             labelled
+            or (None if table.kind == "summary" else statement_unit)
             or (table_units or {}).get(table.logical_id)
             or ("元" if table.kind == "summary" else unit)
         )
