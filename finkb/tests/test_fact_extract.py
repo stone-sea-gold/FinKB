@@ -264,3 +264,48 @@ def test_normalize_item_accepts_metric_key():
 
     item = _normalize_item({"metric": "cash", "row": 0, "col": 1, "value_raw": "1"})
     assert item["metric_id"] == "cash" and "metric" not in item
+
+
+def test_unit_from_labels_ignores_per_share():
+    from finkb.fact_engine.ingest import unit_from_labels
+
+    assert unit_from_labels([["营业收入(千元)", "456,451,731"]]) == "千元"
+    assert unit_from_labels([["营业收入（万元）", "1"]]) == "万元"
+    assert unit_from_labels([["基本每股收益(元)", "5.8"]]) is None
+    assert unit_from_labels([["营业收入", "1"]]) is None
+
+
+def test_cf_select_skips_parent_and_notes():
+    merged = make_table(
+        [["经营活动产生/(使用)的现金流量净额", "5"]] + [[f"现金流{i}", "1"] for i in range(30)],
+        ["项目", "2025年度"],
+        section="合并现金流量表",
+        kind_hint="cf_merged",
+    )
+    parent = make_table(
+        [["经营活动产生的现金流量净额", "5"]] + [[f"现金流{i}", "1"] for i in range(32)],
+        ["项目", "2025年度"],
+        section="母公司现金流量表",
+        kind_hint="cf_parent",
+    )
+    notes = make_table(
+        [["经营活动产生的现金流量净额", "5"]] + [[f"现金流{i}", "1"] for i in range(40)],
+        ["项目", "2025年度"],
+        section="(64) 现金流量表项目附注",
+        kind_hint="cf_notes",
+    )
+    assert merged.kind == "cf"  # 斜杠写法也要认
+    picked = select_tables([parent, notes, merged])
+    assert [t.logical_id for t in picked] == ["cf_merged"]
+
+
+def test_expense_metric_stored_positive(tmp_path):
+    from finkb.fact_engine.ingest import write_document
+    from finkb.fact_engine.store import FactStore
+
+    cost = Metric(metric_id="operating_cost", metric_name="营业成本", unit_default="亿元", category="盈利", aliases=[])
+    table = make_table([["减:营业成本", "(100)"]], ["项目", "2025年"], section="合并利润表")
+    store = FactStore(tmp_path / "t.duckdb")
+    stats = write_document(store, [(table, [{"metric_id": "operating_cost", "row": 0, "col": 1, "value_raw": "(100)"}], {1: "2025"})], [cost], "元")
+    assert stats["facts"] == 1
+    assert store.conn.execute("select value_raw, value_norm from facts").fetchone() == (100.0, 1e-06)

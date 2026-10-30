@@ -225,6 +225,42 @@
       "total_invariants": 13,
       "verify_checked": 2614,
       "verify_missing": 2
+    },
+    "600519_2025_年报": {
+      "pages": 143,
+      "logical": 304,
+      "header": 281,
+      "invariants": 13,
+      "total_invariants": 13,
+      "verify_checked": 1619,
+      "verify_missing": 0
+    },
+    "000333_2025_年报": {
+      "pages": 276,
+      "logical": 271,
+      "header": 246,
+      "invariants": 13,
+      "total_invariants": 13,
+      "verify_checked": 1568,
+      "verify_missing": 0
+    },
+    "600276_2025_年报": {
+      "pages": 236,
+      "logical": 283,
+      "header": 260,
+      "invariants": 13,
+      "total_invariants": 13,
+      "verify_checked": 1552,
+      "verify_missing": 1
+    },
+    "600900_2025_年报": {
+      "pages": 259,
+      "logical": 290,
+      "header": 259,
+      "invariants": 13,
+      "total_invariants": 13,
+      "verify_checked": 1679,
+      "verify_missing": 1
     }
   }
 }

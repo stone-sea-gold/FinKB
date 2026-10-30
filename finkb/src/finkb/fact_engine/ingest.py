@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
@@ -28,6 +29,9 @@ from finkb.fact_engine.verifier import parse_number, repair, verify
 UNIT_CHOICES = {"元": 1.0, "千元": 1e3, "万元": 1e4, "百万元": 1e6}
 _UNIT_WORDS = ("百万元", "千元", "万元", "元")
 _CALIBER = "合并报表"
+# 费用类科目统一存正数：报表里「减：营业成本」「研发费用」常以括号负数印刷，
+# 直接入库会让毛利率、费用率全部算反。
+_POSITIVE_METRICS = {"operating_cost", "rd_expense"}
 
 
 def page_unit(doc_dir: Path, page: int) -> str | None:
@@ -49,6 +53,22 @@ def unit_from_text(text: str) -> str | None:
     for unit in _UNIT_WORDS:
         if unit in text:
             return unit
+    return None
+
+
+_LABEL_UNIT = re.compile(r"[（(]\s*(百万元|千元|万元)\s*[)）]")
+
+
+def unit_from_labels(rows: list[list[str]]) -> str | None:
+    """从行标签的「(千元)」后缀认单位。
+
+    主要会计数据常把单位写在行标签里（「营业收入(千元)」），表头里反而没有；
+    只认千元/万元/百万元——「基本每股收益(元)」是每股单位，不能当成记账单位。
+    """
+    for row in rows:
+        m = _LABEL_UNIT.search(str(row[0] if row else ""))
+        if m:
+            return m.group(1)
     return None
 
 Extraction = tuple[SourceTable, list[dict], dict[int, str]]
@@ -156,9 +176,10 @@ def write_document(
     by_id = {m.metric_id: m for m in metrics}
     seen: set[tuple[str, str]] = set()
     for table, obs, periods in extracted:
-        # 主要会计数据默认按「元」记账（利润表可能是千元/万元），不能套公司报表单位；
-        # 表头写明「人民币百万元」时以表头为准
-        table_unit = (unit_from_text(" ".join(table.header)) or "元") if table.kind == "summary" else unit
+        # 单位优先看表头/行标签：主要会计数据有的把「(千元)」写在行标签里
+        # （美的），表头只有年份列。都没有时，summary 按「元」，三表用公司单位。
+        labelled = unit_from_text(" ".join(table.header)) or unit_from_labels(table.rows)
+        table_unit = labelled or ("元" if table.kind == "summary" else unit)
         stats["observations"] += len(obs)
         stats["column_gaps"] += len(missing_columns(table, periods, obs))
         for item in obs:
@@ -171,6 +192,8 @@ def write_document(
                     store.add_unmatched({"table": table.logical_id, "obs": item}, reason or "schema_invalid")
                     stats["unmatched"] += 1
                     continue
+            if verified.metric.metric_id in _POSITIVE_METRICS and verified.value_raw < 0:
+                verified = replace(verified, value_raw=abs(verified.value_raw), value_norm=abs(verified.value_norm))
             key = (verified.period, verified.metric.metric_id)
             if key in seen:
                 stats["duplicated"] += 1

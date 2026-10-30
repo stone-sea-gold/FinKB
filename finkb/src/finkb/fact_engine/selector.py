@@ -56,6 +56,8 @@ def norm_label(text: object) -> str:
 
 _HEADER_PERIOD = re.compile(r"(19|20)\d{2}\s*年|本报告期|年初至|期末|上年同期|本期")
 _NUMBER_ONLY = re.compile(r"[\d,.\-()（）%]+")
+# 「经营活动产生的现金流量净额」有各种写法：产生/(使用)的、产生的、产生（使用）的……
+_CF_NET = re.compile(r"经营活动.*现金流量净额")
 
 
 def split_header_blocks(table: SourceTable) -> list[SourceTable]:
@@ -119,8 +121,9 @@ class SourceTable:
             return "is"
         # 利润表/现金流量表在部分文档里章节被写成「二、财务报表」甚至单位说明，
         # 所以现金流优先看内容：有经营净额、没有营业收入、行数够。
+        # 净额行的写法不固定（美的写成「经营活动产生/(使用)的现金流量净额」），用正则认。
         if (
-            "经营活动产生的现金流量净额" in joined
+            _CF_NET.search(joined)
             and not has_revenue
             and len(self.rows) >= 8
             and "补充资料" not in self.section
@@ -227,6 +230,20 @@ def _bs_blocks(by_page: list[SourceTable]) -> list[list[SourceTable]]:
     return blocks
 
 
+def _is_parent(t: SourceTable) -> bool:
+    """母公司报表（含「公司资产负债表/公司利润表/公司现金流量表」）v1 不抽。
+
+    注意「合并及公司利润表」这种把两张表写进一个章节标题的情况：只要带「合并」
+    就当作合并报表，不能按「公司利润表」误杀。
+    """
+    s = t.section
+    if "母公司" in s:
+        return True
+    if "合并" in s:
+        return False
+    return any(k in s for k in ("公司资产", "公司利润表", "公司现金流量表"))
+
+
 def select_tables(parents: list[SourceTable]) -> list[SourceTable]:
     """从父表列表里选出三表 + 主要会计数据，返回**逻辑子表**（保持行顺序）。"""
     by_page = sorted(parents, key=lambda t: (t.page, t.logical_id))
@@ -263,15 +280,24 @@ def select_tables(parents: list[SourceTable]) -> list[SourceTable]:
             if bs_count >= 4:
                 break
 
-    # 利润表：行数最多的一张
-    is_candidates = [t for t in by_page if t.kind == "is"]
+    # 利润表：优先章节写明「合并」的，其次行数最多；母公司表不参与
+    is_candidates = [t for t in by_page if t.kind == "is" and not _is_parent(t)]
     if is_candidates:
-        picked.append(max(is_candidates, key=lambda t: len(t.rows)))
+        consolidated = [t for t in is_candidates if "合并" in t.section]
+        picked.append(max(consolidated or is_candidates, key=lambda t: len(t.rows)))
 
-    # 现金流量表：行数最多的一张（排除补充资料）
-    cf_candidates = [t for t in by_page if t.kind == "cf"]
+    # 现金流量表：排除附注/补充资料与母公司表；优先「合并」章节，其次行数最多
+    cf_candidates = [
+        t
+        for t in by_page
+        if t.kind == "cf"
+        and not _is_parent(t)
+        and "附注" not in t.section
+        and "补充资料" not in t.section
+    ]
     if cf_candidates:
-        picked.append(max(cf_candidates, key=lambda t: len(t.rows)))
+        consolidated = [t for t in cf_candidates if "合并" in t.section]
+        picked.append(max(consolidated or cf_candidates, key=lambda t: len(t.rows)))
 
     # 返回父表（已合并各逻辑段）：抽取以整张报表为单位，避免把半张表喂给模型
     seen: set[str] = set()

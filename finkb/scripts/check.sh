@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 一条命令跑完「代码对不对」和「22 份产物对不对」。
+# 一条命令跑完「代码对不对」和「29 份产物对不对」。
 # 用法: scripts/check.sh   （PYTHON=... 可覆盖解释器路径）
 set -euo pipefail
 cd "$(dirname "$0")/.."
