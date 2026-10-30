@@ -9,6 +9,11 @@
 #
 # `aliases` 是给 LLM 对齐用的非标写法，宁多勿少；匹配时先精确、再去空白/全角。
 
+# 冻结版本：v1（2026-10-30）。改动 metric_id / metric_name / aliases /
+# unit_default 都必须升版本号并重灌事实库，否则新旧事实的口径不可比。
+version: 1
+frozen_at: "2026-10-30"
+
 metrics:
   - metric_id: revenue
     metric_name: 营业总收入

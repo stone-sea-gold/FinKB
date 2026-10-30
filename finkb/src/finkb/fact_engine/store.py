@@ -24,6 +24,11 @@ from finkb.fact_engine.metric_dict import Metric
 SCHEMA_SQL = """
 CREATE SEQUENCE IF NOT EXISTS fact_id_seq START 1;
 
+CREATE TABLE IF NOT EXISTS meta (
+  key   VARCHAR PRIMARY KEY,
+  value VARCHAR
+);
+
 CREATE TABLE IF NOT EXISTS metric_dict (
   metric_id    VARCHAR PRIMARY KEY,
   metric_name  VARCHAR,
@@ -120,6 +125,21 @@ class FactStore:
             "INSERT OR REPLACE INTO metric_dict VALUES (?, ?, ?, ?, ?)", rows
         )
         return len(rows)
+
+    # ---- 元信息 -----------------------------------------------------------
+
+    def set_meta(self, key: str, value: str) -> None:
+        """写入一条库级元信息（字典版本、模型、构建时间等）。"""
+        self.conn.execute(
+            "INSERT OR REPLACE INTO meta VALUES (?, ?)", [key, value]
+        )
+
+    def get_meta(self, key: str) -> str | None:
+        row = self.conn.execute("SELECT value FROM meta WHERE key = ?", [key]).fetchone()
+        return row[0] if row else None
+
+    def all_meta(self) -> dict[str, str]:
+        return dict(self.conn.execute("SELECT key, value FROM meta").fetchall())
 
     def metrics(self) -> list[tuple]:
         return self.conn.execute(

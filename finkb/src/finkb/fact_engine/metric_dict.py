@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -59,6 +60,27 @@ class Metric:
     def norm_unit(self) -> str:
         """P9 归一化目标单位。"""
         return UNIT_DERIVATION[self.unit_default][1]
+
+
+@dataclass(frozen=True)
+class DictMeta:
+    """字典的冻结信息：版本号、冻结日期、文件哈希。"""
+
+    version: str
+    frozen_at: str
+    sha256: str
+
+
+def load_dict_meta(path: str | Path | None = None) -> DictMeta:
+    """读取字典版本信息；未写 ``version`` 的旧文件按 "0" 处理。"""
+    p = Path(path) if path is not None else DEFAULT_METRIC_DICT
+    data = p.read_bytes()
+    raw = yaml.safe_load(data) or {}
+    return DictMeta(
+        version=str(raw.get("version", "0")),
+        frozen_at=str(raw.get("frozen_at", "")),
+        sha256=hashlib.sha256(data).hexdigest(),
+    )
 
 
 def load_metric_dict(path: str | Path | None = None) -> list[Metric]:

@@ -55,7 +55,7 @@ finkb/
 │       ├── section_splitter.py     # 物理表 → 逻辑表切分 + 表头继承
 │       ├── pipeline.py             # 解析 → 清洗 → 缝合 → 切分 端到端入口
 │       └── mineru_client.py        # MinerU 客户端 + content_list 适配 + pypdf 兜底
-├── tests/                          # 330 项测试，全部离线可跑
+├── tests/                          # 331 项测试，全部离线可跑
 ├── scripts/check.sh                # 一条命令验收（测试 + 语料基线）
 ├── config/corpus-baseline.json     # 29 文档 × 5 个数字的退步基线
 ├── config/metric_dict.yaml        # L1 指标字典 v0（21 个指标）
@@ -221,7 +221,7 @@ result.stitch.records           # 审计记录（页码序列 + 缝合理由）
 
 | 项 | 结果 |
 |---|---|
-| 测试 | **330 项通过**，离线 |
+| 测试 | **331 项通过**，离线 |
 | 语料 | 29 份 / 14 家公司 / 4791 页 / 10 类版式 |
 | 逻辑表 | 6130 张；有表头 **5729（93.5%）** |
 | 守恒律 | **359/359**（年报 16 条 / 半年报 13 条 / 季报 10 条） |

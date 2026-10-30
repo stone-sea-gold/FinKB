@@ -9,6 +9,7 @@ import pytest
 from finkb.fact_engine.metric_dict import (
     DEFAULT_METRIC_DICT,
     Metric,
+    load_dict_meta,
     load_metric_dict,
 )
 from finkb.fact_engine.store import FactStore
@@ -112,3 +113,15 @@ def test_unmatched_pool_rejects_bad_reason():
             store.add_unmatched({"metric_id": "revenue"}, "dropped")
         store.add_unmatched({"metric_id": "revenue"}, "literal_not_found")
         assert len(store.unmatched()) == 1
+
+
+def test_meta_roundtrip_and_version():
+    with FactStore() as store:
+        assert store.get_meta("metric_dict_version") is None
+        store.set_meta("metric_dict_version", "1")
+        store.set_meta("llm_model", "deepseek-v4.1-flash")
+        assert store.get_meta("metric_dict_version") == "1"
+        assert store.all_meta()["llm_model"] == "deepseek-v4.1-flash"
+    meta = load_dict_meta()
+    assert meta.version == "1"
+    assert len(meta.sha256) == 64

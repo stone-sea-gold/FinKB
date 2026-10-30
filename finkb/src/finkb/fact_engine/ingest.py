@@ -17,11 +17,11 @@ from __future__ import annotations
 import re
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 from finkb.fact_engine.extractor import LLMClient, extract_table, missing_columns
-from finkb.fact_engine.metric_dict import UNIT_DERIVATION, Metric
+from finkb.fact_engine.metric_dict import UNIT_DERIVATION, Metric, load_dict_meta
 from finkb.fact_engine.selector import SourceTable, load_tables, select_tables, split_header_blocks
 from finkb.fact_engine.store import FactStore
 from finkb.fact_engine.verifier import parse_number, repair, verify
@@ -295,6 +295,13 @@ def ingest_documents(
     workers: int = 4,
 ) -> dict[str, dict[str, int]]:
     """并发抽取（网络）、串行写库；返回每份文档的计数。"""
+    meta = load_dict_meta()
+    store.set_meta("metric_dict_version", meta.version)
+    store.set_meta("metric_dict_sha256", meta.sha256)
+    store.set_meta("metric_dict_frozen_at", meta.frozen_at)
+    store.set_meta("llm_model", client.config.model)
+    store.set_meta("built_at", datetime.now().isoformat(timespec="seconds"))
+
     def run(doc: Path) -> list[Extraction] | str:
         try:
             return extract_document(client, doc, metrics, manifest)

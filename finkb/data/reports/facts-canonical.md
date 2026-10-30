@@ -10,6 +10,7 @@
 - 文件：`data/facts.duckdb`（`*.duckdb` 被 git 忽略，不入库）
 - 文档清单：`data/parsed/` 下 29 份（14 家公司，2021–2026Q1 共 15 个期间）
 - 抽取入口：`finkb.fact_engine.ingest.ingest_documents`（workers=4）
+- 字典：`metric_dict.yaml` **v1（冻结 2026-10-30）**；版本、sha256、模型、构建时间在 `meta` 表
 
 ## 统计
 
@@ -25,6 +26,17 @@
 
 **逐文档条数**：赛力斯 205、长安 199、比亚迪 195、长城 62、广汽 45、茅台 45、招行 45、
 美的 44、恒瑞 41、长电 41、神华 39、中信 37、万科 34、平安 32。
+
+## 元信息（`meta` 表）
+
+| 键 | 值 |
+|---|---|
+| `metric_dict_version` | 1 |
+| `metric_dict_frozen_at` | 2026-10-30 |
+| `metric_dict_sha256` | `ab1fd251…4b34` |
+| `llm_model` | `deepseek-v4.1-flash` |
+| `built_at` | 2026-10-30T20:19:29 |
+| `facts_count` / `docs_count` | 1064 / 29 |
 
 ## 校验
 
