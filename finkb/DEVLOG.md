@@ -427,12 +427,13 @@ MinerU 把两格粘成一格的 OCR 错位（`601127_2025_半年报` 1 个、`60
 
 | 项 | 值 |
 |---|---|
-| 阶段 | Phase 0 **主体完成**；Phase 1 **L1 跑通并收口**（29 份重灌为唯一库 `data/facts.duckdb`：1064 条、0 未匹配；ADR-037） |
-| 测试 | **331 项全部通过**，离线，约 4 秒 |
-| 源码规模 | `src/` 5172 行，`tests/` 4942 行，`tools/`（核验工具）2392 行 |
+| 阶段 | Phase 0 **主体完成**；Phase 1 **L1 跑通并收口**（29 份重灌为唯一库 `data/facts.duckdb`：1717 条、0 未匹配）；Phase 2 **L2 完整跑通**（29 份全部编译，116 页 active，lint 0 错 0 警，FTS5 检索 + 15 题评测全过；ADR-041～046、051～054） |
+| 测试 | **381 项全部通过**，离线，约 5 秒 |
+| 源码规模 | `src/` 8580 行，`tests/` 5934 行，`tools/`（核验工具）2461 行，`eval/` 424 行 |
 | 真实数据验证 | 有（MinerU `vlm` 后端）：**29 份 / 14 家公司 / 4791 页**，10 类版式 |
 | 语料产出 | **5117 张物理表 → 6130 张逻辑表**；有表头 5729（93.5%）；跨页缝合 28 张，拒绝 21 条 |
 | 质量基线 | 守恒律 **359/359**；数值回查 36026 个抽样中 6 个查不到（99.98%，均为 MinerU 粘格）；`config/corpus-baseline.json` 已含 29 份 |
+| L2 产出 | **116 页 active**（29 摘要 + 70 探针 + 14 实体 + 3 跨公司概念）；claims 账本 **1485 条**（fact 1092 / query 143 / segment 250）；`segment_facts` 255 条（13 份）；`relations` 621 条；`conflicts` 1 组（002594 2025Q1 eps 两个口径）；FTS5 检索索引 116 页 |
 | MinerU 真实联调 | ✅ **已做**（预签名上传链路，`vlm` 后端，200 页/文件上限由 `--auto-split` 自动分批） |
 | 版本控制 | ✅ **已建 git 仓库**（根目录 `/home/generalblack/code/works/reporting`，分支 `main`）。78 次提交 |
 
@@ -446,13 +447,21 @@ MinerU 把两格粘成一格的 OCR 错位（`601127_2025_半年报` 1 个、`60
 - 物理表 → 逻辑表切分（`section_splitter.py`：多层表头、空首格、`kv`/`kv_row`、caption/期间标签/单位回溯）
 - 端到端流水线 `pipeline.build_tables()`
 - 审计工具 `tools/audit.py` 13 个子命令 + 语料基线 + `scripts/check.sh`
+- L2 知识层 MVP：`wiki/`（frontmatter / vault / claims / compiler）、`lint/`（R1–R9）、
+  `fact_engine/{segment,relations,conflicts}.py`；单文档编译出 4 页并全部转正
+- L2 完整跑通：29 份全部编译（`wiki_scope.yaml` 登记 29 份）、实体页 14 张、跨公司概念页 3 张、
+  FTS5 检索（`search/`，trigram + 别名扩展 + bm25）、评测集 15 题（`eval/`，离线复算 15/15）、
+  lint R10 定性页锚规则；`scripts/check.sh` 与 `eval/check.py` 全绿
 
 ### 2.2 明确未做
 
-- Wiki 知识层（L2）、检索路由、前端
+- 8 探针里的 03/04/06/07/08：方案只写了编号、没有定义（v3 §4 只定义 01–05），按「二期」处理
+- 检索路由、前端、跨期对比页（同一公司多年并列）
 - 按页 JSON 载体（P6）——已定 B：直接吃 `LogicalTable`（ADR-029）
 - 向量检索（补丁 P3）——设计已定，代码未写
-- 中文 FTS 分词（依赖 `jieba`，未安装）
+- 中文分词：FTS5 用 trigram 滑窗替代 `jieba`；2 字词无别名时查不到（见 README 已知限制）
+- 编译不幂等：同一文档重编会重写 claims、LLM 正文每次不同；token 成本仍未量化
+- 真实 `kill -9` 未测：只验证了「截断/半写页面仍可解析」（`accept_faults.py`）与原子写单元测试
 
 ### 2.3 最大的未验证项
 
@@ -535,11 +544,22 @@ PDF
 | `cli.py` | 330 | 命令行入口；`.env` 解析与注入；产物落盘 | 不做解析算法 |
 | `parser/section_splitter.py` | 300 | 物理表 → 逻辑表切分；表头继承 | 不改写行内容 |
 | `fact_engine/metric_dict.py` | 112 | 指标字典加载；`unit_default` → `unit_family/norm_unit` 推导 | 不含抽取逻辑 |
-| `fact_engine/selector.py` | 212 | 父表分组；按内容锚点挑主要会计数据 + 三表 | 不调 LLM、不改行 |
+| `fact_engine/selector.py` | 525 | 父表分组；按内容锚点挑主要会计数据 + 三表；期间映射（`doc_period`）与 manifest | 不调 LLM、不改行 |
 | `fact_engine/extractor.py` | 197 | 期间列归一（年/半年/季报）；构造 prompt；调 LLM 摘 Observation | 不算数、不换算 |
 | `fact_engine/verifier.py` | 123 | 回单元格逐字核对；单位换算；`match_level` | 不猜缺失值 |
-| `fact_engine/ingest.py` | 167 | 按文档推断单位；并发抽取、串行写库 | 不做语义判断 |
-| `fact_engine/store.py` | 207 | DuckDB schema、`insert_fact`、`facts_dedup` 视图 | 不解析财报 |
+| `fact_engine/ingest.py` | 336 | 按文档/按页推断单位；并发抽取、串行写库；接 segment/relations/conflicts | 不做语义判断 |
+| `fact_engine/store.py` | 207 | DuckDB schema、`insert_fact` / `insert_segment_fact`、`facts_dedup` 视图 | 不解析财报 |
+| `fact_engine/segment.py` | 320 | 分产品/分行业/分地区结构表 → `segment_facts`（确定性解析、单位反推、对比期剔除） | 不调 LLM、不做语义推断 |
+| `fact_engine/relations.py` | 168 | 四类关系表（子公司/关联方/股东/担保）→ `relations` | 不抽客户/供应商名单 |
+| `fact_engine/conflicts.py` | 68 | 同公司+科目+期间+口径的跨文档数值冲突 → `conflicts` | 不做文本语义矛盾 |
+| `wiki/frontmatter.py` | 163 | YAML frontmatter 的拼装、校验、来源分层计数 | 不写文件 |
+| `wiki/vault.py` | 231 | 目录骨架、原子写、文件锁、索引、scope | 不做内容生成 |
+| `wiki/claims.py` | 281 | 数字 claim 账本（fact/segment/query/quote）+ 脚注渲染 | 不算数，只记录与比对 |
+| `wiki/compiler.py` | 462 | 单文档 1 摘要 + 3 探针的编译与转正门禁（多报告类型、比率 query） | 不直接写正文数字 |
+| `wiki/entities.py` | 139 | 由 `relations` 生成公司实体页（关系索引，正文无数字） | 不生成数值、不调 LLM |
+| `wiki/concepts.py` | 197 | 跨公司/跨文档对比概念页（claim 来自多份文档） | 不自算差值 |
+| `search/index.py` | 217 | 页面 FTS5 索引（trigram + 别名扩展 + bm25） | 不改页面、不调 LLM |
+| `lint/rules.py` | 479 | R1–R10 规则与单页 `page_issues` | 不自动改内容（除 `--fix` 断链） |
 
 **依赖方向**（单向，禁止反向）：
 
@@ -549,6 +569,11 @@ pipeline → noise_filter, table_stitcher, markdown_blocks
 mineru_client → markdown_blocks, models
 noise_filter, table_stitcher → models
 fact_engine → models（只读 report.json 产物，不 import parser 内部）
+wiki/compiler → fact_engine（读 facts/segment_facts）+ wiki/{frontmatter,claims,vault} + lint/rules
+wiki/entities → fact_engine（只读 relations）+ wiki/vault
+wiki/concepts → fact_engine + wiki/{compiler,claims,vault} + lint/rules
+search/index → wiki/vault（只读页面）
+lint/rules → wiki/vault（只读页面与索引）
 ```
 
 `noise_filter` 与 `table_stitcher` **不得** import `mineru_client`——那会破坏格式解耦。
@@ -1246,6 +1271,179 @@ manifest 查不到时用 `date.today()` 兜底，且不告警。
 
 **教训**：兜底值不能静默。查不到公告日期应写进 meta 的告警计数或直接报错。
 
+### ADR-041 「来源数」按证据层计：L1 事实库与 L0 原文各算一个（2026-10-31）
+
+**背景**：L2 的 draft 隔离规则是「来源 <2 的页面进 `_draft/`」，但 Summary 按设计
+「每份年报一份」，天然只有一个 L0 原文来源。照字面执行，所有 Summary 永远转不了正，
+验收标准「来源 <2 的页面停在 `_draft/`」会退化成「所有页面都停在 `_draft/`」。
+
+**决策**：来源按**证据层**计数，而不是按文件数。`sources` 至少包含两项：
+`l1:facts#<company>`（L1 事实库）与 `l0:<doc_id>`（L0 页码锚定原文）。lint 统计
+`l1:` 与 `l0:` 两个前缀是否都存在；概念页跨公司时追加多个 `l1:facts#...` / `l0:...`。
+
+**代价**：同一层的多份文档仍只算一个来源；「两个来源」不等于「两份独立证据」，
+只保证页面同时有数值底座和原文锚点。
+
+**失效条件**：若以后允许只凭 L1 生成纯财务对比页（没有原文叙述），需要把规则改成
+「来源层数 ≥1 且每条 claim 都有出处」，而不是强制两层。
+
+### ADR-042 lint 规则 4 只检查 `wiki_scope.yaml` 登记的文档（2026-10-31）
+
+**背景**：P8 规则 4 要求「`raw/` 下每份文件都要有对应 wiki 条目」。MVP 只编译
+`002594_2025_年报` 一份，`raw/` 有 29 份，第一次跑 lint 就会报 28 条「缺条目」，
+验收要求「lint 零错误」不可能达到。
+
+**决策**：新增 `config/wiki_scope.yaml`，列出当前要编译的文档。规则 4 只检查
+登记文档的 `summaries/<doc>.md` 是否存在；未登记文档只统计数量、不报错。
+新增语料入库时必须同步登记，否则永远不会被编译——这是流程约束，不是代码约束。
+
+**代价**：漏登记的文档不会报错，只能靠入库流程守。
+
+**失效条件**：全量编译 29 份后，把规则 4 改回全量检查，并删掉 `wiki_scope.yaml`
+或让它只表达「优先级」。
+
+### ADR-043 锚点校验用 `report.json` 页数，不再依赖 `sources/<doc>.json`（2026-10-31）
+
+**背景**：P8 规则 8 原本要求 `[Ref: doc#P{n}]` 能在 `sources/<doc>.json` 里 O(1)
+定位。但 ADR-029 已决定 L1 不产出按页 JSON（P6 选 B），规则 8 的依赖悬空；P5 骨架
+里的 `sources/` 目录也一并作废。
+
+**决策**：锚点校验改为：
+- `data/parsed/<doc>/report.json` 的 `pages` 字段是整数总页数；
+- `1 ≤ n ≤ pages` 即认为锚点合法；
+- 同时要求 `page_anchored.md` 里存在 `"page": n` 的 META 块，防止页数对但正文缺页。
+- 不校验「这一页真的有这句话」；引文类数字由 `quote` claim 单独校验（ADR-044）。
+
+**代价**：锚点可能指向一个真实存在但与叙述无关的页。这类错误只能靠 quote claim
+的原文匹配和人工抽检发现，规则 8 本身管不了。
+
+**失效条件**：若以后需要字符级定位或「页内哪一段」的锚点，必须回到按页 JSON，
+并重写规则 8。
+
+### ADR-044 页面数字用「正文 + 脚注 + claims 表」，三种 claim 各自可验（2026-10-31）
+
+**背景**：§9.4 只定义了结构化 claim `{claim_text, anchor, metric_refs[]}`，但页面
+正文是 Markdown。不定一种落地写法，规则 9 无法检查「数字有没有出处」，也守不住
+「数字只由 SQL 计算」这条核心不变量。
+
+**决策**：
+- 正文写正常数字，数字后跟脚注标记 `[^cN]`；脚注定义由代码生成，不允许 LLM 写。
+- `data/wiki.duckdb` 的 `claims` 表是唯一真相，三类：
+  - `fact`：`fact_id` 指向 facts 行，显示值必须等于该行按单位格式化的结果；
+  - `query`：`query_id + params` 指向 `config/wiki_queries.yaml` 的命名 SQL，lint 重跑比对；
+  - `quote`：`anchor` 指向原文页，显示的数字字符串必须能在该页 `page_anchored.md` 找到。
+- lint 规则 9：正文每个数字必须被同一句的 claim 覆盖；年份、`[Ref: ...#P{n}]` 页码、
+  标题序号走白名单；脚注与 claims 必须一一对应。
+- LLM 编译时只输出 `{{cN}}` 占位符，数字由代码渲染——LLM 碰不到数字。
+
+**代价**：脚注增加阅读噪声；`quote` 类依赖原文数字字符串的字面形式（全角/千分位
+需要归一化）。
+
+**失效条件**：若 Obsidian 的脚注渲染不可接受（比如导出 PDF 时脚注挤在一起），
+退回「正文占位符 + 独立渲染层」，claims 表不变。
+
+### ADR-045 指标字典升 v2，新增 `segment_facts` 承载分产品结构（2026-10-31）
+
+**背景**：探针 02（分产品结构）与 05（现金流与资本结构）需要的口径在 v1 字典里
+没有：投资/筹资现金流净额、短期/长期借款、应付债券、租赁负债、销售/管理/财务费用、
+流动资产/负债、应收账款；分产品收入/成本/毛利率则完全不在 facts 的键里。
+
+**决策**：
+- `config/metric_dict.yaml` 升 `version: 2`，新增 13 项指标，仍只收「财报直接披露」
+  的科目；毛利率、资产负债率、有息负债、流动比率、费用率、同比继续由 SQL 视图算，
+  不进字典。
+- 新增 `segment_facts` 表：`(company, period, dimension, segment_name, metric,
+  value_norm, unit, source_doc, page_num, table_id)`。`dimension` 取 `product` /
+  `region` / `industry`，分产品表选「同时有营业收入、营业成本、毛利率」的那张。
+- 字典升版本必须全量重灌（ADR-040），重灌后 `gold_facts` 扩到覆盖新指标。
+
+**代价**：重灌 29 份（实测约 6 分钟、几美分）；分产品表在不同公司列集不同，选表
+规则需要金标兜底；`segment_facts` 与 `facts` 的合计可能有尾差，需定容差。
+
+**失效条件**：若多数公司只按行业披露、不按产品披露，`dimension` 需要允许为空或
+改为通用「分部」表，不能假设每家公司都有 product 维度。
+
+### ADR-046 关系从结构化表格抽；矛盾先做 facts 级跨文档检测（2026-10-31）
+
+**背景**：`relations` 表建了但 0 行；L2 的「实体关系图」「证据依赖图」和 `contradicts`
+链接都没有数据来源。矛盾检测也没有任何机制。
+
+**决策**：
+- `relations` 只从结构化表格抽：主要子公司（`subsidiary_of`）、关联方交易
+  （`related_party_of` + 金额）、前十名股东（`shareholder_of` + 持股比例）、
+  对子公司担保（`guarantees_for`）。每条边带 `source_doc + page_num`。
+- 表加 `attrs_json` 存金额/比例等属性；`src_type/dst_type` 取 `company` / `entity` / `person`。
+- 矛盾先做 facts 级：同一 `company + metric_id + period + caliber` 在不同文档里
+  `value_norm` 不一致 → 写 `conflicts` 表，带两边的 `fact_id`。
+- 不做：客户/供应商名单（只披露前五名合计）、文本语义级矛盾（需要 LLM 判断）。
+
+**代价**：关系覆盖受限于有结构化表的公司；客户/供应商实体缺失；矛盾只覆盖数值，
+不覆盖叙述冲突。
+
+**失效条件**：若 L3 需要客户/供应商实体或「正文说法与表格数字矛盾」，必须引入
+文本抽取或外部数据，`conflicts` 的表结构也要能存 claim 级冲突。
+
+### ADR-047 派生比率走命名 SQL（query claim），LLM 不得自算（2026-11-01）
+
+**背景**：批量编译时模型直接写出了「17 个百分点」「28.9%」「76.1%」「4.7%」——
+都是它自己拿目录里的数字现算的。这违反 ADR-001（数字只由 SQL 计算），也让 R9
+对不上账（claim 里没有这个数）。
+
+**决策**：
+- 毛利率 / 净利率 / 研发强度 / 资产负债率等派生值，在 `config/wiki_queries.yaml`
+  里定义成**命名 SQL**，编译时由 `_try_add_query` 查库写入 claim 账本，正文只能引用占位符。
+- `SYSTEM_PROMPT` 增加硬规则：不得自行计算差值/增速/占比/百分数/合计；叙述差异用
+  「明显高于/低于」；占位符必须写双花括号 `{{cN}}`。
+- 查不到结果时跳过（银行没有「营业成本」，毛利率天然不存在），不编造。
+
+**代价**：比率口径被 SQL 固定下来，新增比率必须改 YAML；模型措辞自由度变窄。
+
+**失效条件**：若未来允许「仅用于叙述的口算」（不落 claim、不进正文数字），需先证明
+它能通过 R9 的数值对账，否则不允许。
+
+### ADR-048 同一逻辑页的草稿与旧 active 不得并存（2026-11-01）
+
+**背景**：重编某文档时新正文进了 `_draft/`、旧页面还在正式目录。lint 按逻辑页名读
+的是**正式目录**的旧正文，却配新 claims，于是报「claim c16 没有脚注定义」——
+问题在错的地方，真正的原因是新页面没过门禁。
+
+**决策**：编译流程改为「写草稿 → 写 claims → **先删同名旧 active** → `page_issues`
+校验草稿 → 通过才转正」。`concepts.py` 同样处理。删除原先「失败后才删旧 active」的代码。
+
+**代价**：校验期间正式页面短暂消失；若进程被 kill，需要重跑该页（可由 lint 发现）。
+
+**失效条件**：若将来需要「新旧版本并存审计」，应改用版本目录而不是同一路径。
+
+### ADR-049 定性页锚规则 R10 只报警告，且豁免三类文本（2026-11-01）
+
+**背景**：方案 §9.4 要求「定性主张必须有 anchor」，但页面上有不少无需锚点的文本：
+页面级说明（「本页…」）、表格引导语（「…如下：」）、实体页的关系索引条目。
+
+**决策**：R10 `rule10_narrative_anchors` 检查「既无 claim 脚注、也无 `[Ref: doc#Pn]`」
+的正文段落，severity 固定为 `warning`；豁免：标题/表格/代码块/脚注定义/加粗小标题、
+`本页` 开头的说明、`如下：` 结尾的引导语、`type=entity` 的页面。转正门禁只拦 `error`。
+
+**代价**：定性锚点缺漏不会阻止转正，只能靠 lint 报告人工看。
+
+**失效条件**：若某天要求「零警告才允许合并」，把 R10 提为 error 并清掉豁免。
+
+### ADR-050 批量编译 29 份，按文档独立编译、共用 claims 账本（2026-11-01）
+
+**背景**：单文档 MVP 的编译器把页面标题写死「年报摘要」、期间取
+`doc_id.split("_")[1]`、公司名取股票代码，半年报/季报会编出错误标题和错期数据。
+
+**决策**：
+- `selector.doc_period(doc_id)` 统一期间映射（年报→year、半年报→yearH1、一季报→yearQ1、三季报→yearQ3）；
+  三季报流量指标优先取「年初至报告期末」（Q1-Q3），存量指标取 Q3（`_period_choices`）。
+- 标题用 `公司名 + 年份 + 报告类型`（`report_kind`），公司名从 `raw/manifest.csv` 取。
+- 批量脚本 `finkb/.tmp/batch_compile.py` 读 `wiki_scope.yaml` 逐份编译，写日志与结果 JSON，
+  结束统一 `rebuild_index`；47 份/29 份的 claim 账本共用一个 `data/wiki.duckdb`。
+- 结构页（分产品 Structure）只在有 `segment_facts` 时编译，否则 `skipped`。
+
+**代价**：约 1338 秒、29 × 4 次 LLM 调用；同一文档重编不幂等（正文重写、claims 重写）。
+
+**失效条件**：语料扩到几百份时应改为增量编译（按 `pipeline_fingerprint` + 页面 mtime 判断）。
+
 ## 6. 被推翻 / 废弃的方案（不要重提）
 
 | 曾提出 | 为什么废弃 | 替代 |
@@ -1690,6 +1888,111 @@ manifest 查不到时用 `date.today()` 兜底，且不告警。
 
 **测试**：`test_subheader_changes_period_for_following_rows`。
 
+### 坑-64 `segment_facts` 有两个唯一键，DuckDB 的 `ON CONFLICT` 必须写冲突目标
+
+**症状**：重灌时报 `Binder Error: Conflict target has to be provided for a DO UPDATE
+operation when the table has multiple UNIQUE/PRIMARY KEY constraints`。
+
+**根因**：`segment_facts` 同时有 `segment_id` 主键和
+`(company, period, dimension, segment_name, metric, source_doc)` 唯一键；DuckDB 不知道该按哪个冲突处理。
+
+**修复**：`INSERT ... ON CONFLICT (company, period, dimension, segment_name, metric, source_doc)
+DO UPDATE SET value_norm = EXCLUDED.value_norm, ...`，把幂等键写全。
+
+**教训**：表上多于一个唯一约束时，「插入或替换」不是默认行为，必须显式指名业务键。
+
+### 坑-65 草稿页的路径带 `_draft/`，claims 却按逻辑路径记账
+
+**症状**：编译器把带直接数字（未走 claim）的页面也转成了 active；`test_direct_number_blocks_promotion` 失败。
+
+**根因**：`page_issues` 拿 `_draft/summaries/x.md` 去和 claims 表的键
+`summaries/x.md` 比对，一条也对不上；R9 生成的问题又按页面路径过滤，于是草稿页的
+问题被全部过滤掉，页面被误判为「无问题」。
+
+**修复**：`_page_rel()` 去掉 `_draft/` 前缀，草稿页与正式页共用同一逻辑键。
+
+**教训**：账本键和文件路径必须是同一个坐标系；草稿只是物理位置不同，不是另一套 ID。
+
+### 坑-66 wikilink 的显示文本会被当成正文数字
+
+**症状**：给摘要页加「延伸阅读」后，R9 报三个探针页「数字没有 claim 覆盖」，
+内容却是 `返回摘要：[[summaries/002594_2025_年报|002594_2025_年报]]`。
+
+**根因**：`_sentence_numbers` 只把 wikilink 换成显示文本，`002594_2025` 里的数字仍被正则抓到。
+
+**修复**：做数字检查前把整条 wikilink 删掉（链接文本是导航，不是主张）。
+
+**教训**：正文抽取规则要先「去掉结构性标记」再抽数字，顺序反了就会误报。
+
+### 坑-67 百分数占位符后面又补了一个 `%`
+
+**症状**：分产品页出现 `20.49%[^c11]%`，渲染后显示两个百分号。
+
+**根因**：claim 的显示值已含 `%`，模型按提示里的例子又在占位符后写了一个 `%`。
+
+**修复**：提示明确「百分数占位符已含 %，不要再补」；渲染后再用
+`re.sub(r"(%\[\^c\d+\])%", r"\1", body)` 兜底。
+
+**教训**：单位到底归「值」还是归「模板」，必须在契约里写死；两边都写就会重复。
+
+### 坑-68 草稿页与旧 active 同页并存，lint 报错了地方
+
+**症状**：重编某文档后 lint 报「claim c16 没有脚注定义」，指向的却是旧内容；
+新页面其实停在 `_draft/`。
+
+**根因**：lint 按逻辑页名读**正式目录**，读到的旧正文配的是新 claims；真正的错误
+（草稿页没用上 c16）被掩盖。
+
+**修复**：编译流程改成「写草稿 → 写 claims → 删除同名旧 active → 校验草稿 → 转正」
+（ADR-048）。
+
+**教训**：「同一个逻辑页只能有一个物理文件」要在写入协议里保证，不能靠事后清理。
+
+### 坑-69 模型自行计算派生数字（百分点、利润率、研发强度）
+
+**症状**：草稿页正文出现「17 个百分点」「28.9%」「76.1%」「4.7%」，R9 报无源数字。
+
+**根因**：目录里只有原始科目值，模型顺手做了减法和除法。
+
+**修复**：新增命名 SQL（毛利率/净利率/研发强度/资产负债率）作为 query claim，并在
+`SYSTEM_PROMPT` 里禁止任何自行计算（ADR-047）。
+
+**教训**：只要目录里没有某派生值，模型就会自己算——「禁止」必须配套「提供」。
+
+### 坑-70 单花括号 `{c1}` 不渲染
+
+**症状**：草稿页正文出现 `{c1}`，数字没被替换，页面渲染成字面量。
+
+**根因**：模型把占位符写成了单花括号；渲染器只认 `{{cN}}`。
+
+**修复**：提示写死「必须双花括号」；R9 会把残留 `{c…}` 当无源内容报错。
+
+**教训**：模板占位符的边界字符要在提示、渲染器、lint 三处一致。
+
+### 坑-71 query claim 单独不能构成 l1 来源层
+
+**症状**：分产品页被「来源不足两层（ADR-041）」挡成草稿，明明有毛利率数字。
+
+**根因**：编译时把 `debt_ratio` 等 query claim 也加进了结构页，该页没有 facts/segments
+来源，`has_enough_sources` 只认 `l1:facts#` / `l1:segments#`。
+
+**修复**：query claim 只加在非结构页；结构页单独判断是否有 `segment_facts`。
+
+**教训**：claim 的「来源层」与「数值种类」是两件事，账本里要分开记。
+
+### 坑-72 「11 家」「2026Q1」这类词被当成无源数字
+
+**症状**：概念页 R9 报「数字没有 claim 覆盖」，指向「11 家」「2026Q1」。
+
+**根因**：R9 的数字正则匹配到公司计数和期间 token。
+
+**修复**：`_sentence_numbers` 先剔除 `DOC_ID`、`PERIOD_TOKEN`、`STOCK_CODE`、wikilink
+显示文本；概念提示禁止写「N 家」类数量词。
+
+**教训**：数值对账要先建立「哪些 token 不是数据」的白名单，否则误报会淹没真问题。
+
+---
+
 ## 8. 未验证项与风险
 
 **接手前必须知道：哪些结论是验证过的，哪些是推断的。**
@@ -1718,8 +2021,17 @@ manifest 查不到时用 `date.today()` 兜底，且不告警。
 | 缝合算法（构造数据） | ✅ 已验证 | 15 项测试覆盖两页/三页/列数/重复表头/页首非表格 |
 | 清洗（MinerU 路径） | ✅ 已验证 | 实测 MinerU 对页眉/页码**打类型标签**，直接标记 `is_noise`，无需统计推断 |
 | 硅基流动 API | ❌ 未接入 | 向量兜底（P3）无代码，key 未配置 |
-| 中文 FTS 分词 | ❌ 未开始 | `jieba` 未安装 |
+| 中文分词 | ⚠️ 用 FTS5 trigram 滑窗替代 | `jieba` 未安装；trigram 对 3 字以上词有效，2 字词要靠 `metric_dict.aliases` 别名扩展才稳 |
 | `rowspan`/`colspan` | ✅ 已展开 | `_expand_merged_cells` 统一展开；仍有个别物理表逐页丢空列（坑-40），表现是跨页列数不一致、拒绝缝合 |
+| **L2 多文档编译** | ✅ **2026-11-01，29 份 / 116 页 active** | `wiki_scope.yaml` 登记 29 份；每份 1 摘要 + 3 探针（结构页无数据时跳过）；lint 0 错 0 警；总耗时 1338 秒，token 成本仍未量化 |
+| **L2 实体 / 概念页** | ✅ 14 实体 + 3 概念 | 实体页由 `relations` 生成（无数字、无 LLM）；概念页跨公司对比，走同一 claims 账本与门禁 |
+| **L2 检索（FTS5）** | ✅ 116 页索引 | `finkb/src/finkb/search/`：trigram + `metric_dict.aliases` 扩展 + bm25；「营收」实测命中 3 页；2 字词无别名时查不到 |
+| **L2 评测集** | ✅ 15/15 | `eval/gold_qa.json`（单点 8 / 跨期 4 / 跨司 3）+ `eval/check.py` 离线复算，断言含 fact 存在、页锚存在、原文含该数字 |
+| **L2 验收（故障注入）** | ✅ 4/4 | 临时副本注入假锚点/断链/无源数字/截断页：分别被 R8/R1/R9 拦，截断页仍可解析（`finkb/.tmp/accept_faults.py`） |
+| **真实 `kill -9`** | ⚠️ 未实测 | 只用「截断页」模拟半写文件 + 原子写单元测试；没有在真实编译中途 kill 过进程 |
+| **8 探针** | ❌ 只实现 3 个 | 方案对 03/04/06/07/08 只有编号没有定义（v3 §4 只定义 01–05）；按「二期」处理 |
+| **关系抽取** | ✅ **29 份，621 条边** | 只覆盖子公司/关联方/股东/担保四类结构化表；客户、供应商名单语料里没有 |
+| **矛盾检测** | ✅ **1 组** | 只做 facts 级同科目跨文档数值不一致；文本语义矛盾未做（ADR-046） |
 
 ### 8.1 一个容易误判的点
 
@@ -1909,6 +2221,38 @@ git checkout 57f9fed -- _ref               # 恢复到工作区
 ## 11. 变更记录
 
 > 时间线：2026-10-21 之后的条目来自 git 提交历史，之前的是**重建**的。
+
+### 2026-11-01 —— L2 知识层完整跑通（29 份 / 116 页 / 检索 + 评测）
+
+- 分产品结构抽取重写（`fact_engine/segment.py`）：维度标记支持「表头子串 + section_path 子串 +
+  行内标记」三种来源、列名变体（营业收入/销售收入/主营业务收入 等）、按子表页取单位并用
+  facts 总收入反推、剔除「上一期对比表」；覆盖 7 份/123 行 → **13 份/255 行**，
+  13 份的行业/地区合计与 facts 同期总收入误差 <1%
+- 编译器支持多报告类型：期间走 `selector.doc_period`、三季报流量取年初至报告期末
+  （`_period_choices`）、标题用「公司名 + 年份 + 报告类型」、公司名取 `raw/manifest.csv`
+- 新增 `wiki/entities.py`（14 张实体页，由 relations 生成）与 `wiki/concepts.py`
+  （3 张跨公司对比页）；新增 `search/`（FTS5 trigram + 别名扩展 + bm25，116 页索引）
+- 新增 `eval/gold_qa.json` + `eval/check.py`：15 题（单点 8 / 跨期 4 / 跨司 3）离线复算 **15/15**
+- lint 新增 R10 定性页锚规则（warning，豁免页面说明/表格引导语/实体页）；R9 加
+  DOC_ID / PERIOD_TOKEN / STOCK_CODE 白名单；编译器门禁只拦 error
+- 29 份批量编译（1338 秒）→ **116 页 active**（29 摘要 + 70 探针 + 14 实体 + 3 概念），
+  `_draft/` 为空；claims 账本 **1485 条**（fact 1092 / query 143 / segment 250）；
+  `python -m finkb.lint` **0 错 0 警**
+- 新增 ADR-047～050、坑-68～72；测试 360→**381**；`scripts/check.sh` exit 0、金标 72/72
+
+### 2026-10-31 —— L2 知识层 MVP（单文档编译跑通）
+
+- 指标字典升 v2：21 → **34 项**（新增投资/筹资现金流、借款、债券、租赁负债、三费、
+  流动资产/负债、应收账款）；新增 `segment_facts` 承载分产品/分行业/分地区结构（123 条）
+- 全量重灌：`data/facts.duckdb` **1717 条**、0 未匹配、金标 72/72、语料基线 exit 0；
+  旧库归档 `.tmp/db_archive/facts-v1-1064.duckdb`
+- 新增 `fact_engine/{segment,relations,conflicts}.py`：结构表确定性解析、四类关系边
+  （29 份共 621 条）、facts 级跨文档冲突（1 组：002594 2025Q1 eps 3.12 vs 1.0391）
+- 新增 `wiki/`（frontmatter / vault / claims / compiler）与 `lint/`（R1–R9 + 单页检查）；
+  数字走「正文占位符 + 脚注 + claims 账本」，三种 claim（fact/segment/query/quote）各自可验
+- 002594_2025_年报 编译出 4 页（摘要 + 核心指标 + 分产品结构 + 现金流与资本结构），
+  全部 active；`python -m finkb.lint` 0 错 0 警
+- 新增 ADR-041～046、坑-64～67；测试 331→**360**
 
 ### 2026-10-30（第六段）—— 公告日期补齐与指标字典冻结
 

@@ -383,11 +383,15 @@ wiki_vault/
 ├── summaries/<doc>.md       # 每份年报一份综述
 ├── concepts/<slug>.md       # 跨文档综合、横向对比（如「三大车企2025毛利率对比」）
 ├── entities/<slug>.md       # 命名实体：公司页 type=organization + 供应商/客户
-├── sources/<doc>.json       # 按页 JSON 载体（见 P6）
 ├── explorations/<slug>.md   # 问答沉淀（Sink）产物
 ├── reports/                 # lint 报告（自动生成）
 └── _draft/                  # ★本项目的隔离区，同构镜像上述目录结构
 ```
+
+> **修订（ADR-029 / ADR-043）**：`sources/` 已取消，不产出按页 JSON。L1 直接读
+> `data/parsed/<doc>/report.json` 的 `tables` / `logical_tables`；L2 的锚点校验用
+> `report.json` 的 `pages` 总页数 + `page_anchored.md` 的逐块 META，不再依赖
+> `sources/<doc>.json`。下方 P6 保留为历史设计，**不执行**。
 
 **类型映射（v2.1 → v2.2）**：
 
@@ -405,7 +409,12 @@ wiki_vault/
 
 ---
 
-### 6.6 P6 ｜ 页码载体改为按页 JSON（取代自定义 META 注释）
+### 6.6 P6 ｜ 页码载体改为按页 JSON（已作废，见 ADR-029 / ADR-043）
+
+> **状态：不执行。** ADR-029 选择 B：L1 直接以 `report.json` 的 `tables` /
+> `logical_tables` 为输入，不产出 `sources/<doc>.json`；锚点校验改为
+> `report.json` 的 `pages` + `page_anchored.md`（ADR-043）。本节保留为历史设计，
+> 避免重新讨论。
 
 **背景盲区**：v2.1 用行内注释 `<!-- META: {...} -->` 注入页码。问题：① 注释污染 Markdown 正文，LLM 编译时容易被误读；② block 级与 page 级粒度混在一起，表格缝合时需反复解析注释串；③ 无法被 Obsidian 干净渲染。
 
@@ -494,7 +503,7 @@ data/parsed/<doc>/
 | 5 | `check_index_sync` | `index.md` 与磁盘实际文件是否一致 | 报错 |
 | 6 | `find_invalid_frontmatter` | YAML 能否解析 | 报错 |
 | 7 | `find_missing_okf_fields` | OKF 必填：非空 `type` + `description`（`index.md`/`log.md`/`sources/` 豁免） | 报错 |
-| **8** | **`check_anchor_resolvable`（本项目扩展）** | 每个 `[Ref: doc#P{n}]` 能否在 `sources/<doc>.json` 中找到该页 | 报错 |
+| **8** | **`check_anchor_resolvable`（本项目扩展）** | 每个 `[Ref: doc#P{n}]`：`doc` 在 `data/parsed/` 存在，`1 ≤ n ≤ report.json` 的 `pages`，且 `page_anchored.md` 有该页 META 块（ADR-043） | 报错 |
 | **9** | **`check_metric_refs`（本项目扩展）** | 含数字的主张必须带 `metric_refs` 且指向存在的 `facts` 行 | 报错 |
 
 报告统一写入 `reports/lint-{timestamp}.md`。
@@ -553,7 +562,8 @@ data/parsed/<doc>/
 **物理页码锚定**（按 P6 执行，不注入 META 注释）
 
 - `physical_page = page_idx + 1`
-- 页码唯一真相存于 `data/parsed/<doc>/sources/<doc>.json`，结构见 6.6
+- 页码真相：`data/parsed/<doc>/report.json` 的 `pages`（总页数）+ `page_anchored.md`
+  的逐块 META（ADR-043）；不产出 `sources/<doc>.json`（ADR-029）
 - `data/parsed/<doc>/full.md` 保持干净（无任何 `<!-- META -->` 残留）
 - 对外锚点恒为 `[Ref: {doc_id}#P{n}]`，对内抽取使用 `blocks[].table_id` 与 `page_range`
 
@@ -687,7 +697,9 @@ CREATE TABLE unmatched_pool (
 **探针编译器**
 
 - MVP 仅 3 个探针（R3）：`01_核心财务指标`、`02_主营业务分产品结构`、`05_现金流与资本结构`
-- 二期扩至 8 个（01–07 + 风险展望）
+- 二期扩至 8 个（01–07 + 风险展望）——**注：本文只给出编号，03/04/06/07/08 没有定义；
+  v3 §4 只定义到 05（研发投入/产能出海/现金流资本结构）。二期开工前必须先补这 5 个探针的语义。**
+  （2026-11-01 现状：01/02/05 已实现并跑通 29 份）
 - **Agentic 编译循环**：检索 → 草稿 → 评估 → 补充检索 → 再生成，直到稳定（参考 `corrective_rag` 的 grade-retry 图）
 - 定性主张的锚点核验复用 `agentic_typed_rag_pydanticai` 的 `validate_grounded_answer()` 思路
 - 产物一律先进 `_draft/`，lint 通过后转正
@@ -858,11 +870,23 @@ updated_at: 2026-01-01
 | **0. 数据地基** | MinerU 解析 → **按页 JSON 载体（P6）** → 跨页缝合 → TableBlock | 4.5–5.5 天 | 3 张跨页表缝合正确；3 页链式正确；列数不一致不误缝；`full.md` 无 META 残留 |
 | **1. 事实层** | DuckDB 建表（**P9 三维建模**）+ 两段式抽取（P1）+ 宽表与枚举（P2）+ 唯一键与重述（P4/P9） | 4.5–5.5 天 | ≥10 数值绝对一致；`exact` ≥80%；一条 SQL 出三家 2025 对比；乱序 `source_doc` 下 `facts_dedup` 结果不变 |
 | **2. 知识层** | **目录骨架（P5）** + Schema + 探针编译（3 个）+ **frontmatter 代码化（P7）** + **lint 七条与原子写（P8）** + draft 隔离 + Git | 6.5–7.5 天 | lint 零错误；假锚点/断链/无源数字分别被规则 8/1/9 拦截；`kill -9` 后文件仍可解析 |
+
 | **3. 检索路由** | FTS5+jieba+别名 → BFS → **向量兜底（P3）** → RRF；三级路由 | 4–5 天 | 15 题路由正确率 >90%；定性长尾能召回正确页 |
 | **4. 交互层** | 三栏工作台 + 页锚跳转 + 三视图 | 5 天 | 点 `[Ref]` 跳 PDF 对应页 |
 | **5. 评测消融** | 15→50 题 + Ragas + 三组消融 | 4 天 | 三组真实数字 |
 
 **合计 ≈ 29–33 个有效工作日**（含 P1–P9 全部补丁增量；全职 6 周，业余 9–11 周）
+
+> **实施状态（2026-11-01）**：知识层（第 2 阶段）已完整跑通，见 `finkb/DEVLOG.md`
+> ADR-041～050 与 T-60/T-62。与本文的差异：
+> ① P6 已作废，锚点改用 `report.json` 页数 + `page_anchored.md`（ADR-029/043）；
+> ② lint 实际为 **10 条**规则（新增 R8 锚点、R9 claim 对账、R10 定性页锚）；
+> ③ 页面数字用「正文占位符 + 脚注 + claims 账本」（ADR-044），不是纯 Markdown；
+> ④ 已编译 **29 份 / 116 页**（29 摘要 + 70 探针 + 14 实体 + 3 概念），不是单文档；
+> ⑤ 检索做了 **FTS5 trigram + 别名扩展**（未装 jieba，无向量兜底），检索路由属第 3 阶段；
+> ⑥ 评测集 15 题已建并 15/15 通过（`eval/`）；探针只实现 01/02/05，03/04/06/07/08
+> 本文只有编号、没有定义，按二期处理；
+> ⑦ `kill -9` 验收只做到「截断页仍可解析」的模拟，未真实 kill 进程。
 
 ### 11.1 MVP 砍法（R3，约 11 天可演示）
 
@@ -911,7 +935,7 @@ updated_at: 2026-01-01
 | **误把 OpenKB 当依赖引入** | 栈不兼容（pageindex/litellm/markitdown），且**丢失数值层** | **硬约束：只抄设计不抄代码**；不引入其任何运行时依赖 |
 | **为对齐 OpenKB 而换掉 MinerU** | 表格保真度下降，跨页缝合失去前提 | 明确禁止；MinerU 是财报表格解析的不可替代项 |
 | **引入 FIBO 本体** | OWL 需图数据库 + 推理机（450MB），6 份年报规模下纯负担 | 只借 P9 的三条建模思想，不引入任何 RDF/OWL 依赖 |
-| **`sources/<doc>.json` 体积过大** | 单份年报 JSON 可能达数十 MB | 按页切片读取，禁止整文件载入内存；`load_page(doc, n)` 只解析目标页 |
+| **`report.json` 体积过大** | 单份年报 JSON 约 0.8–1 MB，可整份载入；`page_anchored.md` 813 KB 也不宜反复整份复制 | `report.json` 直接读；`page_anchored.md` 按页切片扫描 |
 | **OKF/OpenKB 规范后续演进** | 目录骨架可能需再调整 | 目录名集中在 `schema.py` 常量中，改动收敛到单处 |
 
 **未决（非阻塞）**：
@@ -931,7 +955,7 @@ updated_at: 2026-01-01
 |---|---|---|
 | 参考实现 | 仅网页级调研（PieKBS / Sage Wiki 等） | **新增 OpenKB（同范式）与 FIBO（金融本体）源码级核对**，结论见 2.4 |
 | L2 目录 | 自定义 `companies/` + `comparisons/` | **P5：`summaries/` `concepts/` `entities/` `explorations/` `reports/` `_draft/`**（对齐 OKF） |
-| 页码载体 | 行内 `<!-- META -->` 注释 | **P6：按页 JSON `sources/<doc>.json`**，page 级对外 / block 级对内 |
+| 页码载体 | 行内 `<!-- META -->` 注释 | ~~P6：按页 JSON~~ → **ADR-029：直接读 `report.json`；锚点用 `pages` + `page_anchored.md` 校验（ADR-043）** |
 | frontmatter | LLM 生成（含 YAML） | **P7：代码生成，LLM 只输出 JSON 正文** |
 | lint | 「校验 frontmatter/断链」笼统描述 | **P8：7+2 条规则清单 + `--fix` + 原子写 + 文件锁** |
 | 金额建模 | `unit_raw` 单字段混装元/千元/% | **P9：`unit_family` / `currency` / `unit_of_account` / `norm_unit` 正交拆分**（FIBO `AmountOfMoney`） |

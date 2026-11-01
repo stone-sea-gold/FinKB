@@ -1,0 +1,458 @@
+{
+  "schema_version": 1,
+  "description": "FinKB L2 评测集（方案 §10）：15 题 = 单点 8 / 跨期 4 / 跨司 3。所有数值答案由 finkb/data/facts.duckdb 按 sql 字段确定性复算，不依赖 LLM。",
+  "generated_at": "2026-11-01",
+  "fact_db": "finkb/data/facts.duckdb",
+  "answer_rule": "answer = 复算结果四舍五入到 2 位小数（题目中的 gold）；answer_exact = 事实库精确值；物理页码取 fact.page_num。",
+  "companies": {
+    "000002": "万科A",
+    "000333": "美的集团",
+    "000625": "长安汽车",
+    "002594": "比亚迪",
+    "600036": "招商银行",
+    "600276": "恒瑞医药",
+    "600519": "贵州茅台",
+    "600900": "长江电力",
+    "601088": "中国神华",
+    "601127": "赛力斯",
+    "601238": "广汽集团"
+  },
+  "questions": [
+    {
+      "id": "S01",
+      "type": "single",
+      "question": "万科A（000002）2025 年的营业收入是多少亿元？（保留两位小数）",
+      "answer": 2334.33,
+      "answer_exact": 2334.32769,
+      "unit": "亿元",
+      "metric_id": "revenue",
+      "companies": [
+        "000002"
+      ],
+      "periods": [
+        "2025"
+      ],
+      "caliber": "合并报表",
+      "evidence": [
+        {
+          "doc_id": "000002_2025_年报",
+          "page": 10,
+          "fact_id": 1
+        }
+      ],
+      "sql": "SELECT value_norm FROM facts WHERE fact_id = 1",
+      "note": "000002_2025_年报 p10「主要会计数据和财务指标」表 2025 年列。"
+    },
+    {
+      "id": "S02",
+      "type": "single",
+      "question": "贵州茅台（600519）2025 年归属于上市公司股东的净利润（归母净利润）是多少亿元？（保留两位小数）",
+      "answer": 823.2,
+      "answer_exact": 823.200671,
+      "unit": "亿元",
+      "metric_id": "net_profit",
+      "companies": [
+        "600519"
+      ],
+      "periods": [
+        "2025"
+      ],
+      "caliber": "合并报表",
+      "evidence": [
+        {
+          "doc_id": "600519_2025_年报",
+          "page": 6,
+          "fact_id": 978
+        }
+      ],
+      "sql": "SELECT value_norm FROM facts WHERE fact_id = 978",
+      "note": "600519_2025_年报 p6 主要会计数据表；一行同时给出 2025/2024/2023 三年列。"
+    },
+    {
+      "id": "S03",
+      "type": "single",
+      "question": "恒瑞医药（600276）2025 年的研发费用是多少亿元？（保留两位小数）",
+      "answer": 69.61,
+      "answer_exact": 69.611554,
+      "unit": "亿元",
+      "metric_id": "rd_expense",
+      "companies": [
+        "600276"
+      ],
+      "periods": [
+        "2025"
+      ],
+      "caliber": "合并报表",
+      "evidence": [
+        {
+          "doc_id": "600276_2025_年报",
+          "page": 135,
+          "fact_id": 960
+        }
+      ],
+      "sql": "SELECT value_norm FROM facts WHERE fact_id = 960",
+      "note": "600276_2025_年报 p135 合并利润表「研发费用」行 2025 年度列。"
+    },
+    {
+      "id": "S04",
+      "type": "single",
+      "question": "中国神华（601088）2025 年经营活动产生的现金流量净额是多少亿元？（保留两位小数）",
+      "answer": 750.59,
+      "answer_exact": 750.59,
+      "unit": "亿元",
+      "metric_id": "ocf",
+      "companies": [
+        "601088"
+      ],
+      "periods": [
+        "2025"
+      ],
+      "caliber": "合并报表",
+      "evidence": [
+        {
+          "doc_id": "601088_2025_年报",
+          "page": 8,
+          "fact_id": 1116
+        }
+      ],
+      "sql": "SELECT value_norm FROM facts WHERE fact_id = 1116",
+      "note": "601088_2025_年报 p8 主要会计数据表 2025 年列（原表单位百万元）。"
+    },
+    {
+      "id": "S05",
+      "type": "single",
+      "question": "长江电力（600900）2025 年的加权平均净资产收益率是多少（%）？（保留两位小数）",
+      "answer": 15.9,
+      "answer_exact": 15.9,
+      "unit": "%",
+      "metric_id": "roe_weighted",
+      "companies": [
+        "600900"
+      ],
+      "periods": [
+        "2025"
+      ],
+      "caliber": "合并报表",
+      "evidence": [
+        {
+          "doc_id": "600900_2025_年报",
+          "page": 7,
+          "fact_id": 1059
+        }
+      ],
+      "sql": "SELECT value_norm FROM facts WHERE fact_id = 1059",
+      "note": "600900_2025_年报 p7「主要财务指标」表 2025 年列。"
+    },
+    {
+      "id": "S06",
+      "type": "single",
+      "question": "美的集团（000333）2025 年的基本每股收益是多少元/股？（保留两位小数）",
+      "answer": 5.8,
+      "answer_exact": 5.8,
+      "unit": "元/股",
+      "metric_id": "eps_basic",
+      "companies": [
+        "000333"
+      ],
+      "periods": [
+        "2025"
+      ],
+      "caliber": "合并报表",
+      "evidence": [
+        {
+          "doc_id": "000333_2025_年报",
+          "page": 9,
+          "fact_id": 66
+        }
+      ],
+      "sql": "SELECT value_norm FROM facts WHERE fact_id = 66",
+      "note": "000333_2025_年报 p9 主要会计数据表 2025 年列。"
+    },
+    {
+      "id": "S07",
+      "type": "single",
+      "question": "广汽集团（601238）2025 年归属于上市公司股东的净利润是多少亿元？（保留两位小数，亏损记为负数）",
+      "answer": -87.84,
+      "answer_exact": -87.836212,
+      "unit": "亿元",
+      "metric_id": "net_profit",
+      "companies": [
+        "601238"
+      ],
+      "periods": [
+        "2025"
+      ],
+      "caliber": "合并报表",
+      "evidence": [
+        {
+          "doc_id": "601238_2025_年报",
+          "page": 11,
+          "fact_id": 1512
+        }
+      ],
+      "sql": "SELECT value_norm FROM facts WHERE fact_id = 1512",
+      "note": "601238_2025_年报 p11「近三年主要会计数据」表 2025 年列；负值用于检验符号口径（坑-60）。"
+    },
+    {
+      "id": "S08",
+      "type": "single",
+      "question": "招商银行（600036）2025 年上半年的营业收入是多少亿元？（保留两位小数）",
+      "answer": 1699.69,
+      "answer_exact": 1699.69,
+      "unit": "亿元",
+      "metric_id": "revenue",
+      "companies": [
+        "600036"
+      ],
+      "periods": [
+        "2025H1"
+      ],
+      "caliber": "合并报表",
+      "evidence": [
+        {
+          "doc_id": "600036_2025_半年报",
+          "page": 7,
+          "fact_id": 860
+        }
+      ],
+      "sql": "SELECT value_norm FROM facts WHERE fact_id = 860",
+      "note": "600036_2025_半年报 p7「本集团主要会计数据和财务指标」表 2025 年 1-6 月列（原表单位百万元）。"
+    },
+    {
+      "id": "CP01",
+      "type": "cross_period",
+      "question": "比亚迪（002594）2025 年的营业收入比 2024 年增加多少亿元？（保留两位小数）",
+      "answer": 268.63,
+      "answer_exact": 268.62503,
+      "unit": "亿元",
+      "metric_id": "revenue",
+      "companies": [
+        "002594"
+      ],
+      "periods": [
+        "2025",
+        "2024"
+      ],
+      "caliber": "合并报表",
+      "evidence": [
+        {
+          "doc_id": "002594_2025_年报",
+          "page": 11,
+          "fact_id": 628
+        },
+        {
+          "doc_id": "002594_2025_年报",
+          "page": 11,
+          "fact_id": 629
+        }
+      ],
+      "sql": "SELECT (SELECT value_norm FROM facts WHERE fact_id = 628) - (SELECT value_norm FROM facts WHERE fact_id = 629)",
+      "note": "跨期口径①：002594_2025_年报 p11「主要会计数据」表同页给出 2025 年与 2024 年两列（R2 锁定口径，不使用 2023/2024 年报）。"
+    },
+    {
+      "id": "CP02",
+      "type": "cross_period",
+      "question": "长安汽车（000625）2025 年归属于上市公司股东的净利润比 2024 年减少多少亿元？（保留两位小数）",
+      "answer": 32.46,
+      "answer_exact": 32.461407,
+      "unit": "亿元",
+      "metric_id": "net_profit",
+      "companies": [
+        "000625"
+      ],
+      "periods": [
+        "2025",
+        "2024"
+      ],
+      "caliber": "合并报表",
+      "evidence": [
+        {
+          "doc_id": "000625_2025_年报",
+          "page": 6,
+          "fact_id": 299
+        },
+        {
+          "doc_id": "000625_2025_年报",
+          "page": 6,
+          "fact_id": 300
+        }
+      ],
+      "sql": "SELECT (SELECT value_norm FROM facts WHERE fact_id = 300) - (SELECT value_norm FROM facts WHERE fact_id = 299)",
+      "note": "跨期口径①：000625_2025_年报 p6「主要会计数据」表同页给出 2025 年与 2024 年两列；答案为正的减少额。"
+    },
+    {
+      "id": "CP03",
+      "type": "cross_period",
+      "question": "赛力斯（601127）2026 年上半年营业收入比 2025 年上半年减少多少亿元？（保留两位小数）",
+      "answer": 49.09,
+      "answer_exact": 49.086037,
+      "unit": "亿元",
+      "metric_id": "revenue",
+      "companies": [
+        "601127"
+      ],
+      "periods": [
+        "2026H1",
+        "2025H1"
+      ],
+      "caliber": "合并报表",
+      "evidence": [
+        {
+          "doc_id": "601127_2026_半年报",
+          "page": 6,
+          "fact_id": 1452
+        },
+        {
+          "doc_id": "601127_2026_半年报",
+          "page": 6,
+          "fact_id": 1453
+        }
+      ],
+      "sql": "SELECT (SELECT value_norm FROM facts WHERE fact_id = 1453) - (SELECT value_norm FROM facts WHERE fact_id = 1452)",
+      "note": "跨期口径②：601127_2026_半年报 p6「主要会计数据」表同页给出本报告期（2026H1）与上年同期（2025H1）两列。"
+    },
+    {
+      "id": "CP04",
+      "type": "cross_period",
+      "question": "长安汽车（000625）2026 年上半年营业收入的同比增速是多少（%）？（保留两位小数）",
+      "answer": -9.71,
+      "answer_exact": -9.708148967417706,
+      "unit": "%",
+      "metric_id": "revenue",
+      "companies": [
+        "000625"
+      ],
+      "periods": [
+        "2026H1",
+        "2025H1"
+      ],
+      "caliber": "合并报表",
+      "evidence": [
+        {
+          "doc_id": "000625_2026_半年报",
+          "page": 6,
+          "fact_id": 407
+        },
+        {
+          "doc_id": "000625_2026_半年报",
+          "page": 6,
+          "fact_id": 408
+        }
+      ],
+      "sql": "SELECT ((SELECT value_norm FROM facts WHERE fact_id = 407) / (SELECT value_norm FROM facts WHERE fact_id = 408) - 1) * 100",
+      "note": "跨期口径②：000625_2026_半年报 p6 本报告期与上年同期两列；同比增速 =（本期 / 上年同期 - 1）× 100，负值表示下降。",
+      "evidence_unit": "亿元"
+    },
+    {
+      "id": "CC01",
+      "type": "cross_company",
+      "question": "2025 年美的集团（000333）、贵州茅台（600519）、长江电力（600900）三家公司的营业收入合计是多少亿元？（保留两位小数）",
+      "answer": 7115.32,
+      "answer_exact": 7115.317737,
+      "unit": "亿元",
+      "metric_id": "revenue",
+      "companies": [
+        "000333",
+        "600519",
+        "600900"
+      ],
+      "periods": [
+        "2025"
+      ],
+      "caliber": "合并报表",
+      "evidence": [
+        {
+          "doc_id": "000333_2025_年报",
+          "page": 9,
+          "fact_id": 54
+        },
+        {
+          "doc_id": "600519_2025_年报",
+          "page": 6,
+          "fact_id": 972
+        },
+        {
+          "doc_id": "600900_2025_年报",
+          "page": 6,
+          "fact_id": 1037
+        }
+      ],
+      "sql": "SELECT SUM(value_norm) FROM facts WHERE fact_id IN (54, 972, 1037)",
+      "note": "跨司对比：三家均为 2025 年报、合并报表、营业总收入（亿元）；答案 = 三值求和。"
+    },
+    {
+      "id": "CC02",
+      "type": "cross_company",
+      "question": "2025 年美的集团、贵州茅台、长江电力三家公司的归母净利润最高值比最低值多多少亿元？（保留两位小数）",
+      "answer": 478.17,
+      "answer_exact": 478.172579,
+      "unit": "亿元",
+      "metric_id": "net_profit",
+      "companies": [
+        "000333",
+        "600519",
+        "600900"
+      ],
+      "periods": [
+        "2025"
+      ],
+      "caliber": "合并报表",
+      "evidence": [
+        {
+          "doc_id": "000333_2025_年报",
+          "page": 9,
+          "fact_id": 57
+        },
+        {
+          "doc_id": "600519_2025_年报",
+          "page": 6,
+          "fact_id": 978
+        },
+        {
+          "doc_id": "600900_2025_年报",
+          "page": 6,
+          "fact_id": 1043
+        }
+      ],
+      "sql": "SELECT MAX(value_norm) - MIN(value_norm) FROM facts WHERE fact_id IN (57, 978, 1043)",
+      "note": "跨司对比：三家均为 2025 年报、合并报表、归母净利润（亿元）；答案 = 最高值 - 最低值。"
+    },
+    {
+      "id": "CC03",
+      "type": "cross_company",
+      "question": "2025 年美的集团、贵州茅台、长江电力三家公司的加权平均净资产收益率最高值比最低值高多少个百分点？（保留两位小数）",
+      "answer": 16.63,
+      "answer_exact": 16.63,
+      "unit": "个百分点",
+      "metric_id": "roe_weighted",
+      "companies": [
+        "000333",
+        "600519",
+        "600900"
+      ],
+      "periods": [
+        "2025"
+      ],
+      "caliber": "合并报表",
+      "evidence": [
+        {
+          "doc_id": "000333_2025_年报",
+          "page": 9,
+          "fact_id": 69
+        },
+        {
+          "doc_id": "600519_2025_年报",
+          "page": 6,
+          "fact_id": 996
+        },
+        {
+          "doc_id": "600900_2025_年报",
+          "page": 7,
+          "fact_id": 1059
+        }
+      ],
+      "sql": "SELECT MAX(value_norm) - MIN(value_norm) FROM facts WHERE fact_id IN (69, 996, 1059)",
+      "note": "跨司对比：三家均为 2025 年报、合并报表、加权平均净资产收益率（%）；差值单位记作个百分点。"
+    }
+  ]
+}

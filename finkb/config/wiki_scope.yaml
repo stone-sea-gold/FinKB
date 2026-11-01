@@ -1,0 +1,149 @@
+# L2 知识层的文档范围（ADR-042）。
+# lint 规则 4 只检查这里登记的文档；MVP 阶段登记全部 29 份已解析文档。
+version: 1
+docs:
+  - doc_id: 000002_2025_年报
+    company: "000002"
+    company_name: 万科A
+    period: "2025"
+    report_type: 年报
+  - doc_id: 000333_2025_年报
+    company: "000333"
+    company_name: 美的集团
+    period: "2025"
+    report_type: 年报
+  - doc_id: 000625_2025_一季报
+    company: "000625"
+    company_name: 长安汽车
+    period: "2025Q1"
+    report_type: 一季报
+  - doc_id: 000625_2025_三季报
+    company: "000625"
+    company_name: 长安汽车
+    period: "2025Q3"
+    report_type: 三季报
+  - doc_id: 000625_2025_半年报
+    company: "000625"
+    company_name: 长安汽车
+    period: "2025H1"
+    report_type: 半年报
+  - doc_id: 000625_2025_年报
+    company: "000625"
+    company_name: 长安汽车
+    period: "2025"
+    report_type: 年报
+  - doc_id: 000625_2026_一季报
+    company: "000625"
+    company_name: 长安汽车
+    period: "2026Q1"
+    report_type: 一季报
+  - doc_id: 000625_2026_半年报
+    company: "000625"
+    company_name: 长安汽车
+    period: "2026H1"
+    report_type: 半年报
+  - doc_id: 002594_2025_一季报
+    company: "002594"
+    company_name: 比亚迪
+    period: "2025Q1"
+    report_type: 一季报
+  - doc_id: 002594_2025_三季报
+    company: "002594"
+    company_name: 比亚迪
+    period: "2025Q3"
+    report_type: 三季报
+  - doc_id: 002594_2025_半年报
+    company: "002594"
+    company_name: 比亚迪
+    period: "2025H1"
+    report_type: 半年报
+  - doc_id: 002594_2025_年报
+    company: "002594"
+    company_name: 比亚迪
+    period: "2025"
+    report_type: 年报
+  - doc_id: 002594_2026_一季报
+    company: "002594"
+    company_name: 比亚迪
+    period: "2026Q1"
+    report_type: 一季报
+  - doc_id: 002594_2026_半年报
+    company: "002594"
+    company_name: 比亚迪
+    period: "2026H1"
+    report_type: 半年报
+  - doc_id: 600030_2025_年报
+    company: "600030"
+    company_name: 中信证券
+    period: "2025"
+    report_type: 年报
+  - doc_id: 600036_2025_半年报
+    company: "600036"
+    company_name: 招商银行
+    period: "2025H1"
+    report_type: 半年报
+  - doc_id: 600276_2025_年报
+    company: "600276"
+    company_name: 恒瑞医药
+    period: "2025"
+    report_type: 年报
+  - doc_id: 600519_2025_年报
+    company: "600519"
+    company_name: 贵州茅台
+    period: "2025"
+    report_type: 年报
+  - doc_id: 600900_2025_年报
+    company: "600900"
+    company_name: 长江电力
+    period: "2025"
+    report_type: 年报
+  - doc_id: 601088_2025_年报
+    company: "601088"
+    company_name: 中国神华
+    period: "2025"
+    report_type: 年报
+  - doc_id: 601127_2025_一季报
+    company: "601127"
+    company_name: 赛力斯
+    period: "2025Q1"
+    report_type: 一季报
+  - doc_id: 601127_2025_三季报
+    company: "601127"
+    company_name: 赛力斯
+    period: "2025Q3"
+    report_type: 三季报
+  - doc_id: 601127_2025_半年报
+    company: "601127"
+    company_name: 赛力斯
+    period: "2025H1"
+    report_type: 半年报
+  - doc_id: 601127_2025_年报
+    company: "601127"
+    company_name: 赛力斯
+    period: "2025"
+    report_type: 年报
+  - doc_id: 601127_2026_一季报
+    company: "601127"
+    company_name: 赛力斯
+    period: "2026Q1"
+    report_type: 一季报
+  - doc_id: 601127_2026_半年报
+    company: "601127"
+    company_name: 赛力斯
+    period: "2026H1"
+    report_type: 半年报
+  - doc_id: 601238_2025_年报
+    company: "601238"
+    company_name: 广汽集团
+    period: "2025"
+    report_type: 年报
+  - doc_id: 601318_2025_半年报
+    company: "601318"
+    company_name: 中国平安
+    period: "2025H1"
+    report_type: 半年报
+  - doc_id: 601633_2025_年报
+    company: "601633"
+    company_name: 长城汽车
+    period: "2025"
+    report_type: 年报

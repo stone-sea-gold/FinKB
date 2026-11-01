@@ -123,5 +123,5 @@ def test_meta_roundtrip_and_version():
         assert store.get_meta("metric_dict_version") == "1"
         assert store.all_meta()["llm_model"] == "deepseek-v4.1-flash"
     meta = load_dict_meta()
-    assert meta.version == "1"
+    assert meta.version == "2"
     assert len(meta.sha256) == 64

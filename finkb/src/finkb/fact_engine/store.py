@@ -75,7 +75,42 @@ CREATE TABLE IF NOT EXISTS relations (
   dst_type   VARCHAR,
   dst_id     VARCHAR,
   source_doc VARCHAR,
-  page_num   INTEGER
+  page_num   INTEGER,
+  attrs_json VARCHAR
+);
+
+-- facts 级跨文档冲突（ADR-046）：同一 company+metric+period+caliber 在不同文档里数值不一致。
+CREATE TABLE IF NOT EXISTS conflicts (
+  conflict_id VARCHAR PRIMARY KEY,
+  company     VARCHAR,
+  metric_id   VARCHAR,
+  period      VARCHAR,
+  caliber     VARCHAR,
+  fact_id_a   BIGINT,
+  fact_id_b   BIGINT,
+  value_a     DOUBLE,
+  value_b     DOUBLE,
+  doc_a       VARCHAR,
+  doc_b       VARCHAR,
+  detected_at VARCHAR
+);
+
+-- 分产品 / 分行业 / 分地区结构（ADR-045）。长表：一行一个（维度, 段名, 指标）。
+CREATE SEQUENCE IF NOT EXISTS segment_id_seq START 1;
+
+CREATE TABLE IF NOT EXISTS segment_facts (
+  segment_id   BIGINT PRIMARY KEY,
+  company      VARCHAR,
+  period       VARCHAR,
+  dimension    VARCHAR,
+  segment_name VARCHAR,
+  metric       VARCHAR,
+  value_norm   DOUBLE,
+  unit         VARCHAR,
+  source_doc   VARCHAR,
+  page_num     INTEGER,
+  table_id     VARCHAR,
+  UNIQUE (company, period, dimension, segment_name, metric, source_doc)
 );
 
 CREATE TABLE IF NOT EXISTS unmatched_pool (
@@ -97,6 +132,8 @@ class FactStore:
     def __init__(self, db_path: str | Path = ":memory:") -> None:
         self.conn = duckdb.connect(str(db_path))
         self.conn.execute(SCHEMA_SQL)
+        # 旧库升级：relations 加 attrs_json（ADR-046）。
+        self.conn.execute("ALTER TABLE relations ADD COLUMN IF NOT EXISTS attrs_json VARCHAR")
 
     def close(self) -> None:
         self.conn.close()
@@ -207,6 +244,58 @@ class FactStore:
 
     def dedup_facts(self) -> list[tuple]:
         return self.conn.execute("SELECT * FROM facts_dedup").fetchall()
+
+    def get_fact(self, fact_id: int) -> dict | None:
+        """按 id 取一行事实（返回列名字典，L2 的 claim 校验用）。"""
+        row = self.conn.execute("SELECT * FROM facts WHERE fact_id = ?", [fact_id]).fetchone()
+        if row is None:
+            return None
+        return dict(zip([d[0] for d in self.conn.description], row))
+
+    # ---- 结构（分产品 / 分行业 / 分地区） ---------------------------------
+
+    def insert_segment_fact(
+        self,
+        *,
+        company: str,
+        period: str,
+        dimension: str,
+        segment_name: str,
+        metric: str,
+        value_norm: float,
+        unit: str,
+        source_doc: str,
+        page_num: int,
+        table_id: str,
+    ) -> int:
+        """写一条结构事实；同键重复时覆盖（重灌幂等）。"""
+        segment_id = self.conn.execute("SELECT nextval('segment_id_seq')").fetchone()[0]
+        self.conn.execute(
+            "INSERT INTO segment_facts VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT (company, period, dimension, segment_name, metric, source_doc) "
+            "DO UPDATE SET value_norm = EXCLUDED.value_norm, unit = EXCLUDED.unit, "
+            "page_num = EXCLUDED.page_num, table_id = EXCLUDED.table_id",
+            [
+                segment_id,
+                company,
+                period,
+                dimension,
+                segment_name,
+                metric,
+                value_norm,
+                unit,
+                source_doc,
+                page_num,
+                table_id,
+            ],
+        )
+        return segment_id
+
+    def segment_facts(self) -> list[tuple]:
+        return self.conn.execute(
+            "SELECT * FROM segment_facts "
+            "ORDER BY company, period, dimension, segment_name, metric"
+        ).fetchall()
 
     # ---- 未匹配池 ---------------------------------------------------------
 

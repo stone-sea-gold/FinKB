@@ -104,6 +104,9 @@ class SourceTable:
     header: list[str]
     rows: list[list[str]]
     children: list["SourceTable"] = field(default_factory=list)
+    # 逻辑表的 section_path（如 ["分产品"]）。分节切分常把「分产品/分行业」这类
+    # 行标记吃掉，父表的 rows 里就看不到它了；结构表解析靠这个字段还原维度。
+    section_path: tuple[str, ...] = ()
 
     @property
     def labels(self) -> str:
@@ -178,6 +181,7 @@ def load_tables(doc_dir: Path, manifest: dict | None = None) -> list[SourceTable
             section=str(p.get("section") or ""),
             header=header,
             rows=[[str(c or "") for c in row] for row in p["rows"][a:b]],
+            section_path=tuple(t.get("section_path") or ()),
         )
         parent = groups.get(t["parent_id"])
         if parent is None:

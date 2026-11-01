@@ -1,3 +1,7 @@
 
 # 测试临时目录（pytest 需要可写 TMPDIR）
 .tmp/
+wiki_vault/.wiki.lock
+
+# L2 自动生成的 lint 报告（每次运行一份，不入库）
+wiki_vault/reports/

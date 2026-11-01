@@ -20,9 +20,12 @@ from dataclasses import replace
 from datetime import date, datetime
 from pathlib import Path
 
+from finkb.fact_engine.conflicts import detect_conflicts
 from finkb.fact_engine.extractor import LLMClient, extract_table, missing_columns
 from finkb.fact_engine.metric_dict import UNIT_DERIVATION, Metric, load_dict_meta
 from finkb.fact_engine.selector import SourceTable, load_tables, select_tables, split_header_blocks
+from finkb.fact_engine.relations import write_relations
+from finkb.fact_engine.segment import write_segments
 from finkb.fact_engine.store import FactStore
 from finkb.fact_engine.verifier import parse_number, repair, verify
 
@@ -34,7 +37,7 @@ _CALIBER = "合并报表"
 _POSITIVE_METRICS = {"operating_cost", "rd_expense"}
 
 
-_UNIT_NOTE = re.compile(r"(?:金额)?单位\s*[:：为]?\s*(?:人民币)?\s*(百万元|千元|万元|元)")
+_UNIT_NOTE = re.compile(r"(?:金额)?单位\s*[:：为]?\s*(?:人民币)?\s*(百万元|千元|亿元|万元|元)")
 
 
 def page_unit(doc_dir: Path, page: int) -> str | None:
@@ -325,4 +328,9 @@ def ingest_documents(
             or units.get(doc.name.split("_")[0], "元")
         )
         results[doc.name] = write_document(store, items, metrics, unit, table_units)
+        results[doc.name]["segments"] = write_segments(
+            store, doc, manifest, unit, unit_for=lambda t: page_unit(doc, t.page)
+        )
+        results[doc.name]["relations"] = write_relations(store, doc, manifest)
+    store.set_meta("conflicts_count", str(detect_conflicts(store)))
     return results

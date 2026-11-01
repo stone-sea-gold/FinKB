@@ -1,0 +1,65 @@
+# L2 页面里「算出来的数字」的命名 SQL（ADR-044）。
+# claim 的 kind=query 时，lint 会重跑这里定义的 SQL 并比对显示值。
+version: 1
+queries:
+  yoy:
+    description: 同比增长率（%）
+    unit: "%"
+    params: [fact_id]
+    sql: |
+      SELECT ROUND((a.value_norm / NULLIF(b.value_norm, 0) - 1) * 100, 2)
+      FROM facts a
+      JOIN facts b
+        ON b.company = a.company
+       AND b.metric_id = a.metric_id
+       AND b.caliber = a.caliber
+       AND b.period = CAST(CAST(a.period AS INTEGER) - 1 AS VARCHAR)
+      WHERE a.fact_id = ?
+  debt_ratio:
+    description: 资产负债率（%）
+    unit: "%"
+    params: [company, period]
+    sql: |
+      SELECT ROUND(100.0 * l.value_norm / NULLIF(a.value_norm, 0), 2)
+      FROM facts l, facts a
+      WHERE l.company = ? AND l.period = ?
+        AND l.metric_id = 'total_liabilities' AND l.caliber = '合并报表'
+        AND a.company = l.company AND a.period = l.period
+        AND a.metric_id = 'total_assets' AND a.caliber = '合并报表'
+      LIMIT 1
+  gross_margin:
+    description: 毛利率（%）
+    unit: "%"
+    params: [company, period]
+    sql: |
+      SELECT ROUND(100.0 * (r.value_norm - c.value_norm) / NULLIF(r.value_norm, 0), 2)
+      FROM facts r, facts c
+      WHERE r.company = ? AND r.period = ?
+        AND r.metric_id = 'revenue' AND r.caliber = '合并报表'
+        AND c.company = r.company AND c.period = r.period
+        AND c.metric_id = 'operating_cost' AND c.caliber = '合并报表'
+      LIMIT 1
+  net_margin:
+    description: 净利率（%）
+    unit: "%"
+    params: [company, period]
+    sql: |
+      SELECT ROUND(100.0 * p.value_norm / NULLIF(r.value_norm, 0), 2)
+      FROM facts p, facts r
+      WHERE p.company = ? AND p.period = ?
+        AND p.metric_id = 'net_profit' AND p.caliber = '合并报表'
+        AND r.company = p.company AND r.period = p.period
+        AND r.metric_id = 'revenue' AND r.caliber = '合并报表'
+      LIMIT 1
+  rd_ratio:
+    description: 研发费用占营业收入比重（%）
+    unit: "%"
+    params: [company, period]
+    sql: |
+      SELECT ROUND(100.0 * d.value_norm / NULLIF(r.value_norm, 0), 2)
+      FROM facts d, facts r
+      WHERE d.company = ? AND d.period = ?
+        AND d.metric_id = 'rd_expense' AND d.caliber = '合并报表'
+        AND r.company = d.company AND r.period = d.period
+        AND r.metric_id = 'revenue' AND r.caliber = '合并报表'
+      LIMIT 1

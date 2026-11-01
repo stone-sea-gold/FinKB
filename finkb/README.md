@@ -1,4 +1,4 @@
-# FinKB — Phase 0 完成 / Phase 1 开工
+# FinKB — Phase 0/1/2 完成，L2 知识层完整跑通
 
 A 股财报知识库，架构见 [`../FinKB-方案v2.md`](../FinKB-方案v2.md)（v2.2）。
 
@@ -7,7 +7,10 @@ A 股财报知识库，架构见 [`../FinKB-方案v2.md`](../FinKB-方案v2.md)�
 > 工作约定见 [`AGENTS.md`](./AGENTS.md)。
 
 当前实现范围：**Phase 0 — L0 凭证层**（解析 → 页码锚定 → 页眉页脚清洗 → 跨页表格缝合 →
-物理表切分为逻辑表 → 审计）；**Phase 1 已跑通 L1**：三家 18 份 → 617 条事实，另招行/平安 2 份跨行业验证 73 条；抽取器 + 逐字反查 + 列级召回 + 单位归一；四行业盲测（白酒/家电/医药/电力）4 份 → 159 条，暴露并修复 3 处缺陷（ADR-034）。
+物理表切分为逻辑表 → 审计）；**Phase 1 — L1 事实层**（29 份唯一库 1717 条、0 未匹配）；
+**Phase 2 — L2 知识层**：29 份年报全部编译成 **116 页** Markdown 知识页
+（29 摘要 + 70 探针 + 14 实体 + 3 跨公司概念页），数字全部走 claim 账本 + 脚注，
+FTS5 检索 + 15 题离线评测，`lint` 十条规则兜底（ADR-041～050）。
 
 ## 数据格式分层（重要）
 
@@ -47,7 +50,13 @@ finkb/
 │   ├── common/models.py            # Page / Block / TableBlock / StitchedTable
 │   ├── fact_engine/                 # L1：选表 / 抽取 / 逐字反查 / DuckDB 仓储
 │   │   ├── metric_dict.py          # YAML → Metric；单位族由 unit_default 推导
-│   │   └── store.py                # metric_dict / facts / relations / unmatched_pool
+│   │   ├── segment.py              # 分产品/分行业/分地区结构表 → segment_facts
+│   │   ├── relations.py            # 子公司/关联方/股东/担保 → relations
+│   │   ├── conflicts.py            # 同科目跨文档数值冲突 → conflicts
+│   │   └── store.py                # metric_dict / facts / segment_facts / relations / conflicts
+│   ├── wiki/                        # L2：frontmatter / 原子写 / claim 账本 / 编译器 / 实体 / 概念页
+│   ├── lint/                        # L2：R1–R10 规则 + 单页转正前检查
+│   ├── search/                      # L2：页面 FTS5 索引（trigram + 别名扩展 + bm25）
 │   └── parser/
 │       ├── markdown_blocks.py      # 页码锚定 Markdown 解析；HTML 表格 → 行/网格
 │       ├── noise_filter.py         # 运行页眉/页脚与残留页码清洗
@@ -55,10 +64,14 @@ finkb/
 │       ├── section_splitter.py     # 物理表 → 逻辑表切分 + 表头继承
 │       ├── pipeline.py             # 解析 → 清洗 → 缝合 → 切分 端到端入口
 │       └── mineru_client.py        # MinerU 客户端 + content_list 适配 + pypdf 兜底
-├── tests/                          # 331 项测试，全部离线可跑
-├── scripts/check.sh                # 一条命令验收（测试 + 语料基线）
+├── wiki_vault/                      # L2 知识页（index / summaries / explorations / entities / concepts / _draft）
+├── eval/                           # L2 评测集 15 题 + 离线复算脚本（gold_qa.json / check.py）
+├── tests/                          # 381 项测试，全部离线可跑
+├── scripts/check.sh                # 一条命令验收（测试 + 语料基线 + 金标）
 ├── config/corpus-baseline.json     # 29 文档 × 5 个数字的退步基线
-├── config/metric_dict.yaml        # L1 指标字典 v0（21 个指标）
+├── config/metric_dict.yaml        # L1 指标字典 v2（34 个指标）
+├── config/wiki_scope.yaml         # L2 编译范围（29 份全登记）
+├── config/wiki_queries.yaml       # L2 命名 SQL（同比 / 资产负债率 / 三项利润率）
 └── data/parsed/                    # 解析产物（不进 git）
 ```
 
@@ -79,6 +92,22 @@ python tools/audit.py rowspan --doc ...                              # rowspan �
 python tools/audit.py headers --doc ...                              # 多层表头逐张对照
 python tools/audit.py diff --before a.json --after b.json            # 两次快照的字段级差异
 ```
+
+L2 知识页：
+
+```bash
+python -m finkb.wiki init                    # 建目录骨架（幂等）
+python -m finkb.wiki compile --doc 002594_2025_年报   # 编译单份：1 摘要 + 3 探针（4 次 LLM 调用）
+python -m finkb.lint                         # 十条规则；报告写 wiki_vault/reports/，有 error 时 exit 1
+python -m finkb.wiki index                   # 重算 index.md（编译后自动做）
+python -m finkb.search "比亚迪 毛利率"        # FTS5 检索（trigram + 别名扩展）
+python -m finkb.search --rebuild             # 全量重建检索索引
+cd .. && .venv/bin/python eval/check.py      # 15 题离线复算（不联网、不调 LLM）
+```
+
+批量编译器在 `finkb/.tmp/batch_compile.py`（读 `config/wiki_scope.yaml`，逐份编译并写
+`.tmp/batch_compile.log`；29 份约 22 分钟）。`wiki init/compile` 需要 `LLM_API_KEY`；
+`lint` 与 `search` 全离线。
 
 `verify-cells` / `recall` 需要 PDF 与 `PyMuPDF`（已装）；其余全离线。
 
@@ -221,14 +250,16 @@ result.stitch.records           # 审计记录（页码序列 + 缝合理由）
 
 | 项 | 结果 |
 |---|---|
-| 测试 | **331 项通过**，离线 |
+| 测试 | **381 项通过**，离线 |
 | 语料 | 29 份 / 14 家公司 / 4791 页 / 10 类版式 |
 | 逻辑表 | 6130 张；有表头 **5729（93.5%）** |
 | 守恒律 | **359/359**（年报 16 条 / 半年报 13 条 / 季报 10 条） |
 | 数值回查 | 36026 个抽样中 6 个查不到（99.98%，均为 MinerU 粘格） |
 | 跨页缝合 | 28 张；列数不一致拒绝 21 条，逐条带原因 |
 | 原文召回 | 18 份实测 100%：PDF 里的数字没有整表丢失 |
-| L1 事实层 | **29 份唯一库 1064 条**（0 未匹配、0 列缺口，42 组资产负债权益全平）；金标事实集 72/72 |
+| L1 事实层 | **29 份唯一库 1717 条**（0 未匹配、0 列缺口，42 组资产负债权益全平）；金标事实集 72/72 |
+| L2 知识层 | **116 页 active**（29 摘要 + 70 探针 + 14 实体 + 3 概念）、lint 0 错 0 警；claims 1485 条；`segment_facts` 255 条、`relations` 621 条、`conflicts` 1 组 |
+| L2 检索与评测 | FTS5 索引 116 页；`eval/check.py` 15/15 通过 |
 
 以上数字由 `python tools/audit.py corpus` 复现；退步由 `config/corpus-baseline.json` 判定。
 
@@ -257,8 +288,17 @@ result.stitch.records           # 审计记录（页码序列 + 缝合理由）
   但盲测样本仍只有一轮。
 - **跨行业只到「能跑」**：中信证券/中国神华的三表已能完整选中（ADR-035），但行业科目
   只补了 6 个，字典外的行会缺；同一页并列合并表与母公司表时，仍可能选错。
+- **L2 只做了 3 个探针**：01 核心财务 / 02 分产品结构 / 05 现金流与资本结构；方案里的
+  03/04/06/07/08 只有编号没有定义（v3 §4 只定义 01–05），按「二期」处理。
+- **L2 结构覆盖 13/29 份**：分产品/分行业/分地区表只存在于 13 份文档；银行、保险、季报
+  本身不披露三列表（已逐份核对，不是漏抽）。
+- **L2 检索是词面检索**：FTS5 trigram 对 3 字以上词有效，2 字词要靠 `metric_dict.aliases`
+  扩展；没有向量兜底，也没有检索路由（L3 才做）。
+- **L2 编译不幂等**：重编会重写 claims、LLM 正文每次不同；token 成本未量化。
+- **L2 关系与冲突只做结构化部分**：关系仅四类表（子公司/关联方/股东/担保），
+  矛盾仅 facts 级数值不一致；文本语义矛盾、客户/供应商名单未做（ADR-046）。
 
-## 下一步（Phase 1）
+## 下一步（Phase 2 及以后）
 
 0. ✅ 已完成：`LLM_API_KEY` 已配置并联调（chat 模型，用于语义对齐；**不是** embedding key）；
    `metric_dict` 15 项已建（先覆盖 3 家整车，再按行业扩到银行/保险）
@@ -271,3 +311,8 @@ result.stitch.records           # 审计记录（页码序列 + 缝合理由）
 4. ✅ 跨行业验证：招商银行、中国平安 2 份 → 73 条事实、0 未匹配（ADR-033）
 5. ✅ 盲测第一轮：白酒/家电/医药/电力 4 份，冻结代码跑完，暴露 3 处缺陷并修复（ADR-034）
 6. ✅ 券商/能源跨页拼表：中信证券、中国神华三表完整选中，67 条事实、0 未匹配；28 份既有选表不变（ADR-035/036）
+7. ✅ L2 单文档编译：`python -m finkb.wiki compile --doc 002594_2025_年报` 产出 4 页并全部转正；
+   `python -m finkb.lint` 0 错 0 警
+8. ✅ L2 完整跑通：29 份全部编译（116 页 active）、实体页 14 张、跨公司概念页 3 张、
+   FTS5 检索、15 题评测 15/15、lint 十条规则 0 错 0 警；`scripts/check.sh` 与 `eval/check.py` 全绿
+9. ⏳ 后续：8 探针语义定义、跨期对比页、检索路由与前端（L3）、向量兜底（P3）

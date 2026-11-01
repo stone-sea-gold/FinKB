@@ -62,6 +62,11 @@
 | 孤儿值不进 rows | 存 `orphan_values`，既不污染数据也不丢失信息 |
 | 一行四格「键、值、键、值」不算表头 | 偶数格 + 键不带数字 + 值带数字 + 无年份格，四条同时成立才是键值行（坑-56） |
 | **父表有表头 ⇒ 不是 `kv_row`** | 用结构事实判类型；「值必含数字」的假设不成立（坑-22） |
+| **L2 正文数字只能写占位符 `{{cN}}`** | 显示值、脚注、claims 账本由代码填；lint R9 会重验（ADR-044） |
+| **派生比率（毛利率/净利率/研发强度/资产负债率）只能走命名 SQL** | 写进 `config/wiki_queries.yaml`，LLM 不得自行计算任何差值/增速/占比（ADR-047） |
+| **同一逻辑页的草稿与旧 active 不得并存** | 编译顺序：写草稿 → 写 claims → 删旧 active → 校验 → 转正（ADR-048） |
+| **frontmatter 由代码拼装** | LLM 只输出 JSON；页面正文出现单独一行 `---` 即判违规（P7） |
+| **转正前必须过 `page_issues`** | 任一 R1/R8/R9 error 就留在 `_draft/`，不得手动改 `status`（R10 是 warning） |
 
 ## 完工前（强制）
 
@@ -78,7 +83,7 @@
 
 ```bash
 cd finkb
-../.venv/bin/python -m pytest -q     # 当前基线：331 passed
+../.venv/bin/python -m pytest -q     # 当前基线：381 passed
 ```
 
 - 全部测试必须**离线可跑**，不得依赖网络或 API key

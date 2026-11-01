@@ -9,10 +9,15 @@
 #
 # `aliases` 是给 LLM 对齐用的非标写法，宁多勿少；匹配时先精确、再去空白/全角。
 
-# 冻结版本：v1（2026-10-30）。改动 metric_id / metric_name / aliases /
+# 冻结版本：v2（2026-10-31）。改动 metric_id / metric_name / aliases /
 # unit_default 都必须升版本号并重灌事实库，否则新旧事实的口径不可比。
-version: 1
-frozen_at: "2026-10-30"
+#
+# v2 增补（ADR-045）：为 L2 探针 02/05 补 13 项「财报直接披露」的科目——
+# 投资/筹资现金流净额、短期/长期借款、应付债券、租赁负债、销售/管理/财务费用、
+# 流动资产/负债合计、应收账款。毛利率、资产负债率、有息负债、费用率、同比
+# 仍由 SQL 视图算，不进字典。
+version: 2
+frozen_at: "2026-10-31"
 
 metrics:
   - metric_id: revenue
@@ -141,3 +146,82 @@ metrics:
     unit_default: 亿元
     category: 盈利
     aliases: [保险服务收入, 保险业务收入, 已赚保费]
+
+  # ── v2 增补（ADR-045）：L2 探针 02/05 需要的直接披露科目 ──────────────
+  - metric_id: icf
+    metric_name: 投资活动产生的现金流量净额
+    unit_default: 亿元
+    category: 现金流
+    aliases: [投资活动现金流量净额, 投资活动产生的现金流量净额（元）, 投资活动现金净流量]
+
+  - metric_id: fcf
+    metric_name: 筹资活动产生的现金流量净额
+    unit_default: 亿元
+    category: 现金流
+    aliases: [筹资活动现金流量净额, 筹资活动产生的现金流量净额（元）, 筹资活动现金净流量]
+
+  - metric_id: net_cash_increase
+    metric_name: 现金及现金等价物净增加额
+    unit_default: 亿元
+    category: 现金流
+    aliases: [现金及现金等价物净增加额, 现金净增加额, 现金及现金等价物净增加（减少）额]
+
+  - metric_id: short_term_borrowings
+    metric_name: 短期借款
+    unit_default: 亿元
+    category: 资产
+    aliases: [短期借款]
+
+  - metric_id: long_term_borrowings
+    metric_name: 长期借款
+    unit_default: 亿元
+    category: 资产
+    aliases: [长期借款]
+
+  - metric_id: bonds_payable
+    metric_name: 应付债券
+    unit_default: 亿元
+    category: 资产
+    aliases: [应付债券]
+
+  - metric_id: lease_liabilities
+    metric_name: 租赁负债
+    unit_default: 亿元
+    category: 资产
+    aliases: [租赁负债]
+
+  - metric_id: selling_expense
+    metric_name: 销售费用
+    unit_default: 亿元
+    category: 盈利
+    aliases: [销售费用]
+
+  - metric_id: admin_expense
+    metric_name: 管理费用
+    unit_default: 亿元
+    category: 盈利
+    aliases: [管理费用]
+
+  - metric_id: finance_expense
+    metric_name: 财务费用
+    unit_default: 亿元
+    category: 盈利
+    aliases: [财务费用]
+
+  - metric_id: current_assets
+    metric_name: 流动资产合计
+    unit_default: 亿元
+    category: 资产
+    aliases: [流动资产合计]
+
+  - metric_id: current_liabilities
+    metric_name: 流动负债合计
+    unit_default: 亿元
+    category: 资产
+    aliases: [流动负债合计]
+
+  - metric_id: accounts_receivable
+    metric_name: 应收账款
+    unit_default: 亿元
+    category: 资产
+    aliases: [应收账款]
