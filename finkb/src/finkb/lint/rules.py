@@ -27,6 +27,7 @@ YEAR = re.compile(r"^(?:19|20)\d{2}$")
 STOCK_CODE = re.compile(r"[（(]\d{6}[)）]")
 DOC_ID = re.compile(r"\d{6}_\d{4}_(?:年报|半年报|一季报|三季报)")
 PERIOD_TOKEN = re.compile(r"(?:19|20)\d{2}(?:Q[1-4](?:-Q[1-4])?|H[12])")
+PAGE_TEXT = re.compile(r"第\s*\d+\s*页")
 HEADING = re.compile(r"^#{1,6}\s")
 TABLE_LINE = re.compile(r"^\s*\|")
 FENCE = re.compile(r"^```")
@@ -201,6 +202,7 @@ def _norm_number(text: str) -> str:
 
 def _sentence_numbers(sentence: str) -> list[str]:
     sentence = PERIOD_TOKEN.sub("", sentence)
+    sentence = PAGE_TEXT.sub("", sentence)
     sentence = DOC_ID.sub("", sentence)
     sentence = STOCK_CODE.sub("", sentence)
     sentence = WIKILINK.sub("", sentence)

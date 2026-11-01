@@ -255,7 +255,8 @@ def footnote(claim: Claim) -> str:
     if claim.kind == "fact":
         return f"数值来源：facts #{claim.fact_id}（{claim.note}，{claim.unit}）。"
     if claim.kind == "segment":
-        return f"结构数据来源：segment_facts #{claim.segment_id}（{claim.note}，{claim.unit}）。"
+        suffix = f"，{claim.unit}" if claim.unit else ""
+        return f"结构数据来源：segment_facts #{claim.segment_id}（{claim.note}{suffix}）。"
     if claim.kind == "query":
         return f"计算来源：query `{claim.query_id}`（参数 {json.dumps(claim.params, ensure_ascii=False, sort_keys=True)}）。"
     return f"原文：{claim.anchor}。"

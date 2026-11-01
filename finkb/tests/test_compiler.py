@@ -10,14 +10,15 @@ from finkb.wiki import vault
 
 
 class FakeClient:
-    def __init__(self, body: str, title: str = "示例页") -> None:
+    def __init__(self, body: str, title: str = "示例页", description: str = "一句话摘要") -> None:
         self.body = body
         self.title = title
+        self.description = description
         self.calls = 0
 
     def chat_json(self, system: str, user: str) -> dict:
         self.calls += 1
-        return {"title": self.title, "description": "一句话摘要", "body_markdown": self.body}
+        return {"title": self.title, "description": self.description, "body_markdown": self.body}
 
 
 def _store() -> FactStore:
@@ -61,14 +62,14 @@ def _one_page(monkeypatch):
     )
 
 
-def _run(tmp_path, monkeypatch, body: str):
+def _run(tmp_path, monkeypatch, body: str, description: str = "一句话摘要"):
     _one_page(monkeypatch)
     data_root = tmp_path / "data"
     doc = data_root / "parsed" / "000001_2025_年报"
     doc.mkdir(parents=True)
     (doc / "report.json").write_text(json.dumps({"pages": 3}), encoding="utf-8")
     (doc / "page_anchored.md").write_text('<!-- META: {"doc": "000001_2025_年报", "page": 1} -->\n正文', encoding="utf-8")
-    client = FakeClient(body)
+    client = FakeClient(body, description=description)
     with _store() as store:
         return compiler.compile_document(
             client,
@@ -111,3 +112,76 @@ def test_single_layer_source_stays_draft(tmp_path, monkeypatch):
     assert results[0]["status"] == "draft"
     assert "来源不足两层" in results[0]["reason"]
     assert not (tmp_path / "vault" / "summaries" / "000001_2025_年报.md").exists()
+
+
+def test_page_specs_include_new_probes():
+    """8 探针里已实现的 5 个：摘要页 + 核心/结构/现金流/研发/海外。"""
+    specs = compiler._page_specs("000001_2025_年报", "示例公司", "2025")
+    slugs = [spec["slug"] for spec in specs]
+    assert len(slugs) == 6
+    assert "000001_2025_年报-研发投入" in slugs
+    assert "000001_2025_年报-海外收入" in slugs
+
+
+def test_only_filter_limits_compiled_pages(tmp_path, monkeypatch):
+    """--only 只编指定 slug，不重编已经稳定的页面。"""
+    monkeypatch.setattr(
+        compiler,
+        "_page_specs",
+        lambda doc_id, company, period: [
+            {
+                "page_type": "summary",
+                "slug": doc_id,
+                "title": "摘要",
+                "catalog": ("revenue",),
+                "segments": False,
+                "cash": False,
+                "brief": "写摘要",
+            },
+            {
+                "page_type": "exploration",
+                "slug": f"{doc_id}-研发投入",
+                "title": "研发投入",
+                "catalog": ("revenue",),
+                "segments": False,
+                "cash": False,
+                "rd": True,
+                "brief": "写研发",
+            },
+        ],
+    )
+    data_root = tmp_path / "data"
+    doc = data_root / "parsed" / "000001_2025_年报"
+    doc.mkdir(parents=True)
+    (doc / "report.json").write_text(json.dumps({"pages": 3}), encoding="utf-8")
+    (doc / "page_anchored.md").write_text(
+        '<!-- META: {"doc": "000001_2025_年报", "page": 1} -->\n正文', encoding="utf-8"
+    )
+    client = FakeClient("营业收入 {{c1}} 亿元。")
+    with _store() as store:
+        results = compiler.compile_document(
+            client,
+            store,
+            "000001_2025_年报",
+            company="000001",
+            period="2025",
+            vault_root=tmp_path / "vault",
+            claims_db=tmp_path / "wiki.duckdb",
+            data_root=data_root,
+            only={"000001_2025_年报-研发投入"},
+        )
+    assert client.calls == 1
+    assert [r["slug"] for r in results] == ["000001_2025_年报-研发投入"]
+
+
+def test_placeholder_in_description_falls_back(tmp_path, monkeypatch):
+    """frontmatter 不渲染占位符：description 里有 {{cN}} 时用静态描述兜底。"""
+    results = _run(
+        tmp_path,
+        monkeypatch,
+        "营业收入 {{c1}} 亿元。",
+        description="营业收入 {{c1}} 亿元",
+    )
+    assert results[0]["status"] == "active"
+    page = vault.read_page(tmp_path / "vault" / "summaries" / "000001_2025_年报.md")
+    assert "{{" not in page.meta["description"]

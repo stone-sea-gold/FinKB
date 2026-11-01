@@ -64,6 +64,11 @@ CASH_METRICS = (
     "lease_liabilities",
 )
 
+RD_METRICS = ("rd_expense",)
+
+# 分地区表里「境外口径」的常见列名（与 config/wiki_queries.yaml 的过滤条件保持一致）。
+OVERSEAS_SEGMENTS = frozenset({"海外", "境外", "国外", "境外地区", "海外地区"})
+
 STOCK_METRICS = frozenset(
     {
         "total_assets",
@@ -89,14 +94,16 @@ SYSTEM_PROMPT = """你是财务知识库的编辑。你只能使用用户给出�
    金额单位写在占位符后面，例如「{{c1}} 亿元」；百分数按规则 4。
    例外：年份（如 2025 年）、页码引用 [Ref: 文档#P12] 可以写。
 2. 只能使用目录里出现过的 cN，不得编造。
-3. 每一段定性陈述都必须带页锚（每段至少一条），格式 [Ref: 文档#P页码]，页码只能取自用户给的「可用页锚」。
+3. 每一段定性陈述都必须带页锚（每段至少一条），格式 [Ref: 文档#P页码]，页码只能取自用户给的「可用页锚」；
+   优先引用该段涉及的 claim 旁边的原文页码（目录里标注了「原文第 N 页」）。
 4. 百分数占位符的显示值已经带 %，不要再在占位符后面补 %（如毛利率写成 {{c11}}，不要写 {{c11}}%）。
 5. 不要输出 Markdown 分隔线 ---，不要输出 frontmatter。
 6. 只输出一个 JSON 对象：{"title": "...", "description": "...", "body_markdown": "..."}。
    description 一句话，不超过 60 字。
 7. 占位符必须写成双花括号 {{cN}}；写单花括号 {cN} 不会渲染，视为错误。
 8. 不得自行计算任何数字：差值、增速、占比、百分数、合计都不行，只能引用目录里已有的数值。
-   叙述差异时用「明显高于/低于」这类文字，不要写算出来的新数字。"""
+   叙述差异时用「明显高于/低于」这类文字，不要写算出来的新数字。
+9. description 是给人看的一句话摘要，不要出现占位符 {{cN}}，也不要写具体数字。"""
 
 
 @dataclass
@@ -110,9 +117,12 @@ class CatalogItem:
     segment_id: int | None = None
     query_id: str | None = None
     params: dict = field(default_factory=dict)
+    page: int | None = None
 
     def line(self) -> str:
-        return f"{{{{{self.marker}}}}} = {self.text} = {self.display}{self.unit}"
+        unit = "" if self.display.endswith("%") else self.unit
+        where = f"（原文第 {self.page} 页）" if self.page is not None else ""
+        return f"{{{{{self.marker}}}}} = {self.text} = {self.display}{unit}{where}"
 
 
 def _fact_rows(store: FactStore, doc_id: str) -> list[dict]:
@@ -123,7 +133,7 @@ def _fact_rows(store: FactStore, doc_id: str) -> list[dict]:
 
 def _segment_rows(store: FactStore, doc_id: str) -> list[dict]:
     cursor = store.conn.execute(
-        "SELECT segment_id, dimension, segment_name, metric, value_norm, unit FROM segment_facts "
+        "SELECT segment_id, dimension, segment_name, metric, value_norm, unit, page_num FROM segment_facts "
         "WHERE source_doc = ? ORDER BY dimension, segment_name, metric",
         [doc_id],
     )
@@ -135,6 +145,7 @@ def _segment_rows(store: FactStore, doc_id: str) -> list[dict]:
             "metric": row[3],
             "value_norm": row[4],
             "unit": row[5],
+            "page_num": row[6],
         }
         for row in cursor.fetchall()
     ]
@@ -174,6 +185,7 @@ def build_catalog(
                 display=claim.display_value,
                 unit=claim.unit,
                 fact_id=claim.fact_id,
+                page=int(fact["page_num"]) if fact.get("page_num") is not None else None,
             )
         )
     return items
@@ -200,6 +212,7 @@ def add_segments(items: list[CatalogItem], segments: list[dict]) -> None:
                 display=display,
                 unit="" if unit == "%" else unit,
                 segment_id=int(row["segment_id"]),
+                page=int(row["page_num"]) if row.get("page_num") is not None else None,
             )
         )
 
@@ -258,6 +271,7 @@ def _page_specs(doc_id: str, company: str, period: str) -> list[dict]:
             "page_type": "summary",
             "slug": doc_id,
             "title": f"{head}摘要",
+            "desc": f"{head}总览：业务、收入与利润、现金流、资产结构与研发投入。",
             "catalog": SUMMARY_METRICS,
             "segments": False,
             "cash": False,
@@ -267,6 +281,7 @@ def _page_specs(doc_id: str, company: str, period: str) -> list[dict]:
             "page_type": "exploration",
             "slug": f"{doc_id}-核心财务指标",
             "title": f"{head}核心财务指标",
+            "desc": f"{head}的核心财务指标与经营质量解读。",
             "catalog": SUMMARY_METRICS,
             "segments": False,
             "cash": False,
@@ -276,6 +291,7 @@ def _page_specs(doc_id: str, company: str, period: str) -> list[dict]:
             "page_type": "exploration",
             "slug": f"{doc_id}-分产品结构",
             "title": f"{head}分产品与分地区结构",
+            "desc": f"{head}的分产品、分行业与分地区收入结构。",
             "catalog": (),
             "segments": True,
             "cash": False,
@@ -285,10 +301,33 @@ def _page_specs(doc_id: str, company: str, period: str) -> list[dict]:
             "page_type": "exploration",
             "slug": f"{doc_id}-现金流与资本结构",
             "title": f"{head}现金流与资本结构",
+            "desc": f"{head}的经营、投资、筹资现金流与有息负债结构。",
             "catalog": CASH_METRICS,
             "segments": False,
             "cash": True,
             "brief": "写一份现金流与资本结构解读：经营/投资/筹资现金流、现金余额、有息负债结构，2–3 段。",
+        },
+        {
+            "page_type": "exploration",
+            "slug": f"{doc_id}-研发投入",
+            "title": f"{head}研发投入",
+            "desc": f"{head}的研发费用规模与研发强度。",
+            "catalog": RD_METRICS,
+            "segments": False,
+            "cash": False,
+            "rd": True,
+            "brief": "写一份研发投入解读：研发费用与研发强度（占营收比重），2–3 段；数据缺失时不要写数字。",
+        },
+        {
+            "page_type": "exploration",
+            "slug": f"{doc_id}-海外收入",
+            "title": f"{head}海外收入",
+            "desc": f"{head}的境外收入、成本与毛利率。",
+            "catalog": (),
+            "segments": False,
+            "cash": False,
+            "overseas": True,
+            "brief": "写一份海外业务解读：境外/海外收入与毛利率，2–3 段；没有境外口径数据时不要写数字。",
         },
     ]
 
@@ -304,6 +343,7 @@ def compile_document(
     claims_db: Path | None = None,
     data_root: Path = DEFAULT_DATA_ROOT,
     dry_run: bool = False,
+    only: set[str] | None = None,
 ) -> list[dict]:
     """编译一份文档的 1 个摘要页 + 3 个探针页，返回每页的编译结果。"""
     claims_path = claims_db or (FINKB_ROOT / "data" / "wiki.duckdb")
@@ -312,14 +352,29 @@ def compile_document(
     results: list[dict] = []
 
     specs = _page_specs(doc_id, company, period)
+    if only is not None:
+        specs = [spec for spec in specs if spec["slug"] in only]
     for spec in specs:
         items = build_catalog(store, doc_id, spec["catalog"], period)
         if spec["segments"]:
             add_segments(items, segments)
         # facts.company 存的是股票代码，页面展示用公司名，查询参数要用代码。
         code = doc_id.split("_")[0]
-        if not spec["segments"]:
-            flow = flow_period(period)
+        flow = flow_period(period)
+        if spec.get("rd"):
+            if "rd_ratio" in queries:
+                _try_add_query(items, store, "rd_ratio", {"company": code, "period": flow})
+        elif spec.get("overseas"):
+            # 用分地区表里的境外口径原始条目：既提供数字，也提供页锚（l1:segments）。
+            add_segments(
+                items,
+                [
+                    r
+                    for r in segments
+                    if r["dimension"] == "region" and r["segment_name"] in OVERSEAS_SEGMENTS
+                ],
+            )
+        elif not spec["segments"]:
             if "debt_ratio" in queries:
                 _try_add_query(items, store, "debt_ratio", {"company": code, "period": period})
             for query_id in ("gross_margin", "net_margin", "rd_ratio"):
@@ -331,6 +386,17 @@ def compile_document(
 
         catalog_text = "\n".join(item.line() for item in items)
         anchors = _available_anchors(data_root, doc_id)
+        # claim 所在页最相关，优先给模型；再补文档前几页兜底。
+        relevant = [f"{doc_id}#P{item.page}" for item in items if item.page is not None]
+        if spec.get("overseas"):
+            relevant = [
+                f"{doc_id}#P{r['page_num']}"
+                for r in segments
+                if r["dimension"] == "region"
+                and r["segment_name"] in OVERSEAS_SEGMENTS
+                and r.get("page_num") is not None
+            ] + relevant
+        anchors = list(dict.fromkeys(relevant + anchors))
         user = (
             f"文档：{doc_id}\n公司：{company}\n期间：{period}\n\n"
             f"claim 目录（正文数字只能用这些占位符）：\n{catalog_text}\n\n"
@@ -371,10 +437,16 @@ def compile_document(
             + [f"l1:facts#{fid}" for fid in dict.fromkeys(fact_ids)]
             + [f"l1:segments#{sid}" for sid in dict.fromkeys(segment_ids)]
         )
+        title = str(output.get("title") or spec["title"])
+        description = str(output.get("description") or spec["brief"])[:80]
+        if "{{" in title:
+            title = spec["title"]
+        if "{{" in description:
+            description = str(spec.get("desc") or spec["brief"])[:80]
         meta = frontmatter.build(
             page_type=spec["page_type"],
-            title=str(output.get("title") or spec["title"]),
-            description=str(output.get("description") or spec["brief"])[:80],
+            title=title,
+            description=description,
             sources=sources,
             company=company,
             period=period,
@@ -437,6 +509,8 @@ def _cross_links(body: str, spec: dict, doc_id: str, root: Path) -> str:
         ("核心财务指标", f"{doc_id}-核心财务指标"),
         ("分产品结构", f"{doc_id}-分产品结构"),
         ("现金流与资本结构", f"{doc_id}-现金流与资本结构"),
+        ("研发投入", f"{doc_id}-研发投入"),
+        ("海外收入", f"{doc_id}-海外收入"),
     ]
     if spec["page_type"] == "summary":
         links = [
