@@ -26,6 +26,14 @@ else
 fi
 
 echo
+echo "== 每份文档事实数（坑-80）=="
+if [ -f data/facts.duckdb ]; then
+  "$PYTHON" tools/facts_baseline.py --db data/facts.duckdb --check
+else
+  echo "跳过：data/facts.duckdb 不存在"
+fi
+
+echo
 echo "== 金标事实集 =="
 if [ -f data/facts.duckdb ]; then
   "$PYTHON" tools/gold_check.py --db data/facts.duckdb --gold config/gold_facts.yaml
