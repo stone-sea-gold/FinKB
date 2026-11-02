@@ -16,8 +16,13 @@
 # 投资/筹资现金流净额、短期/长期借款、应付债券、租赁负债、销售/管理/财务费用、
 # 流动资产/负债合计、应收账款。毛利率、资产负债率、有息负债、费用率、同比
 # 仍由 SQL 视图算，不进字典。
-version: 2
-frozen_at: "2026-10-31"
+#
+# v3 增补（2026-11-02）：补两个被会计恒等式暴露出来的缺项——汇率变动对现金的
+# 影响（fx_effect）、少数股东权益（minority_interest）。前者的缺席让现金流
+# 恒等式只能靠 5% 容差遮住，后者的缺席让「归母净资产 ≤ 权益合计」这条约束
+# 在少数股东权益为负时必然误报。
+version: 3
+frozen_at: "2026-11-02"
 
 metrics:
   - metric_id: revenue
@@ -165,6 +170,23 @@ metrics:
     unit_default: 亿元
     category: 现金流
     aliases: [现金及现金等价物净增加额, 现金净增加额, 现金及现金等价物净增加（减少）额]
+
+  # ── v3 增补（2026-11-02）：把会计恒等式缺的两项补齐 ──────────────────
+  # fx_effect 是现金流量表恒等式的第 4 项。缺了它，「净增加额 = 经营+投资+
+  # 筹资」这条约束永远差一个汇率项，只能靠编容差遮住（见 DEVLOG 坑-77）。
+  - metric_id: fx_effect
+    metric_name: 汇率变动对现金及现金等价物的影响
+    unit_default: 亿元
+    category: 现金流
+    aliases: [汇率变动对现金的影响, 汇率变动对现金及现金等价物的影响额, 汇率变动对现金的影响额]
+
+  # minority_interest 是「归母权益 + 少数股东权益 = 所有者权益合计」缺的另一项。
+  # 少数股东权益在子公司累积亏损时会为负，所以「归母 ≤ 合计」的约束本身是错的。
+  - metric_id: minority_interest
+    metric_name: 少数股东权益
+    unit_default: 亿元
+    category: 资产
+    aliases: [其中：少数股东权益, 少数股东权益]
 
   - metric_id: short_term_borrowings
     metric_name: 短期借款

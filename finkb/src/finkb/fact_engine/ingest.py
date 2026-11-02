@@ -20,6 +20,7 @@ from dataclasses import replace
 from datetime import date, datetime
 from pathlib import Path
 
+from finkb.fact_engine.basis import annotate_period_basis
 from finkb.fact_engine.conflicts import detect_conflicts
 from finkb.fact_engine.extractor import LLMClient, extract_table, missing_columns
 from finkb.fact_engine.metric_dict import UNIT_DERIVATION, Metric, load_dict_meta
@@ -189,7 +190,13 @@ def extract_document(
     out: list[Extraction] = []
     for parent in select_tables(load_tables(doc_dir, manifest)):
         for table in split_header_blocks(parent):
-            obs, periods = _extract_table(client, table, metrics)
+            # 单表解析失败（表头认不出期间列等）只丢这一张表，不丢整份文档。
+            # 601238 的现金流量表续页里有一行「其中：子公司吸收少数股东投资收到的现金」
+            # 被当成表头，曾导致该文档 67 条事实全部消失（坑-80）。
+            try:
+                obs, periods = _extract_table(client, table, metrics)
+            except ValueError:
+                continue
             gaps = missing_columns(table, periods, obs)
             if gaps:  # 有数却整列没输出：补抽一次，仍缺则由 column_gaps 计数暴露
                 try:
@@ -333,4 +340,6 @@ def ingest_documents(
         )
         results[doc.name]["relations"] = write_relations(store, doc, manifest)
     store.set_meta("conflicts_count", str(detect_conflicts(store)))
+    # 率值的期间口径要等全部文档写完才能反算（ADR-055）。
+    store.set_meta("period_basis", str(sum(annotate_period_basis(store).values())))
     return results

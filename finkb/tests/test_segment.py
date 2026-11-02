@@ -89,6 +89,19 @@ def test_segment_fact_roundtrip_is_idempotent(tmp_path):
         assert rows[0][6] == 11.0
 
 
+def test_dimension_member_is_normalized_and_aliased(tmp_path):
+    """维度种类封闭、成员开放：同一段名的不同写法归到一个 member 上。"""
+    with FactStore(tmp_path / "facts.duckdb") as store:
+        for label in ("新能源汽车", "其中：新能源汽车", " 新能源汽车 "):
+            member_id = store.upsert_segment_member(
+                dim_kind="product", raw_label=label, source_doc="doc"
+            )
+            assert member_id == "product:新能源汽车"
+        members = store.dimension_members("product")
+        assert len(members) == 1
+        assert members[0][6] == 3  # facts 计数
+
+
 def test_find_segment_tables_accepts_header_marker():
     header = ["分行业", "营业收入", "营业成本", "毛利率", "营业收入比上年增减"]
     child = SourceTable(

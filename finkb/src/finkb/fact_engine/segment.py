@@ -21,6 +21,12 @@ from finkb.fact_engine.verifier import parse_number, unit_factor
 # 行标记 → 维度名。只收这三种；「分销售模式」等暂不进入 MVP。
 DIMENSIONS = {"分产品": "product", "分行业": "industry", "分地区": "region"}
 
+# 维度种类的封闭词表（ADR-054）：dim_kind → 中文标签。
+# 维度**种类**由准则与披露规则决定，是个小集合；维度**成员**是数据驱动的开放
+# 集合，从结构表行名自动抽取。所以新增一份年报不需要任何维度配置。
+DIMENSION_LABELS = {"product": "分产品", "industry": "分行业", "region": "分地区"}
+DIMENSION_MARKERS = {"product": "分产品", "industry": "分行业", "region": "分地区"}
+
 # 列名变体：多数用「营业收入 / 营业成本 / 毛利率」，中国神华用「销售收入 / 销售成本」。
 REVENUE_NEEDLES = ("营业收入", "销售收入", "主营业务收入")
 COST_NEEDLES = ("营业成本", "销售成本", "主营业务成本")
@@ -298,12 +304,29 @@ def write_segments(
     default_unit: str,
     unit_for: Callable[[SourceTable], str | None] | None = None,
 ) -> int:
-    """解析一份文档的结构表并写库，返回写入行数。"""
+    """解析一份文档的结构表并写库，返回写入行数。
+
+    写入前先把维度种类登记进 ``dimensions``（封闭词表、幂等）；每条结构事实
+    同时把段名归一成 ``dimension_members`` 的一个成员，``member_id`` 作为外键落在
+    ``segment_facts`` 上。这样「分产品」下的段名是数据驱动的：新公司、新年报、
+    新段名都自动长出来，不需要改任何配置。
+    """
+    for dim_kind, label in DIMENSION_LABELS.items():
+        store.upsert_dimension(
+            dim_kind=dim_kind, label=label, markers=DIMENSION_MARKERS[dim_kind],
+            note="维度种类固定，成员由结构表行名自动抽取",
+        )
+
     written = 0
     for source, dimension, unit in plan_segments(
         store, doc_dir, manifest, default_unit, unit_for
     ):
         for item in parse_segments(source, unit, dimension=dimension):
+            member_id = store.upsert_segment_member(
+                dim_kind=item["dimension"],
+                raw_label=item["segment_name"],
+                source_doc=source.doc_id,
+            )
             store.insert_segment_fact(
                 company=source.company,
                 period=source.period,
@@ -315,6 +338,7 @@ def write_segments(
                 source_doc=source.doc_id,
                 page_num=source.page,
                 table_id=source.logical_id,
+                member_id=member_id,
             )
             written += 1
     return written

@@ -315,6 +315,17 @@ def _first_label(t: SourceTable) -> str:
     return str(t.rows[0][0]).strip() if t.rows else ""
 
 
+def _hit(label: str, anchors: tuple[str, ...]) -> bool:
+    """``label`` 是否命中任一锚点。
+
+    必须是**子串**匹配而不是相等：续页首行常带序号前缀（「三、筹资活动产生的
+    现金流量:」「一、营业收入」），用 ``in tuple`` 判等会全部漏掉，跨页缝合就
+    静默失败——万科 000002 的合并现金流量表正是因此被切成两半，然后由「选行数
+    最多的表」规则选中了母公司表（v3 修正，见 DEVLOG 坑-77）。
+    """
+    return any(a in label for a in anchors)
+
+
 def _statement_runs(by_page: list[SourceTable], family: str) -> list[list[SourceTable]]:
     """把跨页切开的同一张报表按页序拼成一组。
 
@@ -336,7 +347,7 @@ def _statement_runs(by_page: list[SourceTable], family: str) -> list[list[Source
                 break
             if _is_parent(prev) or _has_note_section(prev) or not _family_match(prev, family):
                 break
-            if _first_label(cur) not in _CONT_START[family] and name not in cur.section:
+            if not _hit(_first_label(cur), _CONT_START[family]) and name not in cur.section:
                 break
             start -= 1
         end = i
@@ -349,9 +360,9 @@ def _statement_runs(by_page: list[SourceTable], family: str) -> list[list[Source
             if name in nxt.section:
                 pass  # 「合并利润表（续）」这类明确续页，直接接
             else:
-                if _is_terminal(cur, family) or _first_label(nxt) in _STATEMENT_START[family]:
+                if _is_terminal(cur, family) or _hit(_first_label(nxt), _STATEMENT_START[family]):
                     break
-                if _first_label(nxt) not in _CONT_START[family]:
+                if not _hit(_first_label(nxt), _CONT_START[family]):
                     break
             end += 1
         run = by_page[start : end + 1]
@@ -495,7 +506,9 @@ def select_tables(parents: list[SourceTable]) -> list[SourceTable]:
         if run:
             income = run
 
-    # 现金流量表：排除附注/补充资料与母公司表；优先「合并」章节，其次行数最多
+    # 现金流量表：先按页序缝合跨页报表，缝不出来才退回「合并章节 + 行数最多」。
+    # 不能直接用行数最多：母公司现金流量表通常比合并表的单页片段更长，万科
+    # 000002 就是被这条规则选中了母公司表，导致经营/投资/筹资来自不同主体。
     cf_candidates = [
         t
         for t in by_page
@@ -506,6 +519,8 @@ def select_tables(parents: list[SourceTable]) -> list[SourceTable]:
     ]
     cash: list[SourceTable] = []
     if cf_candidates:
+        cash = _best_run(by_page, "cf")
+    if not cash and cf_candidates:
         consolidated = [t for t in cf_candidates if "合并" in t.section]
         cash = [max(consolidated or cf_candidates, key=lambda t: len(t.rows))]
 

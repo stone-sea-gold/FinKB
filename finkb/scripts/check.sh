@@ -18,6 +18,14 @@ echo "== 全语料守恒律 + 基线对照 =="
 "$PYTHON" tools/audit.py corpus --baseline config/corpus-baseline.json --pdf-root ../raw
 
 echo
+echo "== 本体链条完整性 =="
+if [ -f data/facts.duckdb ]; then
+  "$PYTHON" -m finkb.ontology --db data/facts.duckdb --wiki data/wiki.duckdb audit --strict
+else
+  echo "跳过：data/facts.duckdb 不存在"
+fi
+
+echo
 echo "== 金标事实集 =="
 if [ -f data/facts.duckdb ]; then
   "$PYTHON" tools/gold_check.py --db data/facts.duckdb --gold config/gold_facts.yaml

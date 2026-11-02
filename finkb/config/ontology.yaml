@@ -1,0 +1,1442 @@
+# 本体层单一真相源（ontology.yaml）
+#
+# 由 tools/build_ontology.py 生成，**但可以直接手工编辑**——运行时只读这个文件。
+# 想持久化的改动请同时回灌到生成脚本的 CURATED 表，否则重跑会被覆盖。
+#
+# 规模：62 个概念 / 71 条关系 / 10 条约束
+#
+# 四层栈：L0 元概念 → L1 科目骨架(FIBO) → L2 国标科目(CAS 2015) → L3 派生指标
+# 改 L2 的 basis_element 前先确认该元素在 CAS 里真实存在，别凭印象填。
+version: 1
+updated_at: '2026-11-02'
+taxonomy:
+  name: CAS 2015-03-31
+  source: http://m.mof.gov.cn/tzgg/201504/t20150407_1213301.htm
+  elements_total: 4317
+  elements_cas: 3682
+  elements_ifrs: 635
+  note: CAS 2015 分类标准是 IFRS 2014 分类标准的中文扩展（包内同时分发 full_ifrs_20140305），因此对齐国标天然获得部分 IFRS 对齐。
+  copyright: 财政部 2015，All rights reserved；本项目只引用科目名称，不打包分发原文件。
+layers:
+  L0: 元概念（CMNS），十年不变
+  L1: 科目骨架（FIBO FND 静态导出），极少变
+  L2: 国标科目（CAS 2015 裁剪），随准则变
+  L3: 分析指标（自建派生），随需求变
+concepts:
+- concept_id: cmns:MonetaryAmount
+  label: 金额
+  basis: cmns
+  basis_uri: https://www.omg.org/spec/Commons/QuantitiesAndUnits/MonetaryAmount
+  definition: 以货币表示的数额，必须同时绑定币种与期间（存量指标用时点）。
+  unit_default: 亿元
+  layer: L0
+  domain: meta
+  parent_id: null
+  metric_id: null
+  aliases:
+  - 金额
+  source_uri: https://www.omg.org/spec/Commons/QuantitiesAndUnits/MonetaryAmount
+- concept_id: xbrli:perShareItem
+  label: 每股金额
+  basis: ifrs
+  basis_uri: http://www.xbrl.org/2003/instance/perShareItemType
+  definition: 按股数摊薄后的货币金额，单位固定为「元/股」。
+  unit_default: 元/股
+  layer: L0
+  domain: meta
+  parent_id: null
+  metric_id: null
+  aliases:
+  - 每股金额
+  source_uri: http://www.xbrl.org/2003/instance/perShareItemType
+- concept_id: xbrli:pureItem
+  label: 比率
+  basis: ifrs
+  basis_uri: http://www.xbrl.org/2003/instance/pureItemType
+  definition: 无量纲比值，本项目统一以百分数存储（毛利率 17.74 表示 17.74%）。
+  unit_default: '%'
+  layer: L0
+  domain: meta
+  parent_id: null
+  metric_id: null
+  aliases:
+  - 比率
+  source_uri: http://www.xbrl.org/2003/instance/pureItemType
+- concept_id: cmns-qtu:Expression
+  label: 派生表达式
+  basis: cmns
+  basis_uri: https://www.omg.org/spec/Commons/QuantitiesAndUnits/Expression
+  definition: 由其他概念经算术运算得到的值；必须声明参数（expression_args）才能计算。
+  unit_default: null
+  layer: L0
+  domain: meta
+  parent_id: null
+  metric_id: null
+  aliases:
+  - 派生表达式
+  source_uri: https://www.omg.org/spec/Commons/QuantitiesAndUnits/Expression
+- concept_id: cmns-dt:DatePeriod
+  label: 期间
+  basis: cmns
+  basis_uri: https://www.omg.org/spec/Commons/DatesAndTimes/DatePeriod
+  definition: 有起止日的区间。利润表/现金流量表类概念必须有它，资产负债表类必须没有（时点）。
+  unit_default: null
+  layer: L0
+  domain: meta
+  parent_id: null
+  metric_id: null
+  aliases:
+  - 期间
+  source_uri: https://www.omg.org/spec/Commons/DatesAndTimes/DatePeriod
+- concept_id: cmns-qtu:Measure
+  label: 计量单位
+  basis: cmns
+  basis_uri: https://www.omg.org/spec/Commons/QuantitiesAndUnits/Measure
+  definition: 数值的附属单位，本项目限定为 亿元 / % / 元每 / 辆。
+  unit_default: null
+  layer: L0
+  domain: meta
+  parent_id: null
+  metric_id: null
+  aliases:
+  - 计量单位
+  source_uri: https://www.omg.org/spec/Commons/QuantitiesAndUnits/Measure
+- concept_id: cmns:Party
+  label: 主体
+  basis: cmns
+  basis_uri: https://www.omg.org/spec/Commons/PartiesAndSituations/Party
+  definition: 财报的报告主体（上市公司）。所有事实都必须挂在一个主体上。
+  unit_default: null
+  layer: L0
+  domain: meta
+  parent_id: null
+  metric_id: null
+  aliases:
+  - 主体
+  source_uri: https://www.omg.org/spec/Commons/PartiesAndSituations/Party
+- concept_id: fibo:Income
+  label: 收入
+  parent_id: cmns:MonetaryAmount
+  basis: fibo
+  basis_uri: https://spec.edmcouncil.org/fibo/ontology/FND/Accounting/CurrencyAmount/Income
+  definition: 企业在期间内取得的经济利益流入。FIBO 定义：revenue received during a period of time；约束 hasDatePeriod 基数恰为 1
+    —— 即收入**必须带期间**，这一条是本层最重要的语义约束。
+  unit_default: 亿元
+  layer: L1
+  domain: meta
+  metric_id: null
+  aliases:
+  - 收入
+  source_uri: https://spec.edmcouncil.org/fibo/ontology/FND/Accounting/CurrencyAmount/Income
+- concept_id: finkb:Expense
+  label: 费用
+  parent_id: cmns:MonetaryAmount
+  basis: self
+  basis_uri: null
+  definition: 期间内流出的经济利益（营业成本与三费）。FIBO 闭包内未提供可复用的 Expense 类，按 CAS 费用类科目语义新增，故 basis=self。
+  unit_default: 亿元
+  layer: L1
+  domain: meta
+  metric_id: null
+  aliases:
+  - 费用
+  source_uri: null
+- concept_id: fibo:Asset
+  label: 资产
+  parent_id: cmns:MonetaryAmount
+  basis: fibo
+  basis_uri: https://spec.edmcouncil.org/fibo/ontology/FND/Accounting/CurrencyAmount/Asset
+  definition: 主体在某一时点控制的资源。FIBO 把它分为 流动/非流动/持有待售 三类。
+  unit_default: 亿元
+  layer: L1
+  domain: meta
+  metric_id: null
+  aliases:
+  - 资产
+  source_uri: https://spec.edmcouncil.org/fibo/ontology/FND/Accounting/CurrencyAmount/Asset
+- concept_id: finkb:Liabilities
+  label: 负债
+  parent_id: cmns:MonetaryAmount
+  basis: self
+  basis_uri: null
+  definition: 主体在某一时点承担的现时义务。FIBO 闭包内无独立 Liabilities 类（负债在 FIBO 里作为金融工具/合同的义务面建模），此处按 CAS 负债类语义新增。
+  unit_default: 亿元
+  layer: L1
+  domain: meta
+  metric_id: null
+  aliases:
+  - 负债
+  source_uri: null
+- concept_id: fibo:OwnersEquity
+  label: 所有者权益
+  parent_id: cmns-qtu:Expression
+  basis: fibo
+  basis_uri: https://spec.edmcouncil.org/fibo/ontology/FND/Accounting/CurrencyAmount/OwnersEquity
+  definition: 资产减负债后的剩余权益。FIBO 把它建模为 Expression（差额表达式）而非直接金额，这正是「权益是算出来的、不是数出来的」的形式化表达。
+  unit_default: 亿元
+  layer: L1
+  domain: meta
+  metric_id: null
+  aliases:
+  - 所有者权益
+  source_uri: https://spec.edmcouncil.org/fibo/ontology/FND/Accounting/CurrencyAmount/OwnersEquity
+- concept_id: fibo:CashFlow
+  label: 现金流
+  parent_id: cmns:MonetaryAmount
+  basis: fibo
+  basis_uri: https://spec.edmcouncil.org/fibo/ontology/FND/Accounting/CurrencyAmount/CashFlow
+  definition: 期间内现金及现金等价物的净流入/流出量。
+  unit_default: 亿元
+  layer: L1
+  domain: meta
+  metric_id: null
+  aliases:
+  - 现金流
+  source_uri: https://spec.edmcouncil.org/fibo/ontology/FND/Accounting/CurrencyAmount/CashFlow
+- concept_id: fibo:EBITDA
+  label: 息税折旧摊销前利润
+  parent_id: cmns-qtu:Expression
+  basis: fibo
+  basis_uri: https://spec.edmcouncil.org/fibo/ontology/FND/Accounting/CurrencyAmount/EBITDA
+  definition: FIBO 用 hasArgument 声明其由哪些科目合成。本项目 MVP 不用，保留作 L1 扩展位。
+  unit_default: 亿元
+  layer: L1
+  domain: meta
+  metric_id: null
+  aliases:
+  - 息税折旧摊销前利润
+  source_uri: https://spec.edmcouncil.org/fibo/ontology/FND/Accounting/CurrencyAmount/EBITDA
+- concept_id: fibo:Report
+  label: 定期报告
+  parent_id: cmns:Party
+  basis: fibo
+  basis_uri: https://spec.edmcouncil.org/fibo/ontology/FND/Accounting/Accounting/Report
+  definition: 主体发布的财务报告文档（年报/半年报/季报）。L0 凭证层的 PDF 即其实例。
+  unit_default: null
+  layer: L1
+  domain: meta
+  metric_id: null
+  aliases:
+  - 定期报告
+  source_uri: https://spec.edmcouncil.org/fibo/ontology/FND/Accounting/Accounting/Report
+- concept_id: metric:revenue
+  label: 营业总收入
+  layer: L2
+  domain: finance
+  basis: cas
+  basis_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_Revenues
+  basis_element: cas_Revenues
+  definition: 国标科目「营业总收入」，引自 CAS 2015-03-31 分类标准。
+  parent_id: fibo:Income
+  metric_id: revenue
+  unit_default: 亿元
+  aliases:
+  - 营业总收入
+  - 营业收入
+  - 营业总收入
+  - 一、营业总收入
+  - 其中：营业收入
+  - 主营业务收入
+  - 营收
+  - 分部对外交易收入
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_Revenues
+- concept_id: metric:net_profit
+  label: 归属于上市公司股东的净利润
+  layer: L2
+  domain: finance
+  basis: ifrs
+  basis_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_ProfitLossAttributableToOwnersOfParent
+  basis_element: ifrs-full_ProfitLossAttributableToOwnersOfParent
+  definition: CSRC 报表口径「归属于上市公司股东的净利润」，对应国标归母净利润元素
+  parent_id: fibo:Income
+  metric_id: net_profit
+  unit_default: 亿元
+  aliases:
+  - 归属于上市公司股东的净利润
+  - 归母净利润
+  - 归属于母公司股东的净利润
+  - 归属于上市公司股东净利润
+  - 归属于母公司所有者的净利润
+  - 归属于母公司所有者（股东）的净利润
+  source_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_ProfitLossAttributableToOwnersOfParent
+- concept_id: metric:net_profit_deducted
+  label: 归属于上市公司股东的扣除非经常性损益的净利润
+  layer: L2
+  domain: finance
+  basis: self
+  basis_uri: null
+  basis_element: null
+  definition: 「扣除非经常性损益后的净利润」是证监会报表格式行项目，不在 CAS 分类标准内 (basis=self)
+  parent_id: fibo:Income
+  metric_id: net_profit_deducted
+  unit_default: 亿元
+  aliases:
+  - 归属于上市公司股东的扣除非经常性损益的净利润
+  - 扣非归母净利润
+  - 扣除非经常性损益后归属于上市公司股东的净利润
+  - 扣除非经常性损益后的净利润
+  source_uri: null
+- concept_id: metric:operating_profit
+  label: 营业利润
+  layer: L2
+  domain: finance
+  basis: cas
+  basis_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_OperatingProfits
+  basis_element: cas_OperatingProfits
+  definition: 国标科目「营业利润」，引自 CAS 2015-03-31 分类标准。
+  parent_id: fibo:Income
+  metric_id: operating_profit
+  unit_default: 亿元
+  aliases:
+  - 营业利润
+  - 三、营业利润
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_OperatingProfits
+- concept_id: metric:total_profit
+  label: 利润总额
+  layer: L2
+  domain: finance
+  basis: cas
+  basis_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_ProfitLossBeforeIncomeTaxes
+  basis_element: cas_ProfitLossBeforeIncomeTaxes
+  definition: 国标科目「利润总额」，引自 CAS 2015-03-31 分类标准。
+  parent_id: fibo:Income
+  metric_id: total_profit
+  unit_default: 亿元
+  aliases:
+  - 利润总额
+  - 四、利润总额
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_ProfitLossBeforeIncomeTaxes
+- concept_id: metric:net_interest_income
+  label: 利息净收入
+  layer: L2
+  domain: finance
+  basis: cas
+  basis_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_NetInterestIncome
+  basis_element: cas_NetInterestIncome
+  definition: 国标科目「利息净收入」，引自 CAS 2015-03-31 分类标准。
+  parent_id: fibo:Income
+  metric_id: net_interest_income
+  unit_default: 亿元
+  aliases:
+  - 利息净收入
+  - 净利息收入
+  - 利息净收入
+  - 利息净收入，金融企业
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_NetInterestIncome
+- concept_id: metric:fee_commission_income
+  label: 手续费及佣金净收入
+  layer: L2
+  domain: finance
+  basis: cas
+  basis_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_FeeAndCommissionIncome
+  basis_element: cas_FeeAndCommissionIncome
+  definition: 国标科目「手续费及佣金净收入」，引自 CAS 2015-03-31 分类标准。
+  parent_id: fibo:Income
+  metric_id: fee_commission_income
+  unit_default: 亿元
+  aliases:
+  - 手续费及佣金净收入
+  - 手续费及佣金净收入
+  - 手续费净收入
+  - 手续费及佣金净收入，金融企业
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_FeeAndCommissionIncome
+- concept_id: metric:insurance_revenue
+  label: 保险服务收入
+  layer: L2
+  domain: finance
+  basis: cas
+  basis_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_IncomeFromInsuranceBusiness
+  basis_element: cas_IncomeFromInsuranceBusiness
+  definition: 国标科目「保险服务收入」，引自 CAS 2015-03-31 分类标准。
+  parent_id: fibo:Income
+  metric_id: insurance_revenue
+  unit_default: 亿元
+  aliases:
+  - 保险服务收入
+  - 保险服务收入
+  - 保险业务收入
+  - 已赚保费
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_IncomeFromInsuranceBusiness
+- concept_id: metric:operating_cost
+  label: 营业成本
+  layer: L2
+  domain: finance
+  basis: cas
+  basis_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_CostOfRevenues
+  basis_element: cas_CostOfRevenues
+  definition: 国标科目「营业成本」，引自 CAS 2015-03-31 分类标准。
+  parent_id: finkb:Expense
+  metric_id: operating_cost
+  unit_default: 亿元
+  aliases:
+  - 营业成本
+  - 其中：营业成本
+  - 主营业务成本
+  - 营业总成本
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_CostOfRevenues
+- concept_id: metric:selling_expense
+  label: 销售费用
+  layer: L2
+  domain: finance
+  basis: cas
+  basis_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_SellingAndMarketingExpense
+  basis_element: cas_SellingAndMarketingExpense
+  definition: 国标科目「销售费用」，引自 CAS 2015-03-31 分类标准。
+  parent_id: finkb:Expense
+  metric_id: selling_expense
+  unit_default: 亿元
+  aliases:
+  - 销售费用
+  - 销售费用
+  - 销售费用合计
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_SellingAndMarketingExpense
+- concept_id: metric:admin_expense
+  label: 管理费用
+  layer: L2
+  domain: finance
+  basis: cas
+  basis_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_GeneralAndAdministrativeExpenses
+  basis_element: cas_GeneralAndAdministrativeExpenses
+  definition: 国标科目「管理费用」，引自 CAS 2015-03-31 分类标准。
+  parent_id: finkb:Expense
+  metric_id: admin_expense
+  unit_default: 亿元
+  aliases:
+  - 管理费用
+  - 管理费用
+  - 管理费用合计
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_GeneralAndAdministrativeExpenses
+- concept_id: metric:finance_expense
+  label: 财务费用
+  layer: L2
+  domain: finance
+  basis: cas
+  basis_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_FinanceExpense
+  basis_element: cas_FinanceExpense
+  definition: 国标科目「财务费用」，引自 CAS 2015-03-31 分类标准。
+  parent_id: finkb:Expense
+  metric_id: finance_expense
+  unit_default: 亿元
+  aliases:
+  - 财务费用
+  - 财务费用
+  - 财务费用合计
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_FinanceExpense
+- concept_id: metric:rd_expense
+  label: 研发投入
+  layer: L2
+  domain: finance
+  basis: cas
+  basis_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_ResearchAndDevelopmentExpenses
+  basis_element: cas_ResearchAndDevelopmentExpenses
+  definition: 国标只有「研究开发支出」(余额类)，无 2018 新准则的「研发费用」；二者口径不同，basis=self
+  parent_id: finkb:Expense
+  metric_id: rd_expense
+  unit_default: 亿元
+  aliases:
+  - 研发投入
+  - 研发费用
+  - 研发投入金额
+  - 研发投入总额
+  - 研发投入合计
+  - 研究开发支出
+  - 研究开发支出年初账面余额
+  - 研究开发支出期末账面余额
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_ResearchAndDevelopmentExpenses
+- concept_id: metric:total_assets
+  label: 资产总额
+  layer: L2
+  domain: finance
+  basis: ifrs
+  basis_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_Assets
+  basis_element: ifrs-full_Assets
+  definition: 国标科目「资产总额」，引自 CAS 2015-03-31 分类标准。
+  parent_id: fibo:Asset
+  metric_id: total_assets
+  unit_default: 亿元
+  aliases:
+  - 资产总额
+  - 总资产
+  - 资产合计
+  - 资产总计
+  - 资产
+  source_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_Assets
+- concept_id: metric:current_assets
+  label: 流动资产合计
+  layer: L2
+  domain: finance
+  basis: ifrs
+  basis_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_CurrentAssets
+  basis_element: ifrs-full_CurrentAssets
+  definition: 国标科目「流动资产合计」，引自 CAS 2015-03-31 分类标准。
+  parent_id: fibo:Asset
+  metric_id: current_assets
+  unit_default: 亿元
+  aliases:
+  - 流动资产合计
+  - 流动资产合计
+  - 流动资产
+  source_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_CurrentAssets
+- concept_id: metric:cash
+  label: 货币资金
+  layer: L2
+  domain: finance
+  basis: cas
+  basis_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_BankBalancesAndCash
+  basis_element: cas_BankBalancesAndCash
+  definition: 国标科目「货币资金」，引自 CAS 2015-03-31 分类标准。
+  parent_id: fibo:Asset
+  metric_id: cash
+  unit_default: 亿元
+  aliases:
+  - 货币资金
+  - 货币资金余额
+  - 货币资金合计
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_BankBalancesAndCash
+- concept_id: metric:inventory
+  label: 存货
+  layer: L2
+  domain: finance
+  basis: ifrs
+  basis_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_Inventories
+  basis_element: ifrs-full_Inventories
+  definition: 国标科目「存货」，引自 CAS 2015-03-31 分类标准。
+  parent_id: fibo:Asset
+  metric_id: inventory
+  unit_default: 亿元
+  aliases:
+  - 存货
+  - 存货净额
+  - 存货期末账面价值
+  source_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_Inventories
+- concept_id: metric:accounts_receivable
+  label: 应收账款
+  layer: L2
+  domain: finance
+  basis: cas
+  basis_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_AccountsReceivable
+  basis_element: cas_AccountsReceivable
+  definition: 国标科目「应收账款」，引自 CAS 2015-03-31 分类标准。
+  parent_id: fibo:Asset
+  metric_id: accounts_receivable
+  unit_default: 亿元
+  aliases:
+  - 应收账款
+  - 应收账款
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_AccountsReceivable
+- concept_id: metric:loans_advances
+  label: 发放贷款和垫款
+  layer: L2
+  domain: finance
+  basis: cas
+  basis_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_LoansAndAdvances
+  basis_element: cas_LoansAndAdvances
+  definition: 国标科目「发放贷款和垫款」，引自 CAS 2015-03-31 分类标准。
+  parent_id: fibo:Asset
+  metric_id: loans_advances
+  unit_default: 亿元
+  aliases:
+  - 发放贷款和垫款
+  - 发放贷款和垫款
+  - 发放贷款及垫款
+  - 贷款和垫款
+  - 贷款和垫款账面价值
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_LoansAndAdvances
+- concept_id: metric:total_liabilities
+  label: 负债总额
+  layer: L2
+  domain: finance
+  basis: ifrs
+  basis_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_Liabilities
+  basis_element: ifrs-full_Liabilities
+  definition: 国标科目「负债总额」，引自 CAS 2015-03-31 分类标准。
+  parent_id: finkb:Liabilities
+  metric_id: total_liabilities
+  unit_default: 亿元
+  aliases:
+  - 负债总额
+  - 总负债
+  - 负债合计
+  - 负债总计
+  - 负债
+  source_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_Liabilities
+- concept_id: metric:current_liabilities
+  label: 流动负债合计
+  layer: L2
+  domain: finance
+  basis: ifrs
+  basis_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_CurrentLiabilities
+  basis_element: ifrs-full_CurrentLiabilities
+  definition: 国标科目「流动负债合计」，引自 CAS 2015-03-31 分类标准。
+  parent_id: finkb:Liabilities
+  metric_id: current_liabilities
+  unit_default: 亿元
+  aliases:
+  - 流动负债合计
+  - 流动负债合计
+  - 流动负债
+  source_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_CurrentLiabilities
+- concept_id: metric:short_term_borrowings
+  label: 短期借款
+  layer: L2
+  domain: finance
+  basis: cas
+  basis_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_ShortTermBorrowings
+  basis_element: cas_ShortTermBorrowings
+  definition: 国标科目「短期借款」，引自 CAS 2015-03-31 分类标准。
+  parent_id: finkb:Liabilities
+  metric_id: short_term_borrowings
+  unit_default: 亿元
+  aliases:
+  - 短期借款
+  - 短期借款
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_ShortTermBorrowings
+- concept_id: metric:long_term_borrowings
+  label: 长期借款
+  layer: L2
+  domain: finance
+  basis: cas
+  basis_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_NonCurrentPortionOfLongTermBorrowings
+  basis_element: cas_NonCurrentPortionOfLongTermBorrowings
+  definition: 国标科目「长期借款」，引自 CAS 2015-03-31 分类标准。
+  parent_id: finkb:Liabilities
+  metric_id: long_term_borrowings
+  unit_default: 亿元
+  aliases:
+  - 长期借款
+  - 长期借款
+  - 长期借款合计
+  - 长期借款，非流动部分
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_NonCurrentPortionOfLongTermBorrowings
+- concept_id: metric:bonds_payable
+  label: 应付债券
+  layer: L2
+  domain: finance
+  basis: cas
+  basis_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_BondsPayable
+  basis_element: cas_BondsPayable
+  definition: 国标科目「应付债券」，引自 CAS 2015-03-31 分类标准。
+  parent_id: finkb:Liabilities
+  metric_id: bonds_payable
+  unit_default: 亿元
+  aliases:
+  - 应付债券
+  - 应付债券
+  - 应付债券年初账面余额
+  - 应付债券期末账面余额
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_BondsPayable
+- concept_id: metric:lease_liabilities
+  label: 租赁负债
+  layer: L2
+  domain: finance
+  basis: self
+  basis_uri: null
+  basis_element: null
+  definition: 「租赁负债」为 CAS 21(2018) 新增，2015 分类标准没有该元素 (basis=self)
+  parent_id: finkb:Liabilities
+  metric_id: lease_liabilities
+  unit_default: 亿元
+  aliases:
+  - 租赁负债
+  - 租赁负债
+  source_uri: null
+- concept_id: metric:customer_deposits
+  label: 吸收存款
+  layer: L2
+  domain: finance
+  basis: cas
+  basis_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_CustomerDeposits
+  basis_element: cas_CustomerDeposits
+  definition: 国标科目「吸收存款」，引自 CAS 2015-03-31 分类标准。
+  parent_id: finkb:Liabilities
+  metric_id: customer_deposits
+  unit_default: 亿元
+  aliases:
+  - 吸收存款
+  - 吸收存款
+  - 客户存款
+  - 吸收存款及同业存放
+  - 吸收存款合计
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_CustomerDeposits
+- concept_id: metric:total_equity
+  label: 股东权益合计
+  layer: L2
+  domain: finance
+  basis: ifrs
+  basis_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_Equity
+  basis_element: ifrs-full_Equity
+  definition: 国标科目「股东权益合计」，引自 CAS 2015-03-31 分类标准。
+  parent_id: fibo:OwnersEquity
+  metric_id: total_equity
+  unit_default: 亿元
+  aliases:
+  - 股东权益合计
+  - 所有者权益合计
+  - 股东权益合计
+  - 所有者权益（或股东权益）合计
+  - 所有者权益（或股东权益）
+  - 所有者权益（或股东权益），年初余额
+  - 所有者权益（或股东权益），年末余额
+  source_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_Equity
+- concept_id: metric:net_assets
+  label: 归属于上市公司股东的净资产
+  layer: L2
+  domain: finance
+  basis: ifrs
+  basis_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_EquityAttributableToOwnersOfParent
+  basis_element: ifrs-full_EquityAttributableToOwnersOfParent
+  definition: CSRC 报表口径「归属于上市公司股东的净资产」
+  parent_id: fibo:OwnersEquity
+  metric_id: net_assets
+  unit_default: 亿元
+  aliases:
+  - 归属于上市公司股东的净资产
+  - 归母净资产
+  - 归属于母公司所有者权益合计
+  - 归属于上市公司股东的所有者权益
+  - 归属于母公司所有者权益
+  - 归属于母公司所有者权益（或股东权益）合计
+  source_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_EquityAttributableToOwnersOfParent
+- concept_id: metric:minority_interest
+  label: 少数股东权益
+  layer: L2
+  domain: finance
+  basis: ifrs
+  basis_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_NoncontrollingInterests
+  basis_element: ifrs-full_NoncontrollingInterests
+  definition: 少数股东权益。可为负（子公司累积亏损超少数股东投入），故不可用于任何单向不等式
+  parent_id: fibo:OwnersEquity
+  metric_id: minority_interest
+  unit_default: 亿元
+  aliases:
+  - 少数股东权益
+  - 其中：少数股东权益
+  - 少数股东权益
+  - 期末累计少数股东权益
+  source_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_NoncontrollingInterests
+- concept_id: metric:ocf
+  label: 经营活动产生的现金流量净额
+  layer: L2
+  domain: finance
+  basis: ifrs
+  basis_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_CashFlowsFromUsedInOperatingActivities
+  basis_element: ifrs-full_CashFlowsFromUsedInOperatingActivities
+  definition: 国标科目「经营活动产生的现金流量净额」，引自 CAS 2015-03-31 分类标准。
+  parent_id: fibo:CashFlow
+  metric_id: ocf
+  unit_default: 亿元
+  aliases:
+  - 经营活动产生的现金流量净额
+  - 经营活动现金流量净额
+  - 经营活动产生的现金流量净额（元）
+  - 经营活动现金净流量
+  - 经营活动产生的现金流量
+  source_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_CashFlowsFromUsedInOperatingActivities
+- concept_id: metric:icf
+  label: 投资活动产生的现金流量净额
+  layer: L2
+  domain: finance
+  basis: ifrs
+  basis_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_CashFlowsFromUsedInInvestingActivities
+  basis_element: ifrs-full_CashFlowsFromUsedInInvestingActivities
+  definition: 国标科目「投资活动产生的现金流量净额」，引自 CAS 2015-03-31 分类标准。
+  parent_id: fibo:CashFlow
+  metric_id: icf
+  unit_default: 亿元
+  aliases:
+  - 投资活动产生的现金流量净额
+  - 投资活动现金流量净额
+  - 投资活动产生的现金流量净额（元）
+  - 投资活动现金净流量
+  - 投资活动产生的现金流量
+  source_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_CashFlowsFromUsedInInvestingActivities
+- concept_id: metric:fcf
+  label: 筹资活动产生的现金流量净额
+  layer: L2
+  domain: finance
+  basis: ifrs
+  basis_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_CashFlowsFromUsedInFinancingActivities
+  basis_element: ifrs-full_CashFlowsFromUsedInFinancingActivities
+  definition: 注意 fcf 在本项目指「筹资活动现金流净额」，不是自由现金流
+  parent_id: fibo:CashFlow
+  metric_id: fcf
+  unit_default: 亿元
+  aliases:
+  - 筹资活动产生的现金流量净额
+  - 筹资活动现金流量净额
+  - 筹资活动产生的现金流量净额（元）
+  - 筹资活动现金净流量
+  - 筹资活动产生的现金流量
+  source_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_CashFlowsFromUsedInFinancingActivities
+- concept_id: metric:net_cash_increase
+  label: 现金及现金等价物净增加额
+  layer: L2
+  domain: finance
+  basis: ifrs
+  basis_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_IncreaseDecreaseInCashAndCashEquivalents
+  basis_element: ifrs-full_IncreaseDecreaseInCashAndCashEquivalents
+  definition: 国标科目「现金及现金等价物净增加额」，引自 CAS 2015-03-31 分类标准。
+  parent_id: fibo:CashFlow
+  metric_id: net_cash_increase
+  unit_default: 亿元
+  aliases:
+  - 现金及现金等价物净增加额
+  - 现金及现金等价物净增加额
+  - 现金净增加额
+  - 现金及现金等价物净增加（减少）额
+  source_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_IncreaseDecreaseInCashAndCashEquivalents
+- concept_id: metric:fx_effect
+  label: 汇率变动对现金及现金等价物的影响
+  layer: L2
+  domain: finance
+  basis: ifrs
+  basis_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_EffectOfExchangeRateChangesOnCashAndCashEquivalents
+  basis_element: ifrs-full_EffectOfExchangeRateChangesOnCashAndCashEquivalents
+  definition: 现金流量表恒等式的第 4 项。v3 补入，此前缺席导致约束只能靠 5% 容差遮挡
+  parent_id: fibo:CashFlow
+  metric_id: fx_effect
+  unit_default: 亿元
+  aliases:
+  - 汇率变动对现金及现金等价物的影响
+  - 汇率变动对现金的影响
+  - 汇率变动对现金及现金等价物的影响额
+  - 汇率变动对现金的影响额
+  source_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_EffectOfExchangeRateChangesOnCashAndCashEquivalents
+- concept_id: metric:eps_basic
+  label: 基本每股收益
+  layer: L2
+  domain: finance
+  basis: ifrs
+  basis_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_BasicEarningsLossPerShare
+  basis_element: ifrs-full_BasicEarningsLossPerShare
+  definition: 国标科目「基本每股收益」，引自 CAS 2015-03-31 分类标准。
+  parent_id: xbrli:perShareItem
+  metric_id: eps_basic
+  unit_default: 元/股
+  aliases:
+  - 基本每股收益
+  - 基本每股收益（元/股）
+  - 基本每股收益(元/股)
+  source_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_BasicEarningsLossPerShare
+- concept_id: metric:roe_weighted
+  label: 加权平均净资产收益率
+  layer: L2
+  domain: finance
+  basis: self
+  basis_uri: null
+  basis_element: null
+  definition: 「加权平均净资产收益率」是公司自行披露的监管口径指标，分类标准内无对应元素 (basis=self)
+  parent_id: xbrli:pureItem
+  metric_id: roe_weighted
+  unit_default: '%'
+  aliases:
+  - 加权平均净资产收益率
+  - 加权平均净资产收益率（%）
+  - 加权平均净资产收益率(%)
+  source_uri: null
+- concept_id: self:gross_margin
+  label: 毛利率
+  unit_default: '%'
+  formula: (revenue - operating_cost) / revenue
+  expression_args:
+  - revenue
+  - operating_cost
+  definition: 毛利 / 营业收入。反映产品定价能力与成本结构。
+  layer: L3
+  domain: finance
+  basis: self
+  basis_uri: null
+  parent_id: cmns-qtu:Expression
+  metric_id: null
+  aliases:
+  - 毛利率
+  - gross margin
+  source_uri: null
+- concept_id: self:net_margin
+  label: 净利率
+  unit_default: '%'
+  formula: net_profit / revenue
+  expression_args:
+  - net_profit
+  - revenue
+  definition: 归母净利润 / 营业收入。
+  layer: L3
+  domain: finance
+  basis: self
+  basis_uri: null
+  parent_id: cmns-qtu:Expression
+  metric_id: null
+  aliases:
+  - 净利率
+  source_uri: null
+- concept_id: self:debt_ratio
+  label: 资产负债率
+  unit_default: '%'
+  formula: total_liabilities / total_assets
+  expression_args:
+  - total_liabilities
+  - total_assets
+  definition: 负债合计 / 资产总计。
+  layer: L3
+  domain: finance
+  basis: self
+  basis_uri: null
+  parent_id: cmns-qtu:Expression
+  metric_id: null
+  aliases:
+  - 资产负债率
+  source_uri: null
+- concept_id: self:rd_intensity
+  label: 研发强度
+  unit_default: '%'
+  formula: rd_expense / revenue
+  expression_args:
+  - rd_expense
+  - revenue
+  definition: 研发投入 / 营业收入。
+  layer: L3
+  domain: finance
+  basis: self
+  basis_uri: null
+  parent_id: cmns-qtu:Expression
+  metric_id: null
+  aliases:
+  - 研发强度
+  source_uri: null
+- concept_id: self:expense_ratio
+  label: 期间费用率
+  unit_default: '%'
+  formula: (selling_expense + admin_expense + finance_expense) / revenue
+  expression_args:
+  - selling_expense
+  - admin_expense
+  - finance_expense
+  - revenue
+  definition: 三费合计 / 营业收入。
+  layer: L3
+  domain: finance
+  basis: self
+  basis_uri: null
+  parent_id: cmns-qtu:Expression
+  metric_id: null
+  aliases:
+  - 期间费用率
+  source_uri: null
+- concept_id: self:equity_ratio
+  label: 权益乘数
+  unit_default: '%'
+  formula: total_assets / total_equity
+  expression_args:
+  - total_assets
+  - total_equity
+  definition: 资产总计 / 所有者权益合计，杠杆倍数。equity 为负时该值无意义，由约束拦截。
+  layer: L3
+  domain: finance
+  basis: self
+  basis_uri: null
+  parent_id: cmns-qtu:Expression
+  metric_id: null
+  aliases:
+  - 权益乘数
+  source_uri: null
+- concept_id: finkb:Dimension
+  label: 维度
+  parent_id: fibo:Report
+  basis: self
+  basis_uri: null
+  unit_default: null
+  definition: 报表披露的拆分视角（分产品/分行业/分地区…）。FIBO 闭包内无对应类，按 CAS 披露规则新增。维度种类封闭，成员开放——这是与「新科目」的分界线。
+  layer: L1
+  domain: dimension
+  metric_id: null
+  aliases:
+  - 维度
+  source_uri: null
+- concept_id: dim:region
+  label: 分地区
+  parent_id: finkb:Dimension
+  basis: cas
+  basis_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_RegionsAxis
+  unit_default: null
+  definition: 按地理区域拆分收入/成本。国标对应 cas_RegionsAxis（地区分布 [axis]）。
+  layer: L1
+  domain: dimension
+  metric_id: null
+  aliases:
+  - 分地区
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_RegionsAxis
+- concept_id: dim:product
+  label: 分产品
+  parent_id: finkb:Dimension
+  basis: self
+  basis_uri: null
+  unit_default: null
+  definition: 按产品线拆分。国标无「分产品」axis（实务走「主营业务分产品情况」表），故 basis=self。
+  layer: L1
+  domain: dimension
+  metric_id: null
+  aliases:
+  - 分产品
+  source_uri: null
+- concept_id: dim:industry
+  label: 分行业
+  parent_id: finkb:Dimension
+  basis: cas
+  basis_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_ReportableSegmentsProfitLossAssetAndLiabilityAxis
+  unit_default: null
+  definition: 按行业分部拆分。国标用报告分部 axis 表达，与「分行业」披露表同构。
+  layer: L1
+  domain: dimension
+  metric_id: null
+  aliases:
+  - 分行业
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_ReportableSegmentsProfitLossAssetAndLiabilityAxis
+- concept_id: dim:customer
+  label: 分客户
+  parent_id: finkb:Dimension
+  basis: cas
+  basis_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_ClassesOfCustomersAxis
+  unit_default: null
+  definition: 按客户类别拆分（如银行披露的零售/对公）。国标对应客户类别 axis。本项目暂未抽取，先登记为扩展位。
+  layer: L1
+  domain: dimension
+  metric_id: null
+  aliases:
+  - 分客户
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_ClassesOfCustomersAxis
+relations:
+- src_concept: fibo:Income
+  rel_type: is_a
+  dst_concept: cmns:MonetaryAmount
+  attrs_json: null
+  source_uri: https://spec.edmcouncil.org/fibo/ontology/FND/Accounting/CurrencyAmount/Income
+- src_concept: finkb:Expense
+  rel_type: is_a
+  dst_concept: cmns:MonetaryAmount
+  attrs_json: null
+  source_uri: null
+- src_concept: fibo:Asset
+  rel_type: is_a
+  dst_concept: cmns:MonetaryAmount
+  attrs_json: null
+  source_uri: https://spec.edmcouncil.org/fibo/ontology/FND/Accounting/CurrencyAmount/Asset
+- src_concept: finkb:Liabilities
+  rel_type: is_a
+  dst_concept: cmns:MonetaryAmount
+  attrs_json: null
+  source_uri: null
+- src_concept: fibo:OwnersEquity
+  rel_type: is_a
+  dst_concept: cmns-qtu:Expression
+  attrs_json: null
+  source_uri: https://spec.edmcouncil.org/fibo/ontology/FND/Accounting/CurrencyAmount/OwnersEquity
+- src_concept: fibo:CashFlow
+  rel_type: is_a
+  dst_concept: cmns:MonetaryAmount
+  attrs_json: null
+  source_uri: https://spec.edmcouncil.org/fibo/ontology/FND/Accounting/CurrencyAmount/CashFlow
+- src_concept: fibo:EBITDA
+  rel_type: is_a
+  dst_concept: cmns-qtu:Expression
+  attrs_json: null
+  source_uri: https://spec.edmcouncil.org/fibo/ontology/FND/Accounting/CurrencyAmount/EBITDA
+- src_concept: fibo:Report
+  rel_type: is_a
+  dst_concept: cmns:Party
+  attrs_json: null
+  source_uri: https://spec.edmcouncil.org/fibo/ontology/FND/Accounting/Accounting/Report
+- src_concept: metric:revenue
+  rel_type: is_a
+  dst_concept: fibo:Income
+  attrs_json: null
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_Revenues
+- src_concept: metric:net_profit
+  rel_type: is_a
+  dst_concept: fibo:Income
+  attrs_json: null
+  source_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_ProfitLossAttributableToOwnersOfParent
+- src_concept: metric:net_profit_deducted
+  rel_type: is_a
+  dst_concept: fibo:Income
+  attrs_json: null
+  source_uri: null
+- src_concept: metric:operating_profit
+  rel_type: is_a
+  dst_concept: fibo:Income
+  attrs_json: null
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_OperatingProfits
+- src_concept: metric:total_profit
+  rel_type: is_a
+  dst_concept: fibo:Income
+  attrs_json: null
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_ProfitLossBeforeIncomeTaxes
+- src_concept: metric:net_interest_income
+  rel_type: is_a
+  dst_concept: fibo:Income
+  attrs_json: null
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_NetInterestIncome
+- src_concept: metric:fee_commission_income
+  rel_type: is_a
+  dst_concept: fibo:Income
+  attrs_json: null
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_FeeAndCommissionIncome
+- src_concept: metric:insurance_revenue
+  rel_type: is_a
+  dst_concept: fibo:Income
+  attrs_json: null
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_IncomeFromInsuranceBusiness
+- src_concept: metric:operating_cost
+  rel_type: is_a
+  dst_concept: finkb:Expense
+  attrs_json: null
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_CostOfRevenues
+- src_concept: metric:selling_expense
+  rel_type: is_a
+  dst_concept: finkb:Expense
+  attrs_json: null
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_SellingAndMarketingExpense
+- src_concept: metric:admin_expense
+  rel_type: is_a
+  dst_concept: finkb:Expense
+  attrs_json: null
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_GeneralAndAdministrativeExpenses
+- src_concept: metric:finance_expense
+  rel_type: is_a
+  dst_concept: finkb:Expense
+  attrs_json: null
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_FinanceExpense
+- src_concept: metric:rd_expense
+  rel_type: is_a
+  dst_concept: finkb:Expense
+  attrs_json: null
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_ResearchAndDevelopmentExpenses
+- src_concept: metric:total_assets
+  rel_type: is_a
+  dst_concept: fibo:Asset
+  attrs_json: null
+  source_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_Assets
+- src_concept: metric:current_assets
+  rel_type: is_a
+  dst_concept: fibo:Asset
+  attrs_json: null
+  source_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_CurrentAssets
+- src_concept: metric:cash
+  rel_type: is_a
+  dst_concept: fibo:Asset
+  attrs_json: null
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_BankBalancesAndCash
+- src_concept: metric:inventory
+  rel_type: is_a
+  dst_concept: fibo:Asset
+  attrs_json: null
+  source_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_Inventories
+- src_concept: metric:accounts_receivable
+  rel_type: is_a
+  dst_concept: fibo:Asset
+  attrs_json: null
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_AccountsReceivable
+- src_concept: metric:loans_advances
+  rel_type: is_a
+  dst_concept: fibo:Asset
+  attrs_json: null
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_LoansAndAdvances
+- src_concept: metric:total_liabilities
+  rel_type: is_a
+  dst_concept: finkb:Liabilities
+  attrs_json: null
+  source_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_Liabilities
+- src_concept: metric:current_liabilities
+  rel_type: is_a
+  dst_concept: finkb:Liabilities
+  attrs_json: null
+  source_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_CurrentLiabilities
+- src_concept: metric:short_term_borrowings
+  rel_type: is_a
+  dst_concept: finkb:Liabilities
+  attrs_json: null
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_ShortTermBorrowings
+- src_concept: metric:long_term_borrowings
+  rel_type: is_a
+  dst_concept: finkb:Liabilities
+  attrs_json: null
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_NonCurrentPortionOfLongTermBorrowings
+- src_concept: metric:bonds_payable
+  rel_type: is_a
+  dst_concept: finkb:Liabilities
+  attrs_json: null
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_BondsPayable
+- src_concept: metric:lease_liabilities
+  rel_type: is_a
+  dst_concept: finkb:Liabilities
+  attrs_json: null
+  source_uri: null
+- src_concept: metric:customer_deposits
+  rel_type: is_a
+  dst_concept: finkb:Liabilities
+  attrs_json: null
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_CustomerDeposits
+- src_concept: metric:total_equity
+  rel_type: is_a
+  dst_concept: fibo:OwnersEquity
+  attrs_json: null
+  source_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_Equity
+- src_concept: metric:net_assets
+  rel_type: is_a
+  dst_concept: fibo:OwnersEquity
+  attrs_json: null
+  source_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_EquityAttributableToOwnersOfParent
+- src_concept: metric:minority_interest
+  rel_type: is_a
+  dst_concept: fibo:OwnersEquity
+  attrs_json: null
+  source_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_NoncontrollingInterests
+- src_concept: metric:ocf
+  rel_type: is_a
+  dst_concept: fibo:CashFlow
+  attrs_json: null
+  source_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_CashFlowsFromUsedInOperatingActivities
+- src_concept: metric:icf
+  rel_type: is_a
+  dst_concept: fibo:CashFlow
+  attrs_json: null
+  source_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_CashFlowsFromUsedInInvestingActivities
+- src_concept: metric:fcf
+  rel_type: is_a
+  dst_concept: fibo:CashFlow
+  attrs_json: null
+  source_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_CashFlowsFromUsedInFinancingActivities
+- src_concept: metric:net_cash_increase
+  rel_type: is_a
+  dst_concept: fibo:CashFlow
+  attrs_json: null
+  source_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_IncreaseDecreaseInCashAndCashEquivalents
+- src_concept: metric:fx_effect
+  rel_type: is_a
+  dst_concept: fibo:CashFlow
+  attrs_json: null
+  source_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_EffectOfExchangeRateChangesOnCashAndCashEquivalents
+- src_concept: metric:eps_basic
+  rel_type: is_a
+  dst_concept: xbrli:perShareItem
+  attrs_json: null
+  source_uri: http://xbrl.ifrs.org/taxonomy/2014-03-05/ifrs-full#ifrs-full_BasicEarningsLossPerShare
+- src_concept: metric:roe_weighted
+  rel_type: is_a
+  dst_concept: xbrli:pureItem
+  attrs_json: null
+  source_uri: null
+- src_concept: self:gross_margin
+  rel_type: is_a
+  dst_concept: cmns-qtu:Expression
+  attrs_json: null
+  source_uri: null
+- src_concept: self:net_margin
+  rel_type: is_a
+  dst_concept: cmns-qtu:Expression
+  attrs_json: null
+  source_uri: null
+- src_concept: self:debt_ratio
+  rel_type: is_a
+  dst_concept: cmns-qtu:Expression
+  attrs_json: null
+  source_uri: null
+- src_concept: self:rd_intensity
+  rel_type: is_a
+  dst_concept: cmns-qtu:Expression
+  attrs_json: null
+  source_uri: null
+- src_concept: self:expense_ratio
+  rel_type: is_a
+  dst_concept: cmns-qtu:Expression
+  attrs_json: null
+  source_uri: null
+- src_concept: self:equity_ratio
+  rel_type: is_a
+  dst_concept: cmns-qtu:Expression
+  attrs_json: null
+  source_uri: null
+- src_concept: finkb:Dimension
+  rel_type: is_a
+  dst_concept: fibo:Report
+  attrs_json: null
+  source_uri: null
+- src_concept: dim:region
+  rel_type: is_a
+  dst_concept: finkb:Dimension
+  attrs_json: null
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_RegionsAxis
+- src_concept: dim:product
+  rel_type: is_a
+  dst_concept: finkb:Dimension
+  attrs_json: null
+  source_uri: null
+- src_concept: dim:industry
+  rel_type: is_a
+  dst_concept: finkb:Dimension
+  attrs_json: null
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_ReportableSegmentsProfitLossAssetAndLiabilityAxis
+- src_concept: dim:customer
+  rel_type: is_a
+  dst_concept: finkb:Dimension
+  attrs_json: null
+  source_uri: http://xbrl.mof.gov.cn/taxonomy/2015-03-31/cas#cas_ClassesOfCustomersAxis
+- src_concept: self:gross_margin
+  rel_type: derived_from
+  dst_concept: metric:revenue
+  attrs_json: null
+  source_uri: null
+- src_concept: self:gross_margin
+  rel_type: derived_from
+  dst_concept: metric:operating_cost
+  attrs_json: null
+  source_uri: null
+- src_concept: self:net_margin
+  rel_type: derived_from
+  dst_concept: metric:net_profit
+  attrs_json: null
+  source_uri: null
+- src_concept: self:net_margin
+  rel_type: derived_from
+  dst_concept: metric:revenue
+  attrs_json: null
+  source_uri: null
+- src_concept: self:debt_ratio
+  rel_type: derived_from
+  dst_concept: metric:total_liabilities
+  attrs_json: null
+  source_uri: null
+- src_concept: self:debt_ratio
+  rel_type: derived_from
+  dst_concept: metric:total_assets
+  attrs_json: null
+  source_uri: null
+- src_concept: self:rd_intensity
+  rel_type: derived_from
+  dst_concept: metric:rd_expense
+  attrs_json: null
+  source_uri: null
+- src_concept: self:rd_intensity
+  rel_type: derived_from
+  dst_concept: metric:revenue
+  attrs_json: null
+  source_uri: null
+- src_concept: self:expense_ratio
+  rel_type: derived_from
+  dst_concept: metric:selling_expense
+  attrs_json: null
+  source_uri: null
+- src_concept: self:expense_ratio
+  rel_type: derived_from
+  dst_concept: metric:admin_expense
+  attrs_json: null
+  source_uri: null
+- src_concept: self:expense_ratio
+  rel_type: derived_from
+  dst_concept: metric:finance_expense
+  attrs_json: null
+  source_uri: null
+- src_concept: self:expense_ratio
+  rel_type: derived_from
+  dst_concept: metric:revenue
+  attrs_json: null
+  source_uri: null
+- src_concept: self:equity_ratio
+  rel_type: derived_from
+  dst_concept: metric:total_assets
+  attrs_json: null
+  source_uri: null
+- src_concept: self:equity_ratio
+  rel_type: derived_from
+  dst_concept: metric:total_equity
+  attrs_json: null
+  source_uri: null
+- src_concept: finkb:Liabilities
+  rel_type: disjoint_with
+  dst_concept: fibo:Asset
+  attrs_json: '{"note":"同一笔金额不能同时是资产与负债"}'
+  source_uri: null
+- src_concept: fibo:OwnersEquity
+  rel_type: part_of
+  dst_concept: fibo:Report
+  attrs_json: '{"note":"权益变动表是年报的一部分"}'
+  source_uri: null
+constraints:
+- constraint_id: acct.assets_eq_liabilities_plus_equity
+  concept_id: fibo:Asset
+  rule_type: acct_equation
+  expression: total_assets == total_liabilities + total_equity
+  severity: error
+  note: 会计恒等式。实测 73 个 (公司,期间) 全部通过——这是本体层最硬的一道体检。
+- constraint_id: acct.current_le_total
+  concept_id: fibo:Asset
+  rule_type: range
+  expression: current_assets <= total_assets
+  severity: error
+  note: 流动资产合计不可能超过资产总计。
+- constraint_id: acct.current_liab_le_total
+  concept_id: finkb:Liabilities
+  rule_type: range
+  expression: current_liabilities <= total_liabilities
+  severity: error
+  note: 流动负债合计不可能超过负债合计。
+- constraint_id: acct.cashflow_sum
+  concept_id: fibo:CashFlow
+  rule_type: acct_equation
+  expression: net_cash_increase == ocf + icf + fcf + fx_effect
+  severity: error
+  tolerance: 0.01
+  note: 四项现金流恒等式（v3 修正）：净增加额 = 经营 + 投资 + 筹资 + 汇率变动影响。此前漏掉 fx_effect，导致 8 条合法业务被误报成 warn；补项后升为 error。
+- constraint_id: acct.equity_split
+  concept_id: fibo:OwnersEquity
+  rule_type: acct_equation
+  expression: net_assets + minority_interest == total_equity
+  severity: error
+  tolerance: 0.01
+  note: 权益拆分恒等式（v3 修正）：归母净资产 + 少数股东权益 = 所有者权益合计。旧约束「归母 ≤ 合计」在少数股东权益为负时必然误报（赛力斯 2024/2025Q1）。
+- constraint_id: acct.expense_positive
+  concept_id: finkb:Expense
+  rule_type: range
+  expression: operating_cost >= 0
+  severity: error
+  note: 费用类科目入库统一取正数：报表里「减：营业成本」常印成括号负数，入口已按 _POSITIVE_METRICS 取绝对值，因此出现负数必是实现 bug。（v3 用它替换了被证伪的 cost_le_revenue，顺带覆盖
+    finkb:Expense 分支的约束）
+- constraint_id: range.roe
+  concept_id: metric:roe_weighted
+  rule_type: range
+  expression: -100 <= roe_weighted <= 200
+  severity: warn
+  note: 加权 ROE 的物理边界（百分数口径）；亏损年度或净资产极薄的年份会出界，只报警告。
+- constraint_id: range.gross_margin
+  concept_id: self:gross_margin
+  rule_type: range
+  expression: -50 <= gross_margin <= 100
+  severity: warn
+  note: 毛利率的物理边界（百分数口径：17.74 = 17.74%）。下界从 -100 收到 -50：毛利率低于 -50% 意味着亏本卖货超过一半，业务上极罕见，更可能是取数错误。
+- constraint_id: period.income_requires_period
+  concept_id: fibo:Income
+  rule_type: required_period
+  expression: period IS NOT NULL AND period <> ''
+  severity: error
+  note: FIBO Income 的 hasDatePeriod 基数为 1，落到库里就是期间必填。
+- constraint_id: unit.eps_is_per_share
+  concept_id: xbrli:perShareItem
+  rule_type: unit_check
+  expression: norm_unit == '元/股'
+  severity: error
+  note: 每股指标的规范化单位必须是元/股。注意查的是 norm_unit 而不是 unit_of_account：后者是原始表格的表头单位标注，每股指标的表头常写成「元」。
+dimensions:
+- dim_kind: region
+  label: 分地区
+  markers: 分地区
+  concept_id: dim:region
+  note: 维度种类固定，成员由结构表行名自动抽取（dimension_members）
+- dim_kind: product
+  label: 分产品
+  markers: 分产品
+  concept_id: dim:product
+  note: 维度种类固定，成员由结构表行名自动抽取（dimension_members）
+- dim_kind: industry
+  label: 分行业
+  markers: 分行业
+  concept_id: dim:industry
+  note: 维度种类固定，成员由结构表行名自动抽取（dimension_members）

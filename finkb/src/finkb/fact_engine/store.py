@@ -57,16 +57,11 @@ CREATE TABLE IF NOT EXISTS facts (
   table_id          VARCHAR,
   match_level       VARCHAR,
   extracted_at      TIMESTAMP,
+  dict_version      INTEGER,
+  period_basis      VARCHAR,
   UNIQUE (company, period, metric_id, caliber, source_doc)
 );
 
-CREATE OR REPLACE VIEW facts_dedup AS
-SELECT * FROM (
-  SELECT *, row_number() OVER (
-    PARTITION BY company, period, metric_id, caliber
-    ORDER BY report_date DESC, source_doc DESC
-  ) AS rn FROM facts
-) t WHERE rn = 1;
 
 CREATE TABLE IF NOT EXISTS relations (
   src_type   VARCHAR,
@@ -110,7 +105,29 @@ CREATE TABLE IF NOT EXISTS segment_facts (
   source_doc   VARCHAR,
   page_num     INTEGER,
   table_id     VARCHAR,
+  member_id    VARCHAR,
   UNIQUE (company, period, dimension, segment_name, metric, source_doc)
+);
+
+-- 维度层（ADR-054）：维度种类是封闭词表，成员是数据驱动的开放集合。
+-- 这样每份新年报都不需要专用维度配置：种类由准则/披露规则固定（product /
+-- industry / region / channel / customer / currency），成员由结构表行名自动
+-- 抽取，member_id 做归一（同一成员的多种写法合并到一条）。
+CREATE TABLE IF NOT EXISTS dimensions (
+  dim_kind VARCHAR PRIMARY KEY,   -- product / industry / region / ...
+  label    VARCHAR,               -- 分产品 / 分行业 / 分地区
+  markers  VARCHAR,               -- 识别用的行标记/表题关键词，竖线分隔
+  note     VARCHAR
+);
+
+CREATE TABLE IF NOT EXISTS dimension_members (
+  member_id  VARCHAR PRIMARY KEY,  -- product:新能源汽车
+  dim_kind   VARCHAR,
+  label      VARCHAR,              -- 归一后的成员名
+  parent_id  VARCHAR,              -- 成员层级，如 region:境内 → region:华东
+  aliases    VARCHAR,              -- 见过的其它写法，竖线分隔
+  first_seen VARCHAR,              -- 首次出现的 source_doc，便于溯源
+  facts      INTEGER               -- 该成员已落的 segment_facts 条数
 );
 
 CREATE TABLE IF NOT EXISTS unmatched_pool (
@@ -125,6 +142,15 @@ CREATE SEQUENCE IF NOT EXISTS unmatched_id_seq START 1;
 CREATE INDEX IF NOT EXISTS idx_facts_company_period ON facts (company, period);
 """
 
+FACTS_DEDUP_VIEW_SQL = """CREATE OR REPLACE VIEW facts_dedup AS
+SELECT * FROM (
+  SELECT *, row_number() OVER (
+    PARTITION BY company, period, metric_id, caliber
+    ORDER BY report_date DESC, source_doc DESC
+  ) AS rn FROM facts
+) t WHERE rn = 1;
+"""
+
 
 class FactStore:
     """一个 DuckDB 文件（或内存库）上的 L1 仓储。"""
@@ -132,8 +158,14 @@ class FactStore:
     def __init__(self, db_path: str | Path = ":memory:") -> None:
         self.conn = duckdb.connect(str(db_path))
         self.conn.execute(SCHEMA_SQL)
-        # 旧库升级：relations 加 attrs_json（ADR-046）。
+        # 旧库升级：relations 加 attrs_json（ADR-046）；facts 加 dict_version（补丁 O3）。
         self.conn.execute("ALTER TABLE relations ADD COLUMN IF NOT EXISTS attrs_json VARCHAR")
+        self.conn.execute("ALTER TABLE facts ADD COLUMN IF NOT EXISTS dict_version INTEGER")
+        # 期间口径（ADR-055）：ROE 这类率值在半年/季报里是年化值，不标出来就会
+        # 和年报的年度值混在一起排队。
+        self.conn.execute("ALTER TABLE facts ADD COLUMN IF NOT EXISTS period_basis VARCHAR")
+        # 视图在补列之后建：SELECT * 的列在创建时绑定，必须晚于上面的 ALTER。
+        self.conn.execute(FACTS_DEDUP_VIEW_SQL)
 
     def close(self) -> None:
         self.conn.close()
@@ -207,11 +239,17 @@ class FactStore:
         match_level: str,
         currency: str = "CNY",
         extracted_at: datetime | None = None,
+        dict_version: int | None = None,
+        period_basis: str | None = None,
     ) -> int:
         """写一条事实，返回 ``fact_id``。重复的 (公司,期间,指标,口径,文档) 会抛错。"""
         fact_id = self.conn.execute("SELECT nextval('fact_id_seq')").fetchone()[0]
         self.conn.execute(
-            "INSERT INTO facts VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO facts (fact_id, company, period, metric_id, unit_family, currency, "
+            "unit_of_account, norm_unit, value_raw, raw_text_matched, value_norm, caliber, "
+            "reporting_party, report_date, source_doc, page_num, table_id, match_level, "
+            "extracted_at, dict_version, period_basis) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 fact_id,
                 company,
@@ -232,6 +270,8 @@ class FactStore:
                 table_id,
                 match_level,
                 extracted_at or datetime.now(),
+                dict_version,
+                period_basis,
             ],
         )
         return fact_id
@@ -252,6 +292,71 @@ class FactStore:
             return None
         return dict(zip([d[0] for d in self.conn.description], row))
 
+    # ---- 维度层（ADR-055） ------------------------------------------------
+
+    def upsert_dimension(self, *, dim_kind: str, label: str, markers: str, note: str = "") -> None:
+        """登记一个维度种类。封闭词表，来自本体；重灌幂等。"""
+        self.conn.execute(
+            "INSERT INTO dimensions VALUES (?, ?, ?, ?) "
+            "ON CONFLICT (dim_kind) DO UPDATE SET label = EXCLUDED.label, "
+            "markers = EXCLUDED.markers, note = EXCLUDED.note",
+            [dim_kind, label, markers, note],
+        )
+
+    def upsert_segment_member(self, *, dim_kind: str, raw_label: str, source_doc: str) -> str:
+        """把结构表的一行段名归一成一个维度成员，返回 ``member_id``。
+
+        归一规则：去空白/全角空格/中英文括号与冒号，再剥「其中」前缀。这样
+        「其中：新能源汽车」与「新能源汽车」会落到同一个成员上；其余不同写法
+        （如「汽车」vs「汽车行业」）**不**归并，而是记为不同成员、原文进 ``aliases``——
+        归并是数据治理决策，不该由归一化函数擅自拍板。
+        """
+        norm = self._norm_member(raw_label)
+        member_id = f"{dim_kind}:{norm}"
+        exists = self.conn.execute(
+            "SELECT aliases, facts FROM dimension_members WHERE member_id = ?", [member_id]
+        ).fetchone()
+        raw = str(raw_label).strip()
+        if exists is None:
+            self.conn.execute(
+                "INSERT INTO dimension_members VALUES (?, ?, ?, ?, ?, ?, ?)",
+                [member_id, dim_kind, norm, None, raw, source_doc, 1],
+            )
+        else:
+            known = [a for a in str(exists[0] or "").split("|") if a]
+            if raw and raw not in known:
+                known.append(raw)
+            # 去重保序：同一成员被同一写法反复命中时，aliases 不该无限变长。
+            merged = list(dict.fromkeys([norm, *known]))
+            self.conn.execute(
+                "UPDATE dimension_members SET facts = ?, aliases = ? WHERE member_id = ?",
+                [int(exists[1] or 0) + 1, "|".join(merged), member_id],
+            )
+        return member_id
+
+    @staticmethod
+    def _norm_member(text: str) -> str:
+        """成员名归一：去空白/括号/冒号，并去掉「其中」前缀。
+
+        「其中：新能源汽车」与「新能源汽车」是同一成员的不同印法——前者是报表里
+        的拆分子项，后者是主项。归一后落到同一个 member_id，别名留原文。
+        """
+        import re as _re
+
+        norm = _re.sub(r"[\s\u3000（）()：:，,]", "", str(text or ""))
+        return _re.sub(r"^其中", "", norm)
+
+    def dimensions(self) -> list[tuple]:
+        return self.conn.execute("SELECT * FROM dimensions ORDER BY dim_kind").fetchall()
+
+    def dimension_members(self, dim_kind: str | None = None) -> list[tuple]:
+        sql = "SELECT * FROM dimension_members"
+        args: list[str] = []
+        if dim_kind:
+            sql += " WHERE dim_kind = ?"
+            args.append(dim_kind)
+        return self.conn.execute(sql + " ORDER BY dim_kind, member_id", args).fetchall()
+
     # ---- 结构（分产品 / 分行业 / 分地区） ---------------------------------
 
     def insert_segment_fact(
@@ -267,14 +372,16 @@ class FactStore:
         source_doc: str,
         page_num: int,
         table_id: str,
+        member_id: str | None = None,
     ) -> int:
         """写一条结构事实；同键重复时覆盖（重灌幂等）。"""
         segment_id = self.conn.execute("SELECT nextval('segment_id_seq')").fetchone()[0]
         self.conn.execute(
-            "INSERT INTO segment_facts VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "INSERT INTO segment_facts VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT (company, period, dimension, segment_name, metric, source_doc) "
             "DO UPDATE SET value_norm = EXCLUDED.value_norm, unit = EXCLUDED.unit, "
-            "page_num = EXCLUDED.page_num, table_id = EXCLUDED.table_id",
+            "page_num = EXCLUDED.page_num, table_id = EXCLUDED.table_id, "
+            "member_id = EXCLUDED.member_id",
             [
                 segment_id,
                 company,
@@ -287,6 +394,7 @@ class FactStore:
                 source_doc,
                 page_num,
                 table_id,
+                member_id,
             ],
         )
         return segment_id

@@ -1,9 +1,9 @@
-# FinKB 项目方案 v2.2
+# FinKB 项目方案 v2.3
 
-> **状态**：已批准架构基线（评审通过），并完成第二轮参考实现实地调研与吸收
-> **文档版本**：v2.2　｜　**上一版**：v2.1
-> **本版变更**：实地拉取并核对 [OpenKB](https://github.com/VectifyAI/OpenKB) 与 [FIBO](https://github.com/edmcouncil/fibo) 源码，新增工程补丁 **P5–P9**（L2 目录骨架对齐、按页 JSON 载体、frontmatter 代码化、lint 七条与原子写、金额三维建模与重述按真实日期排序）。工时基线相应上调。
-> **约束等级**：第 5 章（决议）与第 6 章（补丁 **P1–P9**）为**不可违背的工程约束**，实现时不得绕过。
+> **状态**：已批准架构基线（评审通过），完成第二轮参考实现调研与吸收，并新增本体层
+> **文档版本**：v2.3　｜　**上一版**：v2.2
+> **本版变更**：新增 **§7.5 L0.5 本体层**（四层概念栈 + 六跳可追溯链条 + 三张主表），并引入三个扩展补丁 **O1–O3**。同时对「不引入 FIBO 本体」这一结论做收窄修正：不引入的是 OWL 推理栈，不是语义层。
+> **约束等级**：第 5 章（决议）、第 6 章（补丁 **P1–P9**）与 **§7.5.6（本体层边界）** 为**不可违背的工程约束**，实现时不得绕过。
 
 ---
 
@@ -20,8 +20,8 @@
 | **核心不变量** | **数字只由 SQL 计算；LLM 只做「语义对齐」与「查询生成 / 结论叙述」** |
 | **实现约束** | `_draft` 流转与 `lint` 全部由**本地目录状态 + 轻量 Python 脚本**实现，无服务端 |
 | **技术栈** | MinerU（解析）／DuckDB（事实）／SQLite FTS5（主检索）／numpy（向量兜底）／Markdown（知识） |
-| **参考实现** | [OpenKB](https://github.com/VectifyAI/OpenKB)（同范式，**只抄知识层工程实现**）／[FIBO](https://github.com/edmcouncil/fibo)（**只借金额建模思想**） |
-| **工时基线** | 全量 29–33 有效工作日；Phase 0+1 约 13–14 天；MVP 约 11 天可演示 |
+| **参考实现** | [OpenKB](https://github.com/VectifyAI/OpenKB)（同范式，**只抄知识层工程实现**）／[FIBO](https://github.com/edmcouncil/fibo)（**静态导出类骨架做 L1 本体**）／[CAS 2015 国标](http://m.mof.gov.cn/tzgg/201504/t20150407_1213301.htm)（**只做 L2 科目名参考**） |
+| **工时基线** | 全量 31–35 有效工作日（v2.3 加本体层 2–3 天）；Phase 0+1 约 13–14 天；MVP 约 11 天可演示 |
 
 ---
 
@@ -81,7 +81,7 @@ https://github.com/GoogleCloudPlatform/knowledge-catalog/tree/main/okf
 | [WikiChat](https://github.com/stanford-oval/WikiChat) | 先检索验证再生成 | 稳定性机制参考 |
 | Cognee / Mem0 / Letta / MemOS | Agent 记忆框架 | 记忆操作原语，本项目暂不依赖 |
 | **[OpenKB](https://github.com/VectifyAI/OpenKB)** | PageIndex 团队；文档→编译→互链 Wiki；OKF 兼容；Obsidian 兼容（4794★，Apache-2.0） | **同范式参考实现**，知识层工程细节的主要吸收源（见 2.4、P5–P8） |
-| **[FIBO](https://github.com/edmcouncil/fibo)** | EDM Council 金融业务本体（OWL/RDF，450MB，MIT，765★） | 仅借「金额三维建模」思想（见 2.4、P9）；**不引入本体** |
+| **[FIBO](https://github.com/edmcouncil/fibo)** | EDM Council 金融业务本体（OWL/RDF，450MB，MIT，765★） | 借「金额三维建模」思想（见 2.4、P9）+ **静态导出类骨架做轻量本体（见 7.5）**；**不引入 OWL 推理栈** |
 
 其他学术参照：KAG（https://arxiv.org/abs/2409.13731）、RAPTOR（ICLR 2024）、HippoRAG 2（https://proceedings.mlr.press/v267/gutierrez25a.html）、ACE（ICLR 2026）、Anthropic Contextual Retrieval（https://www.anthropic.com/engineering/contextual-retrieval）。
 
@@ -118,7 +118,9 @@ https://github.com/GoogleCloudPlatform/knowledge-catalog/tree/main/okf
 >
 > **结论：FIBO 提供不了 `metric_dict`。本项目的 19 个财务指标枚举必须自建。**
 
-可借鉴的只有**金额建模的三条思想**（→ P9）。**不建议引入本体本身**：OWL 需图数据库 + 推理机（GraphDB/Stardog），6 份年报规模下是纯负担，且与「单人作品集项目」的定位不匹配。
+可借鉴的是**金额建模的三条思想**（→ P9）。**不建议引入的是 OWL 推理栈**：它需要图数据库 + 推理机（GraphDB/Stardog），14 家年报规模下是纯负担，且与「单人作品集项目」的定位不匹配。
+
+> **v2.3 修正**：上一句「不引入本体」需要收窄——不引入的是**推理运行时**，不是**语义层**。经全库核实（298 个 rdf 文件逐个清点），FIBO 的财务类骨架（`Income` / `EBITDA` / `OwnersEquity` / `CashFlow` / `Report` 等）依赖闭包只有 **20 个文件 / 291 个类**，取其中约 40 个即可当 L1 骨架；而 CAS 国标（2015-03-31 版，3418 个数据项 / 5008 条中文标签）提供 L2 科目名。两者**互补而非二选一**：FIBO 回答「是什么类型」，CAS 回答「报表里叫什么」。落地方式见 **§7.5 L0.5 本体层**。
 
 ---
 
@@ -723,6 +725,174 @@ CREATE TABLE unmatched_pool (
 
 ---
 
+### 7.5 L0.5 本体层：概念栈与可追溯链条（v2.3 新增）
+
+**定位**：L1 存「数值」，L2 存「页面」，中间缺一层「含义」。本体层不参与检索排序，只做三件事——**归一化**（同一指标在不同文档的不同写法归到一个概念）、**校验**（会计等式是否成立）、**溯源**（这个概念从哪个标准来）。
+
+它回答三个问题：这个指标**是什么类型的东西**（`Income` 是一种金额，且必须恰好带一个期间）、**在报表里叫什么**（CAS 的「营业收入」）、**和谁有约束关系**（归母净利润 + 少数股东损益 = 净利润）。
+
+#### 7.5.1 四层概念栈
+
+| 层 | 来源 | 内容 | 规模 | 变更频率 |
+|---|---|---|---|---|
+| **L0 元概念** | CMNS | 金额、表达式、期间、币种、主体、情境 | ~8 | 十年不变 |
+| **L1 科目骨架** | FIBO `FND` 域静态导出 | `Income` / `EBITDA` / `OwnersEquity` / `Asset` / `CashFlow` / `Report` / `Ownership` / `Holding` | ~10 | 极低 |
+| **L2 国标科目** | CAS 2015 裁剪 | 营业收入、营业成本、净利润、每股收益…… | ~40 → 可扩至 600 | 随准则，年/季 |
+| **L3 分析指标** | 自建 | 毛利率、净利率、资产负债率、研发强度 | ~10 → 随时增 | 随需求 |
+
+**关键判断：膨胀发生在 L2/L3，L0/L1 是稳定地基。** 这正是分层的意义——FIBO 靠「域可增、层不变」扛住 298 个文件，本项目照抄这条策略，而不是照抄它的规模。
+
+#### 7.5.2 链条契约：一个指标怎么从本体走到原文
+
+六跳，每跳都可单独修改、单独校验：
+
+| 跳 | 起点 | 终点 | 存储 | 怎么改 |
+|---|---|---|---|---|
+| 1 | `metric_id` | `concept_id` | `concepts.metric_id` | 改 `config/ontology.yaml` |
+| 2 | `concept_id` | 父概念（上溯至 L0） | `concepts.parent_id` | 改 YAML 的 `parent` |
+| 3 | `concept_id` | 约束 | `ontology_constraints` | 改 YAML 的 `constraints` |
+| 4 | `concept.metric_id` | `facts` 行 | `facts(metric_id, dict_version)` | 重跑抽取 |
+| 5 | `fact` | 证据 | `facts(source_doc, page_num, table_id, raw_text_matched)` | 只读，由 P4 保证 |
+| 6 | `fact` | 页面断言 | `claims(fact_id) → claims.page` | 重编译页面 |
+
+反查同样成立：从 `page_anchored.md` 的一个页码 → `table_id` → `facts` → `concept` → L0 元概念。
+
+**可机器阅读的定义**：`python -m finkb.ontology chain --metric revenue --format json` 输出整条链（概念 / 约束 / 事实 / 证据 / 页面），供下游程序消费；`--format text` 供人读。
+
+#### 7.5.3 表结构（三张主表 + 一张成员表）
+
+```sql
+-- 概念：四层栈的节点。layer 决定它是元概念还是科目，domain 预留扩展域。
+CREATE TABLE concepts (
+  concept_id     VARCHAR PRIMARY KEY,  -- 'cmns:MonetaryAmount' / 'cas:营业收入' / 'self:gross_margin'
+  label          VARCHAR NOT NULL,
+  layer          VARCHAR NOT NULL,     -- L0 / L1 / L2 / L3
+  domain         VARCHAR NOT NULL,     -- meta / finance / segment / esg
+  basis          VARCHAR,              -- 标准来源：cmns / fibo / cas / self
+  basis_uri      VARCHAR,              -- 标准内可定位地址（CAS 元素名 / FIBO 类 IRI）
+  definition     TEXT,
+  parent_id      VARCHAR REFERENCES concepts(concept_id),
+  metric_id      VARCHAR,              -- 链接 metric_dict（L2 多数有，L3 为 NULL）
+  unit_default   VARCHAR,
+  formula        VARCHAR,              -- L3 派生公式（DSL）
+  expression_args VARCHAR[],           -- L3 参数概念
+  source_uri     VARCHAR,              -- 标准文件出处（可追溯）
+  valid_from     VARCHAR,              -- 版本有效期（补丁 O3）
+  valid_to       VARCHAR
+);
+
+-- 概念间关系：通用边表，rel_type 是开放字符串（这是最重要的扩展预留）
+CREATE TABLE concept_relations (
+  src_concept VARCHAR NOT NULL,
+  rel_type    VARCHAR NOT NULL,  -- is_a / derived_from / equivalent_to / disjoint_with / part_of
+  dst_concept VARCHAR NOT NULL,
+  attrs_json  VARCHAR,
+  source_uri  VARCHAR
+);
+
+-- 约束：只做校验，不做推导。表名不能叫 constraints——那是 SQL 关键字
+CREATE TABLE ontology_constraints (
+  constraint_id VARCHAR PRIMARY KEY,
+  concept_id    VARCHAR NOT NULL,
+  rule_type     VARCHAR NOT NULL,  -- acct_equation / range / required_period / unit_check
+  expression    VARCHAR NOT NULL,
+  tolerance     DOUBLE,            -- 空则用校验器默认容差
+  source_uri    VARCHAR,           -- 优先从 CAS 计算链接库导入，不手写
+  note          VARCHAR,
+  severity      VARCHAR DEFAULT 'error'  -- error=会计恒等式 / warn=允许合法例外
+);
+
+-- 维度种类：封闭词表，不是每份年报配一份。标记载荷决定「哪张表是分部表」
+CREATE TABLE dimensions (
+  dim_kind VARCHAR PRIMARY KEY,   -- product / industry / region / customer
+  label    VARCHAR NOT NULL,      -- 分产品 / 分行业 / 分地区
+  markers  VARCHAR,               -- 表头与章节里出现的判定词，JSON 数组
+  note     VARCHAR
+);
+
+-- 维度成员：开放集合，从报表行名自动抽取，跨公司可归并（补丁 O1）
+CREATE TABLE dimension_members (
+  member_id  VARCHAR PRIMARY KEY,  -- 'product:新能源汽车'（种类:归一化标签）
+  dim_kind   VARCHAR NOT NULL,
+  label      VARCHAR NOT NULL,
+  parent_id  VARCHAR,              -- 成员层级：境内/境外 → 细分区
+  aliases    VARCHAR,              -- 见过的所有原始写法，`|` 分隔
+  first_seen VARCHAR,              -- 首次出现的 source_doc
+  facts      INTEGER DEFAULT 0     -- 被引用次数
+);
+```
+
+> **落地状态（v2.3.2，2026-11-02）**：概念 / 关系 / 约束三表已实现于
+> `finkb/src/finkb/ontology/schema.py`，YAML 生成器在 `finkb/tools/build_ontology.py`，
+> 真相源是 `finkb/config/ontology.yaml`（**62 概念 / 71 关系 / 10 约束**）。
+> 维度两表落在 L1 侧（`finkb/src/finkb/fact_engine/store.py`），因为它们是**事实的坐标**，
+> 不是概念的定义——首批 **3 种维度 / 49 个成员 / 228 条分部事实全部带 member_id**。
+> 四处与本节设计不同，均被真实数据逼出来：
+> ① 表名 `constraints` → **`ontology_constraints`**（SQL 关键字）；
+> ② 约束新增 **`severity`** 两档——原设计默认「违反即错误」，但实测 `归母净利 ≤ 利润总额`
+> 在 17 组上违反，核对后发现是**约束本身错**（所得税为负或少数股东损益为负时合法反转），
+> 见 DEVLOG ADR-053。现 error 只放会计恒等式，其余降为 warn；
+> ③ `dimension_members` 从「(dimension, member_code) 联合主键 + 裸维度名」改为
+> **单 `member_id` 主键 + `dim_kind` 外键 + `parent_id` 层级 + `aliases` 别名列**——
+> 因为同一个成员在不同年报里有多种印法（「新能源汽车」/「其中：新能源汽车」），需要别名收敛；
+> ④ `facts` 另加 `period_basis`（期间口径记号，见 ADR-056），与本体无关但同属「一个数字
+> 必须带上它成立的条件」。
+
+#### 7.5.4 三个扩展补丁（对抗膨胀，v2.3 新增）
+
+| 补丁 | 缺什么 | 怎么补 | 成本 |
+|---|---|---|---|
+| **O1 维度成员标准化** ✅已落地 | `segment_facts.dimension` / `segment_name` 是裸字符串，跨公司无法归并（比亚迪「汽车业务」vs 赛力斯「新能源汽车」） | 新增 `dimensions` + `dimension_members` 两表，`segment_facts` 加 `member_id` | 0.5 天 |
+| **O2 概念等价关系** | `facts_dedup` 只按 `metric_id` 去重，不认「两个 metric 是同一概念」；引入 IFRS 后会重复计数 | `concept_relations` 增 `equivalent_to` / `disjoint_with`；查询层加概念归并视图 | 1 天 |
+| **O3 事实版本标记** | `facts` 无 `dict_version`，口径变更后新旧事实不可比 | `facts` 加 `dict_version INTEGER`；`constraints` 加 `source_uri` | 0.5 天 |
+
+#### 7.5.5 扩展情景下的表结构影响（回答「会不会膨胀」）
+
+| 情景 | 概念数 | 表结构改动 | 真正成本 |
+|---|---|---|---|
+| 现状（14 家 / 34 指标） | ~70 | — | — |
+| 扩到全 A 股财报科目 | 400–600 | **0 张**（YAML 增长） | 别名需从 CAS 5008 条标签自动生成 |
+| 扩到多维交叉（地区/渠道/客户） | +500 成员 | **+1 张**（`dimension_members`） | 维度标准化（补丁 O1） |
+| 扩到多准则（CAS + IFRS） | ×2 | **+1 张**（等价关系） | 等价映射（补丁 O2） |
+| 扩到非财务（ESG/治理/股权） | +200 | **+1 列**（`domain`） | 新开域，不动老域 |
+
+最坏情况：8 张表 → 11 张表，**增量 3 张，不重构**。概念数从 34 涨到 600 是同一 schema 的 600 个实例，不是 600 段逻辑。
+
+#### 7.5.6 边界：不做什么
+
+- **不引入 OWL/RDF 运行时**：无 reasoner、无图数据库。`concept_relations` 是普通边表，遍历用 SQL 递归 CTE。
+- **不做自动推理**：约束只做**校验**（写入时检查等式是否成立），不做**推导**（不自动填充缺失值）。
+- **不复制标准文件**：CAS 有明确版权声明（`All rights reserved`，未经书面许可不得复制），只把**科目名**作为 `basis` 参考写入配置，不打包 xsd/xml 分发。
+- **不做全量导入**：FIBO 闭包 291 个类里只取约 10 个种子；CAS 3418 项里只取约 40 个科目。
+
+#### 7.5.7 为什么维度不需要「每份年报配一份配置」
+
+常被问：维度表能解决膨胀吗？如果每来一份新年报都要重写一份维度定义，那它反而成了新负担。
+
+**不会，因为维度的种类和成员是两种性质的东西**：
+
+| | 维度**种类**（dim_kind） | 维度**成员**（member） |
+|---|---|---|
+| 谁决定 | 会计准则的披露要求 | 公司当年怎么写 |
+| 规模 | **封闭**：分产品 / 分行业 / 分地区 / 分客户，个位数 | **开放**：每家公司每家年报都不同，无上界 |
+| 存储 | `dimensions` 表，人工登记一次 | `dimension_members` 表，抽取时自动新增 |
+| 新公司/新年度要不要改 | 不要 | 不要 |
+
+抽取链是三步，全自动：
+
+1. **认表**——表头、`section_path`、行内标记任一命中 `dimensions.markers` 即认定是分部表；
+2. **认成员**——取该表第一列（行名）作为成员原文；
+3. **收敛**——`_norm_member` 去符号、剥「其中」前缀得到 `member_id`，原文进 `aliases`。
+
+所以新增 100 家公司的年报，`dimensions` 一行不动，`dimension_members` 自己长。
+真正需要人判断的只有「跨公司成员归并」（比亚迪「汽车业务」vs 赛力斯「新能源汽车」该不该算同一个），
+那是**数据治理**，不是**每份文档的配置**——把它做成配置项才会真膨胀。
+
+**边界**：如果将来出现「一行一成员的矩阵表」（分行业 × 分地区交叉），当前 `segment_facts`
+的一行一成员表达不了，需要升级成 `fact × dim` 关联表。这是唯一预判到的维度级重构点。
+
+---
+
 ## 8. 知识沉淀模型与可视化（本方案与 LLM Wiki 的核心差异）
 
 ### 8.1 沉淀的不是「一种东西」，而是「三类可分别验证的凭据」
@@ -934,7 +1104,9 @@ updated_at: 2026-01-01
 | 重述容差阈值需调 | `contradicts` 误报/漏报 | 初期人工抽查 10 条，确定相对误差阈值 |
 | **误把 OpenKB 当依赖引入** | 栈不兼容（pageindex/litellm/markitdown），且**丢失数值层** | **硬约束：只抄设计不抄代码**；不引入其任何运行时依赖 |
 | **为对齐 OpenKB 而换掉 MinerU** | 表格保真度下降，跨页缝合失去前提 | 明确禁止；MinerU 是财报表格解析的不可替代项 |
-| **引入 FIBO 本体** | OWL 需图数据库 + 推理机（450MB），6 份年报规模下纯负担 | 只借 P9 的三条建模思想，不引入任何 RDF/OWL 依赖 |
+| **引入 FIBO 推理栈** | OWL 需图数据库 + reasoner（450MB），14 家年报规模下纯负担 | 只做**静态导出**：取闭包中约 10 个类做 L1 骨架，不引入任何 RDF/OWL 运行时（§7.5.6） |
+| **本体层随科目扩张而膨胀** | 概念数 34 → 600 时维护成本失控 | 分层隔离膨胀（L0/L1 稳定）+ 概念是数据不是代码 + 别名/约束从 CAS 导入而非手写；表结构增量 ≤ 3 张（§7.5.5） |
+| **CAS 版权与版本** | 国标带 `All rights reserved`，且公开最新版是 2015-03-31，缺 2018 新增行项目 | 只做名称参考不打包文件；2018 修订项（研发费用等）用手工补丁并标注 `valid_from` |
 | **`report.json` 体积过大** | 单份年报 JSON 约 0.8–1 MB，可整份载入；`page_anchored.md` 813 KB 也不宜反复整份复制 | `report.json` 直接读；`page_anchored.md` 按页切片扫描 |
 | **OKF/OpenKB 规范后续演进** | 目录骨架可能需再调整 | 目录名集中在 `schema.py` 常量中，改动收敛到单处 |
 
@@ -947,7 +1119,92 @@ updated_at: 2026-01-01
 
 ## 14. 版本变更记录
 
-### v2.2（本版）相比 v2.1
+### v2.3（本版）相比 v2.2
+
+本版为「本体层落地轮」，核心是把 §2.4 的 FIBO/CAS 调研结论转成可执行的概念层设计。
+
+| 项 | v2.2 | v2.3 |
+|---|---|---|
+| 对 FIBO 的结论 | 「不引入本体」（因无财务报表科目） | **收窄为「不引入推理栈」**：闭包实测 20 文件 / 291 类，取约 10 个做 L1 骨架 |
+| 概念层 | 仅 `metric_dict.yaml`（34 条平铺） | **新增 §7.5 四层概念栈**（L0 元概念 / L1 FIBO 骨架 / L2 CAS 科目 / L3 派生指标） |
+| 可追溯性 | 事实 → 页码（两层） | **六跳链条**：metric → concept → 父概念 → 约束 → fact → 证据 → 页面 |
+| 表结构 | 8 张 | **+4 张**（`concepts` / `concept_relations` / **`ontology_constraints`** / `dimension_members`），`facts` 加 `dict_version` |
+| 扩展预留 | 无显式设计 | **三个补丁 O1/O2/O3**（维度成员标准化 / 概念等价 / 事实版本标记） |
+| 风险 | 「引入 FIBO 本体」为单条风险 | 拆为推理栈、概念膨胀、CAS 版权与版本三条 |
+
+#### v2.3.1 落地修订（2026-11-02，实现完成后回写）
+
+本体层已实现并跑通（`finkb/src/finkb/ontology/`），落地过程中三处与 §7.5 原设计不同，均已回写正文：
+
+| 原设计 | 实际 | 为什么改 |
+|---|---|---|
+| 表名 `constraints` | `ontology_constraints` | `constraints` 是 SQL 关键字 |
+| 约束只有「违反即报错」一档 | `severity` 分 `error` / `warn` | `归母净利 ≤ 利润总额` 在 17 组上违反，核对后发现是**约束本身错**（所得税为负或少数股东损益为负时合法反转，长安 000625 2024 为例），见 DEVLOG ADR-053 |
+| L2 共 40 个科目、全部对齐 CAS | 34 个指标，命中 26 个 | 研发费用 / 租赁负债 / 合同负债等属 2018 新准则，2015 版 CAS 里不存在；按处置规则记 `basis=self` 并在 `valid_from` 标版本 |
+
+实测结果：55 概念 / 64 关系 / 10 约束；L2 的 34 个科目中 18 个命中 `cas_*`、13 个命中
+`ifrs-full_*`（共 31 个有标准依据），3 个 `basis=self`（扣非净利 / 租赁负债 / 加权 ROE，
+2015 版标准确实没有）。
+
+约束体检 10 条 × 73 组 (公司,期间) → error 0、warn 13。六跳链条在真实库零断点跑通
+（`002594 / 2025 / revenue` 一路走到 P11 原文命中与 3 个页面引用）。
+
+L3 派生指标的第五跳不是一条事实、而是一次按公式的确定性计算（`self:gross_margin` → 17.74%），
+参数各自指回自己的 L2 概念与事实条数，因此「改一条底层事实会影响哪个派生值」反向可查。
+
+**「可追溯」是门禁项，不是口号**：`finkb.ontology audit` 把 1456 条去重事实逐跳体检，
+术语为「断点数」而非「错误数」——
+
+| 跳 | 检查 | 实测 | 门禁 |
+|---|---|---|---|
+| ① | 概念登记（metric 有没有本体身份） | 0 | 结构性，必须为 0 |
+| ② | 祖先链（能否走到 L0） | 0 | 结构性，必须为 0 |
+| ③ | 约束覆盖（概念身上有没有校验） | 0 | 结构性，必须为 0 |
+| ④ | 证据字段（doc/页码/原文命中） | 0 | 结构性，必须为 0 |
+| ⑤ | 页面引用（被哪些 L2 页引用） | 966 条未被引用 | 覆盖率，只报数 |
+| ⑥ | 派生可算（L3 在该期能否算出） | 138 组缺参数 | 覆盖率，只报数 |
+
+⑤⑥ 不判错的原因：页面只引用支撑结论的事实，未被引用≠不可追溯；派生缺参数可逐条归因到
+「该期没抽到某个 L2 科目」，属 L1 抽取覆盖问题，不是链条断裂。
+
+**百分比只有一种口径**：L2 的披露值本身就是百分数（加权 ROE 存 15.87 = 15.87%），
+若 L3 公式算出来的小数（0.1774）也标 `%`，两者相差 100 倍且不会报错。故在
+`derive.compute` 单点统一 ×100，全库只此一处「由本项目定义而非抄自披露值」的缩放。
+
+#### v2.3.2 告警收口与维度层落地（2026-11-02，本轮）
+
+约束体检 13 条警告逐条定性：**计算错 0 条 / 数据抽取错 2 条 / 约束设计缺陷 11 条**。
+按用户批准的顺序 A2 → A1 → B1 → A3 修复，并把维度表提前到本版落地。
+
+| 项 | 前 | 后 |
+|---|---|---|
+| 现金流恒等式 | 3 项 `ocf+icf+fcf` | **4 项** `ocf+icf+fcf+fx_effect`，缺项时跳过不判（ADR-055 前身） |
+| `acct.equity_split` | `net_assets ≤ total_equity` | **恒等式** `net_assets + minority_interest == total_equity`（允许负少数股东权益） |
+| `acct.cost_le_revenue` | 营业成本 ≤ 营业收入 | **删除**（金融业无此项，约束本身不普适） |
+| `range.gross_margin` | `-100..100` | `-50..100`（超界说明抽错了行） |
+| L2 科目 | 34 | **36**（补 `fx_effect` / `minority_interest`） |
+| 现金流选表 | 按行数最多 | **优先「合并现金流量表」连续段**，续页缝合（`selector._hit`） |
+| 章节标题判据 | 子串误判（`投资活动` 命中 `筹资活动` 页） | 拼接全文再判起止锚点 |
+
+结果：约束 10 条 × **73 组** → **错误 0 / 警告 0**；全库守恒律与保全额金标 72/72 不变。
+
+**维度层（ADR-057）提前落地**：`dimensions`（`dim_kind` 封闭词表：industry / product / region）
++ `dimension_members`（成员表，带 `parent_id` 与 `aliases`）+ `facts.dim_member_id` 可空外键。
+`segment_facts` 加 `member_id`，255 条分部事实**全部**挂上成员（22 行业 / 21 产品 / 15 地区）。
+**不需要为每份年报写维度配置**：维度「种类」由会计准则封闭（CAS 35 分部报告就那几类），
+维度「成员」由行标签自动抽取并归一化（`其中:` 前缀剥离、别名合并、父行建立层级），
+新来的年报走同一套规则——这是「普适性设计」的落点，不是逐文档配置。
+
+**口径标注（ADR-056）**：`facts` 加 `period_basis`（`period` / `annualized`）。
+招商银行半年报的加权 ROE 是**年化**披露（13.85）；粗猜按半年折算（÷2）会得到 6.9%，错得离谱，
+故只在文本同时出现「报告期」字眼时标 `annualized`，保守阈值宁漏不误标。
+
+**换库事故与修复**：v4 库切换到 `data/facts.duckdb`（1830 条事实）时踩两个坑——
+坑-80 单表解析失败拖垮整份文档（601238 丢 68 条，已修为按表 try/except）；
+坑-81 重灌后 `claims.fact_id` / `segment_id` 全部错指（代理键跨库不稳定），
+已按天然键回映 1118 + 283 条，未解 0。两者均写入 DEVLOG §7。
+
+### v2.2 相比 v2.1
 
 本版为「参考实现吸收轮」，基于对 [OpenKB](https://github.com/VectifyAI/OpenKB) 与 [FIBO](https://github.com/edmcouncil/fibo) 的源码实地核对。
 
