@@ -1,0 +1,170 @@
+# 本体公理层（ADR-057）：类 / 对象属性 / 属性链 / 数值定义类。
+#
+# 与 config/ontology.yaml 的分工：
+#   ontology.yaml        概念栈、公式、约束（tools/build_ontology.py 生成，单一真相源）
+#   ontology_axioms.yaml 类、对象属性、属性链、数值判定规则（本文件，手工维护，不参与生成）
+#
+# 为什么分开：build_ontology.py 每次运行都会整份重写 ontology.yaml；把公理混进去，
+# 要么被冲掉，要么得把生成器改成"半个手写文件"。分开后两边各自幂等。
+#
+# 为什么数值规则不写成 OWL 类表达式：OWL 2 RL 不支持算术（net_profit > 0 可以写，
+# 但 ocf / net_profit < 0.5 不行）。所以数值规则用同文件里的 expression 声明，
+# 由 finkb.ontology.infer 用确定性算子求值；OWL 只负责类层级、属性特征与属性链。
+version: 1
+namespace: https://finkb.local/ontology#
+
+# ---------------------------------------------------------------- 类
+# parent 可以引用 ontology.yaml 里的 concept_id，也可以是本文件的 class_id。
+classes:
+  - class_id: finkb:Entity
+    label: 实体
+    parent: cmns:Party
+    comment: 可被关系指向的主体，包括上市公司、子公司与自然人
+  - class_id: finkb:ListedCompany
+    label: 上市公司
+    parent: finkb:Entity
+    comment: 披露定期报告的 A 股上市公司
+  - class_id: finkb:Subsidiary
+    label: 子公司
+    parent: finkb:Entity
+    comment: 纳入合并范围的子公司
+  - class_id: finkb:Person
+    label: 自然人
+    parent: finkb:Entity
+    comment: 股东、董事、高管等自然人主体
+  - class_id: finkb:FinancialState
+    label: 财务状态
+    parent: null
+    comment: 某公司在某报告期的财务状态观测；数值定义类作用于它
+  - class_id: finkb:Category
+    label: 类别
+    parent: null
+    comment: 顶层分类，供风险类别等派生类挂靠
+  - class_id: finkb:RiskCategory
+    label: 风险类别
+    parent: finkb:Category
+    comment: 由确定性数值规则判定的财务风险类别
+
+# ------------------------------------------------------------ 对象属性
+# domain/range 同样可引用 concept_id 或 class_id。
+# characteristics 取值：transitive / symmetric / functional / inverse_functional / reflexive
+object_properties:
+  - property_id: finkb:hasSubsidiary
+    label: 拥有子公司
+    domain: finkb:ListedCompany
+    range: finkb:Subsidiary
+    inverse_of: finkb:isSubsidiaryOf
+    comment: 合并范围口径的母子公司关系
+  - property_id: finkb:isSubsidiaryOf
+    label: 是子公司
+    domain: finkb:Subsidiary
+    range: finkb:ListedCompany
+    inverse_of: finkb:hasSubsidiary
+  - property_id: finkb:providesGuaranteeTo
+    label: 对外担保
+    domain: finkb:Entity
+    range: finkb:Entity
+    inverse_of: finkb:isGuaranteedBy
+    comment: 年报"担保情况"表口径
+  - property_id: finkb:isGuaranteedBy
+    label: 被担保
+    domain: finkb:Entity
+    range: finkb:Entity
+    inverse_of: finkb:providesGuaranteeTo
+  - property_id: finkb:relatedPartyOf
+    label: 关联方
+    domain: finkb:Entity
+    range: finkb:Entity
+    characteristics: [symmetric]
+    comment: 关联方关系是对称的
+  - property_id: finkb:holdsEquityIn
+    label: 持股
+    domain: finkb:Entity
+    range: finkb:Entity
+    inverse_of: finkb:isHeldBy
+    comment: 股东表口径的持股关系（不区分是否控股）
+  - property_id: finkb:isHeldBy
+    label: 被持股
+    domain: finkb:Entity
+    range: finkb:Entity
+    inverse_of: finkb:holdsEquityIn
+  - property_id: finkb:hasIndirectGuaranteeExposure
+    label: 间接担保敞口
+    domain: finkb:ListedCompany
+    range: finkb:Entity
+    comment: 通过子公司对外担保形成的间接敞口（属性链推出）
+  - property_id: finkb:hasFinancialState
+    label: 具有财务状态
+    domain: finkb:ListedCompany
+    range: finkb:FinancialState
+    inverse_of: finkb:stateOfCompany
+  - property_id: finkb:stateOfCompany
+    label: 状态所属公司
+    domain: finkb:FinancialState
+    range: finkb:ListedCompany
+    inverse_of: finkb:hasFinancialState
+
+# ------------------------------------------------------------ 属性链
+property_chains:
+  - chain_id: finkb:chain_indirect_guarantee
+    properties: [finkb:hasSubsidiary, finkb:providesGuaranteeTo]
+    implies: finkb:hasIndirectGuaranteeExposure
+    comment: 上市公司 → 子公司 → 被担保方，推出间接担保敞口
+
+# -------------------------------------------------------- 数值定义类
+# expression 的变量只能是 metric_id；and / or / not / 比较符 / + - * / 与括号。
+# evidence_metrics 省略时取表达式依赖；判断所需指标任一缺失则跳过该 (公司,期间)，
+# 不猜值（ADR-001：数字只由确定性算子产出）。
+defined_classes:
+  - class_id: finkb:HighLeverage
+    label: 高杠杆
+    parent: finkb:RiskCategory
+    expression: total_liabilities / total_assets > 0.7
+    definition: 资产负债率超过 70%
+    note: 金融业天然高杠杆，需结合行业判断；本规则只陈述事实，不直接下风险结论
+    severity: warn
+  - class_id: finkb:CashflowDivergence
+    label: 现金流与利润背离
+    parent: finkb:RiskCategory
+    expression: net_profit > 0 and ocf / net_profit < 0.5
+    definition: 净利润为正，但经营现金流不足净利润的一半
+    note: 利润含金量偏低的信号，不等于财务造假
+    severity: warn
+  - class_id: finkb:NegativeOcf
+    label: 经营现金流为负
+    parent: finkb:RiskCategory
+    expression: ocf < 0
+    definition: 经营活动现金流量净额为负
+    severity: warn
+  - class_id: finkb:RdIntensive
+    label: 研发密集型
+    parent: finkb:Category
+    expression: rd_expense / revenue > 0.05
+    definition: 研发费用占营业收入超过 5%
+    severity: info
+  - class_id: finkb:LowRoe
+    label: 低净资产收益率
+    parent: finkb:RiskCategory
+    expression: roe_weighted < 5
+    definition: 加权平均净资产收益率低于 5%
+    note: 单位是百分数，5 表示 5%
+    severity: warn
+  - class_id: finkb:CashRich
+    label: 现金充裕
+    parent: finkb:Category
+    expression: cash / total_assets > 0.3
+    definition: 货币资金占总资产超过 30%
+    severity: info
+  - class_id: finkb:ReceivableHeavy
+    label: 应收账款偏重
+    parent: finkb:RiskCategory
+    expression: accounts_receivable / revenue > 0.3
+    definition: 应收账款占营业收入超过 30%
+    severity: warn
+  - class_id: finkb:InventoryHeavy
+    label: 存货偏重
+    parent: finkb:RiskCategory
+    expression: inventory / revenue > 0.5
+    definition: 存货占营业收入超过 50%
+    note: 房地产等存货周期长的行业需结合行业判断
+    severity: warn

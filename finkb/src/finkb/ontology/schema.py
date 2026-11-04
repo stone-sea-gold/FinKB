@@ -63,9 +63,101 @@ CREATE TABLE IF NOT EXISTS dimension_members (
   PRIMARY KEY (dimension, member_code)
 );
 
+-- ======================= 公理层（ADR-057） =======================
+-- 公理层与概念层同库：推理结果要和 facts / claims 同库 join，才能把
+-- 「推断出什么」一路走回「哪条事实、哪一页」。
+CREATE TABLE IF NOT EXISTS ontology_classes (
+  class_id  VARCHAR PRIMARY KEY,
+  label     VARCHAR NOT NULL,
+  parent_id VARCHAR,
+  comment   TEXT
+);
+
+CREATE TABLE IF NOT EXISTS ontology_object_properties (
+  property_id     VARCHAR PRIMARY KEY,
+  label           VARCHAR NOT NULL,
+  domain_class    VARCHAR,
+  range_class     VARCHAR,
+  inverse_of      VARCHAR,
+  characteristics VARCHAR[],
+  comment         TEXT
+);
+
+CREATE TABLE IF NOT EXISTS ontology_property_chains (
+  chain_id  VARCHAR PRIMARY KEY,
+  properties VARCHAR[] NOT NULL,
+  implies   VARCHAR NOT NULL,
+  comment   TEXT
+);
+
+-- 数值定义类：OWL 2 RL 不支持算术，判定式由 infer 用确定性算子求值。
+CREATE TABLE IF NOT EXISTS ontology_defined_classes (
+  class_id         VARCHAR PRIMARY KEY,
+  label            VARCHAR NOT NULL,
+  parent_id        VARCHAR,
+  expression       TEXT NOT NULL,
+  definition       TEXT,
+  severity         VARCHAR DEFAULT 'warn',
+  evidence_metrics VARCHAR[],
+  note             TEXT
+);
+
+-- 推理结果：每个 (公司,期间) 命中的定义类，带证据事实 id（血缘）。
+CREATE TABLE IF NOT EXISTS inferred_concepts (
+  company          VARCHAR NOT NULL,
+  period           VARCHAR NOT NULL,
+  class_id         VARCHAR NOT NULL,
+  rule_id          VARCHAR NOT NULL,
+  expression       TEXT,
+  evidence_fact_ids BIGINT[],
+  values_json      VARCHAR,
+  severity         VARCHAR,
+  run_id           VARCHAR,
+  created_at       TIMESTAMP,
+  PRIMARY KEY (company, period, class_id)
+);
+
+-- 属性链/逆属性/对称属性推出的边；premises_json 记录用了哪几条基础边。
+CREATE TABLE IF NOT EXISTS inferred_edges (
+  src_id      VARCHAR NOT NULL,
+  rel_type    VARCHAR NOT NULL,
+  dst_id      VARCHAR NOT NULL,
+  rule_id     VARCHAR NOT NULL,
+  premises_json VARCHAR,
+  source_doc  VARCHAR,
+  page_num    INTEGER,
+  run_id      VARCHAR,
+  created_at  TIMESTAMP,
+  PRIMARY KEY (src_id, rel_type, dst_id, rule_id)
+);
+
+-- OWL RL 闭包里新长出来的三元组（相对 ABox 基线）。
+CREATE TABLE IF NOT EXISTS inferred_triples (
+  subject   VARCHAR NOT NULL,
+  predicate VARCHAR NOT NULL,
+  object    VARCHAR NOT NULL,
+  rule_type VARCHAR,
+  run_id    VARCHAR
+);
+
+CREATE TABLE IF NOT EXISTS inference_runs (
+  run_id          VARCHAR PRIMARY KEY,
+  started_at      TIMESTAMP,
+  finished_at     TIMESTAMP,
+  tbox_triples    BIGINT,
+  abox_triples    BIGINT,
+  inferred_triples BIGINT,
+  defined_hits    BIGINT,
+  chain_edges     BIGINT,
+  status          VARCHAR,
+  note            VARCHAR
+);
+
 CREATE INDEX IF NOT EXISTS idx_concepts_metric ON concepts (metric_id);
 CREATE INDEX IF NOT EXISTS idx_concepts_parent ON concepts (parent_id);
 CREATE INDEX IF NOT EXISTS idx_relations_src ON concept_relations (src_concept);
+CREATE INDEX IF NOT EXISTS idx_inferred_edges_src ON inferred_edges (src_id);
+CREATE INDEX IF NOT EXISTS idx_inferred_concepts_class ON inferred_concepts (class_id);
 """
 
 # 补丁：severity 区分 error / warn。老库补列，幂等。

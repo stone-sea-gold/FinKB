@@ -43,9 +43,12 @@ def load(
     conn: duckdb.DuckDBPyConnection,
     doc: model.OntologyDoc | None = None,
     path: str | Path | None = None,
+    axioms: model.AxiomDoc | None = None,
+    axioms_path: str | Path | None = None,
 ) -> dict[str, int]:
-    """写入概念/关系/约束，返回各表行数。"""
+    """写入概念/关系/约束/公理，返回各表行数。"""
     doc = doc or model.load(path)
+    ax = axioms or model.load_axioms(axioms_path, doc=doc)
     ensure_schema(conn)
 
     conn.executemany(
@@ -90,12 +93,46 @@ def load(
         [(d.dim_kind, d.label, d.markers, d.note) for d in doc.dimensions],
     )
 
+    # 公理层（ADR-057）：类/对象属性/属性链/数值定义类。与关系一样按来源重建。
+    conn.execute("DELETE FROM ontology_classes")
+    conn.executemany(
+        "INSERT INTO ontology_classes VALUES (?,?,?,?)",
+        [(c.class_id, c.label, c.parent, c.comment) for c in ax.classes],
+    )
+    conn.execute("DELETE FROM ontology_object_properties")
+    conn.executemany(
+        "INSERT INTO ontology_object_properties VALUES (?,?,?,?,?,?,?)",
+        [
+            (p.property_id, p.label, p.domain, p.range, p.inverse_of,
+             list(p.characteristics), p.comment)
+            for p in ax.object_properties
+        ],
+    )
+    conn.execute("DELETE FROM ontology_property_chains")
+    conn.executemany(
+        "INSERT INTO ontology_property_chains VALUES (?,?,?,?)",
+        [(c.chain_id, list(c.properties), c.implies, c.comment) for c in ax.property_chains],
+    )
+    conn.execute("DELETE FROM ontology_defined_classes")
+    conn.executemany(
+        "INSERT INTO ontology_defined_classes VALUES (?,?,?,?,?,?,?,?)",
+        [
+            (d.class_id, d.label, d.parent, d.expression, d.definition,
+             d.severity, list(d.evidence_metrics), d.note)
+            for d in ax.defined_classes
+        ],
+    )
+
     conn.execute("INSERT OR REPLACE INTO meta VALUES (?, ?)", ["ontology_version", str(doc.version)])
     return {
         "concepts": len(doc.concepts),
         "relations": len(doc.relations),
         "constraints": len(doc.constraints),
         "dimensions": len(doc.dimensions),
+        "classes": len(ax.classes),
+        "object_properties": len(ax.object_properties),
+        "property_chains": len(ax.property_chains),
+        "defined_classes": len(ax.defined_classes),
     }
 
 

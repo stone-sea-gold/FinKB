@@ -427,14 +427,14 @@ MinerU 把两格粘成一格的 OCR 错位（`601127_2025_半年报` 1 个、`60
 
 | 项 | 值 |
 |---|---|
-| 阶段 | Phase 0 **主体完成**；Phase 1 **L1 跑通并收口**（29 份重灌为唯一库 `data/facts.duckdb`：**1830 条**、0 未匹配、36 指标，2026-11-02 二次重灌纠正 13 条告警）；Phase 2 **L2 完整跑通**（29 份全部编译，153 页 active，lint 0 错 0 警，FTS5 检索 + 15 题评测全过；5 探针）；**L0.5 本体层已落地**（62 概念 / 71 关系 / 10 约束，六跳链条 + audit + 维度层；ADR-052～056） |
-| 测试 | **406 项全部通过**，离线 |
+| 阶段 | Phase 0 **主体完成**；Phase 1 **L1 跑通并收口**（29 份重灌为唯一库 `data/facts.duckdb`：**1830 条**、0 未匹配、36 指标，2026-11-02 二次重灌纠正 13 条告警）；Phase 2 **L2 完整跑通**（29 份全部编译，153 页 active，lint 0 错 0 警，FTS5 检索 + 15 题评测全过；5 探针）；**L0.5 本体层已落地**（62 概念 / 71 关系 / 10 约束，六跳链条 + audit + 维度层；ADR-052～056）；**S1 推理运行时已落地**（公理层 7 类 / 10 属性 / 1 属性链 / 8 数值定义类；OWL 2 RL 物化 2,999 三元组；ADR-057） |
+| 测试 | **424 项全部通过**，离线 |
 | 源码规模 | `src/` 约 9200 行，`tests/` 约 6300 行，`tools/`（核验工具）2461 行，`eval/` 424 行 |
 | 真实数据验证 | 有（MinerU `vlm` 后端）：**29 份 / 14 家公司 / 4791 页**，10 类版式 |
 | 语料产出 | **5117 张物理表 → 6130 张逻辑表**；有表头 5729（93.5%）；跨页缝合 28 张，拒绝 21 条 |
 | 质量基线 | 守恒律 **359/359**；数值回查 36026 个抽样中 6 个查不到（99.98%，均为 MinerU 粘格）；`config/corpus-baseline.json` 已含 29 份 |
 | L2 产出 | **153 页 active**（29 摘要 + 107 探针 + 14 实体 + 3 跨公司概念）；claims 账本 **1570 条**（fact 1118 / query 169 / segment 283）；`segment_facts` **255 条（全部带 member_id）**；`relations` 621 条；`conflicts` 1 组（002594 2025Q1 eps 两个口径）；FTS5 检索索引 153 页 |
-| L0.5 产出 | 62 概念（L0 7 / L1 13 / L2 36 / L3 6）、71 关系、10 约束（5 error / 5 warn）、**3 维度 / 58 成员**；约束求值 73 组 → **0 错 0 警**；`audit` 四条结构断点全 0 |
+| L0.5 产出 | 62 概念（L0 7 / L1 13 / L2 36 / L3 6）、71 关系、10 约束（5 error / 5 warn）、**3 维度 / 58 成员**；约束求值 73 组 → **0 错 0 警**；`audit` 四条结构断点全 0；推理物化：定义类 **96 命中** / 关系边推出 **378 条** / OWL RL **2,999 三元组** |
 | MinerU 真实联调 | ✅ **已做**（预签名上传链路，`vlm` 后端，200 页/文件上限由 `--auto-split` 自动分批） |
 | 版本控制 | ✅ **已建 git 仓库**（根目录 `/home/generalblack/code/works/reporting`，分支 `main`）。78 次提交 |
 
@@ -1497,6 +1497,50 @@ manifest 查不到时用 `date.today()` 兜底，且不告警。
 **失效条件**：语料到 H 股 / IFRS 报表，或概念数破千导致递归 CTE 遍历变慢时，需重新评估
 是否引入图存储。反过来说：只要概念数在千以内且只做校验，DuckDB 单库足够。
 
+### ADR-057 本体推理运行时：YAML 公理层 + 批量 OWL 2 RL 物化 + 数值规则走 Python（2026-11-04）
+
+**背景**：ADR-052 把本体层定为「只校验不推导」，但 v3.1 要求「真正的本体论知识库 + RAG」，
+必须能回答「哪些公司高杠杆 / 现金流与利润背离 / 母子公司担保链」这类**由规则推出、事实表里没有**
+的问题。直接上 OWL 推理栈（Owlready2 + Pellet/HermiT）有三处硬伤：本机无 Java、需要常驻推理机、
+描述逻辑本身不支持算术（`ocf / net_profit < 0.5` 写不出来）。
+
+**决策**：
+
+1. **公理层单独成文件** `config/ontology_axioms.yaml`（类 / 对象属性 / 属性链 / 数值定义类）。
+   不塞进 `config/ontology.yaml`：后者由 `tools/build_ontology.py` 每次整份重写，手写内容会被冲掉。
+   YAML 仍是单一真相源，DuckDB 只做投影。
+2. **三类推理分开落表、各带血缘**：
+   - 数值定义类 → `inferred_concepts`（每条命中记 `evidence_fact_ids` + 判定时的 `values_json`）；
+   - 逆属性 / 对称属性 / 属性链 → `inferred_edges`（记 `premises_json`，即用了哪几条基础边）；
+   - OWL 2 RL 闭包 → `inferred_triples` + `data/ontology/inferred.ttl`（只存基线之外的三元组）。
+3. **OWL 只做符号可证的部分**：类层级、`subClassOf`、逆属性、传递属性、属性链、`equivalentClass`；
+   算术与阈值判定由 Python 确定性算子求值（复用 `expr.py` 的布尔条件解析）。
+4. **批量预计算，不在查询时推理**：问答只读结果表；推理是 `ontology infer` 的离线步骤。
+5. 依赖做成可选 extra（`pip install -e '.[ontology]'`）：没装 `rdflib`/`owlrl` 时只有
+   `export`/`infer` 报错，核心流水线与 424 项离线测试不受影响。
+
+**实测**（29 份真实库，2026-11-04）：
+
+- 导出：TBox 643 三元组、ABox 2,537、基础 3,180；OWL 2 RL 闭包 **7.8 秒**，推出 **2,999 条**
+  （已过滤自反 `owl:sameAs` 与 `owl:Thing` 噪音，过滤前 5,998 条）。
+- 数值定义类：8 条规则命中 **96 条**（HighLeverage 20 / LowRoe 22 / RdIntensive 15 / CashRich 11 /
+  NegativeOcf 10 / CashflowDivergence 9 / InventoryHeavy 7 / ReceivableHeavy 2），缺指标的
+  (公司,期间) 跳过不猜。
+- 关系边：基础 621 → 推出 **378 条**（逆属性 341、对称属性 37；属性链 0 条——担保边 src 还是
+  公司代码，要等 S2 实体消歧把「子公司名」和「被担保方名」接上才会产生间接担保边）。
+- 完整 `ontology infer` 端到端 **18.7 秒**（含写库）。
+
+**代价**：多两个可选依赖；每轮全量重建推断表；闭包时间随三元组数线性增长。
+
+**失效条件**：概念数破千或三元组破 10 万（闭包进入分钟级）→ 改增量推理或图存储；
+需要 SWRL / 非 OWL 2 RL 公理（函数式依赖、传递闭包之外的模式）→ 重新评估推理引擎；
+出现「查询时按需推理」需求 → 加结果缓存层，而不是把闭包搬回查询路径。
+
+**与 ADR-052 的关系**：修订其「只做校验不做推理」为「**不在查询时推理、不自动改事实**」；
+约束失败仍然只报告，不修正 facts。
+
+---
+
 ## 6. 被推翻 / 废弃的方案（不要重提）
 
 | 曾提出 | 为什么废弃 | 替代 |
@@ -2336,7 +2380,7 @@ P43→P44 那张证券投资表（14 列）在 pypdf 文本层能清楚看到首
 | 安装项目 | `cd finkb && ../.venv/bin/pip install --no-build-isolation -e .`（装后可用 `finkb` 命令） |
 | 跑测试 | `cd finkb && ../.venv/bin/python -m pytest` |
 | 继承的系统包 | duckdb 1.5.3、pytest 9.0.3、pydantic 2.13.4、numpy、pandas、requests |
-| 额外安装 | **pypdf 6.21.1**、**PyMuPDF**（`audit.py verify-cells` / `recall` 回查 PDF 用） |
+| 额外安装 | **pypdf 6.21.1**、**PyMuPDF**（`audit.py verify-cells` / `recall` 回查 PDF 用）、**rdflib 7.6.0 + owlrl 7.6.2**（可选，`pip install -e '.[ontology]'`；只有 `ontology export/infer` 需要） |
 | 未安装 | `jieba`（Phase 3 的中文 FTS 需要） |
 
 > 为什么用 `--system-site-packages`：系统 Python 受 PEP 668 保护，直接 `pip install`
@@ -2469,6 +2513,28 @@ git checkout 57f9fed -- _ref               # 恢复到工作区
 ## 11. 变更记录
 
 > 时间线：2026-10-21 之后的条目来自 git 提交历史，之前的是**重建**的。
+
+### 2026-11-04 —— S1：本体推理运行时（公理层 / 导出 / 带血缘物化）
+
+- 新建 `config/ontology_axioms.yaml`：7 类、10 对象属性（含互逆对与 symmetric）、
+  1 条属性链（hasSubsidiary ∘ providesGuaranteeTo ⇒ hasIndirectGuaranteeExposure）、
+  8 条数值定义类（HighLeverage / CashflowDivergence / NegativeOcf / RdIntensive /
+  LowRoe / CashRich / ReceivableHeavy / InventoryHeavy）。
+- `ontology/model.py`：新增公理模型与 `load_axioms`，校验父类/逆属性/属性链/表达式引用。
+- `ontology/expr.py`：新增 `parse_condition` / `evaluate_condition` / `condition_deps`
+  （and / or / not / 嵌套括号 / 链式比较），供数值定义类求值。
+- `ontology/schema.py` + `loader.py`：新增 `ontology_classes` / `ontology_object_properties` /
+  `ontology_property_chains` / `ontology_defined_classes` / `inferred_concepts` /
+  `inferred_edges` / `inferred_triples` / `inference_runs` 八张表。
+- 新建 `ontology/export.py`（TBox/ABox → Turtle，带 sha256 manifest）与
+  `ontology/infer.py`（定义类求值、逆属性/对称/属性链闭包、OWL 2 RL 前向闭包；
+  写库包事务，避免逐条提交）。
+- CLI 新增 `ontology axioms|export|infer`；`pyproject.toml` 加 `ontology` 可选依赖；
+  `.gitignore` 忽略 `finkb/data/ontology/`。
+- 实测：TBox 643 / ABox 2,537 / 闭包 2,999 条（7.8 秒）；定义类 96 命中；关系边推出 378 条；
+  完整 `infer` 18.7 秒。
+- 测试：新增 `tests/test_ontology_axioms.py`（10 项）与 `tests/test_ontology_infer.py`（8 项），
+  全套 **406 → 424 项通过**。
 
 ### 2026-11-02 —— 约束告警 13 → 0，维度层与期间口径落地
 

@@ -7,6 +7,9 @@
     python -m finkb.ontology check                     # 跑约束校验
     python -m finkb.ontology derive --company 002594 --period 2025
     python -m finkb.ontology concept --query 毛利       # 按中文名/别名找概念
+    python -m finkb.ontology axioms                    # 公理层：类/对象属性/属性链/数值规则
+    python -m finkb.ontology export --out data/ontology  # YAML → TBox/ABox Turtle
+    python -m finkb.ontology infer --out data/ontology   # 定义类 + 属性链 + OWL 2 RL 闭包
 """
 
 from __future__ import annotations
@@ -239,6 +242,109 @@ def cmd_dims(args: argparse.Namespace) -> int:
         conn.close()
 
 
+def cmd_axioms(args: argparse.Namespace) -> int:
+    doc = model.load()
+    ax = model.load_axioms(doc=doc)
+    payload = {
+        "version": ax.version,
+        "namespace": ax.namespace,
+        "classes": [
+            {"class_id": c.class_id, "label": c.label, "parent": c.parent, "comment": c.comment}
+            for c in ax.classes
+        ],
+        "object_properties": [
+            {"property_id": p.property_id, "label": p.label, "domain": p.domain,
+             "range": p.range, "inverse_of": p.inverse_of,
+             "characteristics": p.characteristics, "comment": p.comment}
+            for p in ax.object_properties
+        ],
+        "property_chains": [
+            {"chain_id": c.chain_id, "properties": c.properties, "implies": c.implies,
+             "comment": c.comment}
+            for c in ax.property_chains
+        ],
+        "defined_classes": [
+            {"class_id": d.class_id, "label": d.label, "parent": d.parent,
+             "expression": d.expression, "definition": d.definition,
+             "severity": d.severity, "evidence_metrics": d.evidence_metrics}
+            for d in ax.defined_classes
+        ],
+        "warnings": ax.warnings,
+    }
+    if args.format == "json":
+        _emit(payload, "json")
+        return 0
+    print(f"公理层 v{ax.version}：类 {len(ax.classes)} / 对象属性 {len(ax.object_properties)}"
+          f" / 属性链 {len(ax.property_chains)} / 数值定义类 {len(ax.defined_classes)}")
+    for c in ax.classes:
+        print(f"  [类] {c.label:<8} {c.class_id:<28} parent={c.parent}")
+    for p in ax.object_properties:
+        inv = f" inverse_of={p.inverse_of}" if p.inverse_of else ""
+        print(f"  [属性] {p.label:<8} {p.property_id:<34} domain={p.domain} range={p.range}{inv}")
+    for ch in ax.property_chains:
+        print(f"  [链] {' ∘ '.join(ch.properties)} ⇒ {ch.implies}")
+    for d in ax.defined_classes:
+        print(f"  [规则] {d.label:<10} {d.class_id:<26} {d.expression}")
+    for w in ax.warnings:
+        print(f"  ! {w}")
+    return 0
+
+
+def cmd_export(args: argparse.Namespace) -> int:
+    from finkb.ontology import export as export_mod
+
+    try:
+        manifest = export_mod.export(
+            args.db, args.out, ontology_path=args.ontology,
+            axioms_path=args.axioms, with_abox=not args.no_abox,
+        )
+    except ImportError as e:
+        print(f"导出依赖缺失：{e}（pip install rdflib）")
+        return 2
+    except export_mod.ExportError as e:
+        print(f"导出失败：{e}")
+        return 2
+    if args.format == "json":
+        _emit(manifest, "json")
+    else:
+        print(f"TBox {manifest['tbox']['triples']} 三元组 → {args.out}/tbox.ttl")
+        if manifest["abox"]:
+            print(f"ABox {manifest['abox']['triples']} 三元组 → {args.out}/abox.ttl")
+        for w in manifest.get("warnings") or []:
+            print(f"  ! {w}")
+    return 0
+
+
+def cmd_infer(args: argparse.Namespace) -> int:
+    from finkb.ontology import infer as infer_mod
+
+    try:
+        report = infer_mod.run(
+            args.db, args.out, ontology_path=args.ontology,
+            axioms_path=args.axioms, skip_owl=args.skip_owl,
+        )
+    except ImportError as e:
+        print(f"推理依赖缺失：{e}（pip install rdflib owlrl）")
+        return 2
+    if args.format == "json":
+        _emit(report, "json")
+    else:
+        d = report["defined_classes"]
+        e = report["edges"]
+        print(f"定义类命中 {d['hits']} 条："
+              + ", ".join(f"{k.split(':')[-1]}={v}" for k, v in d["per_class"].items() if v))
+        print(f"关系边：基础 {e['base_edges']}，推出 {e['inferred_edges']}（"
+              + ", ".join(f"{k}={v}" for k, v in e["by_rule"].items()) + "）")
+        if not report["owlrl"].get("skipped"):
+            o = report["owlrl"]
+            print(f"OWL 2 RL：TBox {o['tbox_triples']} + ABox {o['abox_triples']}"
+                  f" = {o['base_triples']}，推出 {o['inferred_triples']} 三元组"
+                  f"（{o['elapsed_s']}s）→ {o['out_file']}")
+        else:
+            print("OWL 2 RL：已跳过（--skip-owl）")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     from finkb.fact_engine.selector import FINKB_ROOT
 
@@ -288,6 +394,26 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("dims", help="列出维度种类与成员（分产品/分行业/分地区）")
     p.add_argument("--format", choices=["text", "json"], default="text")
     p.set_defaults(func=cmd_dims)
+
+    p = sub.add_parser("axioms", help="公理层：类/对象属性/属性链/数值定义类")
+    p.add_argument("--format", choices=["text", "json"], default="text")
+    p.set_defaults(func=cmd_axioms)
+
+    p = sub.add_parser("export", help="YAML 本体 → TBox/ABox Turtle")
+    p.add_argument("--out", default=str(FINKB_ROOT / "data" / "ontology"))
+    p.add_argument("--ontology", default=None)
+    p.add_argument("--axioms", default=None)
+    p.add_argument("--no-abox", action="store_true", help="只导出 TBox")
+    p.add_argument("--format", choices=["text", "json"], default="text")
+    p.set_defaults(func=cmd_export)
+
+    p = sub.add_parser("infer", help="定义类 + 属性链 + OWL 2 RL 闭包（物化推理结果）")
+    p.add_argument("--out", default=str(FINKB_ROOT / "data" / "ontology"))
+    p.add_argument("--ontology", default=None)
+    p.add_argument("--axioms", default=None)
+    p.add_argument("--skip-owl", action="store_true", help="只跑数值规则与属性链")
+    p.add_argument("--format", choices=["text", "json"], default="text")
+    p.set_defaults(func=cmd_infer)
 
     args = ap.parse_args(argv)
     if args.cmd == "concept" and not args.id and not args.query:

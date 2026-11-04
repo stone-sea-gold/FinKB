@@ -17,6 +17,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+# 本体导出与 OWL 2 RL 前向闭包（ADR-057）。核心流水线不依赖它们；
+# 没装时 `ontology export/infer` 会给出明确报错，其余功能照常。
+ontology = ["rdflib>=7.0", "owlrl>=7.0"]
 
 [project.scripts]
 finkb = "finkb.cli:main"

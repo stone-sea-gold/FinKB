@@ -23,6 +23,8 @@ raw/*.pdf
 # 派生数据：可由 parse 流程重建
 finkb/data/parsed/
 finkb/data/parent_store/
+# 推理物化产物：可由 ontology infer 重建（tbox/abox/inferred.ttl + report）
+finkb/data/ontology/
 # 分批解析的中间产物：MinerU 原始下载，单份可达 80MB，只作临时中转
 finkb/data/_*/
 *.duckdb

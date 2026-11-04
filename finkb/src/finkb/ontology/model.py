@@ -82,6 +82,92 @@ class Dimension:
     note: str | None = None
 
 
+# ---------------------------------------------------------------- 公理层
+# 公理层（ontology_axioms.yaml）与概念层（ontology.yaml）分开存放：
+# 前者手工维护类/属性/属性链/数值规则，后者由 tools/build_ontology.py 生成。
+AXIOM_CHARACTERISTICS = {
+    "transitive", "symmetric", "functional", "inverse_functional",
+    "reflexive", "irreflexive", "asymmetric",
+}
+DEFINED_CLASS_SEVERITIES = {"error", "warn", "info"}
+
+
+@dataclass
+class AxiomClass:
+    class_id: str
+    label: str
+    parent: str | None = None
+    comment: str | None = None
+
+
+@dataclass
+class ObjectProperty:
+    property_id: str
+    label: str
+    domain: str | None = None
+    range: str | None = None
+    inverse_of: str | None = None
+    characteristics: list[str] = field(default_factory=list)
+    comment: str | None = None
+
+
+@dataclass
+class PropertyChain:
+    chain_id: str
+    properties: list[str]
+    implies: str
+    comment: str | None = None
+
+
+@dataclass
+class DefinedClass:
+    class_id: str
+    label: str
+    parent: str | None
+    expression: str
+    definition: str | None = None
+    note: str | None = None
+    severity: str = "warn"
+    evidence_metrics: list[str] = field(default_factory=list)
+
+    @property
+    def metrics(self) -> list[str]:
+        return list(self.evidence_metrics)
+
+
+@dataclass
+class AxiomDoc:
+    version: int
+    namespace: str
+    classes: list[AxiomClass] = field(default_factory=list)
+    object_properties: list[ObjectProperty] = field(default_factory=list)
+    property_chains: list[PropertyChain] = field(default_factory=list)
+    defined_classes: list[DefinedClass] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+    def class_by_id(self, class_id: str) -> AxiomClass | None:
+        for c in self.classes:
+            if c.class_id == class_id:
+                return c
+        return None
+
+    def property_by_id(self, property_id: str) -> ObjectProperty | None:
+        for p in self.object_properties:
+            if p.property_id == property_id:
+                return p
+        return None
+
+    def defined_by_id(self, class_id: str) -> DefinedClass | None:
+        for d in self.defined_classes:
+            if d.class_id == class_id:
+                return d
+        return None
+
+    def class_ids(self) -> set[str]:
+        return {c.class_id for c in self.classes} | {d.class_id for d in self.defined_classes}
+
+
+
 @dataclass
 class OntologyDoc:
     version: int
@@ -221,6 +307,160 @@ def load(path: str | Path | None = None) -> OntologyDoc:
     )
     doc.warnings = _validate(doc)
     return doc
+
+
+def axioms_path() -> Path:
+    """``finkb/config/ontology_axioms.yaml``（公理层，手工维护）。"""
+    return Path(__file__).resolve().parents[3] / "config" / "ontology_axioms.yaml"
+
+
+def load_axioms(
+    path: str | Path | None = None,
+    doc: OntologyDoc | None = None,
+) -> AxiomDoc:
+    """载入并校验公理层。文件不存在时返回空公理并给 warning（不阻塞老流程）。"""
+    from finkb.ontology import expr  # 局部导入，避免 model/expr 的循环依赖误伤
+
+    p = Path(path) if path else axioms_path()
+    if not p.exists():
+        return AxiomDoc(version=0, namespace="", warnings=[f"公理文件不存在：{p}（跳过）"])
+    raw = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+    doc = doc or load()
+
+    classes = [
+        AxiomClass(
+            class_id=str(c["class_id"]),
+            label=str(c["label"]),
+            parent=_s(c.get("parent")),
+            comment=_s(c.get("comment")),
+        )
+        for c in raw.get("classes") or []
+    ]
+    object_properties = [
+        ObjectProperty(
+            property_id=str(p_["property_id"]),
+            label=str(p_["label"]),
+            domain=_s(p_.get("domain")),
+            range=_s(p_.get("range")),
+            inverse_of=_s(p_.get("inverse_of")),
+            characteristics=[str(x) for x in (p_.get("characteristics") or [])],
+            comment=_s(p_.get("comment")),
+        )
+        for p_ in raw.get("object_properties") or []
+    ]
+    property_chains = [
+        PropertyChain(
+            chain_id=str(c["chain_id"]),
+            properties=[str(x) for x in (c.get("properties") or [])],
+            implies=str(c["implies"]),
+            comment=_s(c.get("comment")),
+        )
+        for c in raw.get("property_chains") or []
+    ]
+    defined_classes = []
+    for d in raw.get("defined_classes") or []:
+        deps = sorted(expr.condition_vars(str(d["expression"])))
+        evidence = [str(x) for x in (d.get("evidence_metrics") or [])]
+        defined_classes.append(
+            DefinedClass(
+                class_id=str(d["class_id"]),
+                label=str(d["label"]),
+                parent=_s(d.get("parent")),
+                expression=str(d["expression"]),
+                definition=_s(d.get("definition")),
+                note=_s(d.get("note")),
+                severity=str(d.get("severity") or "warn"),
+                evidence_metrics=evidence or deps,
+            )
+        )
+
+    ax = AxiomDoc(
+        version=int(raw.get("version") or 0),
+        namespace=str(raw.get("namespace") or "https://finkb.local/ontology#"),
+        classes=classes,
+        object_properties=object_properties,
+        property_chains=property_chains,
+        defined_classes=defined_classes,
+    )
+    ax.warnings = _validate_axioms(ax, doc)
+    return ax
+
+
+def _validate_axioms(ax: AxiomDoc, doc: OntologyDoc) -> list[str]:
+    from finkb.ontology import expr  # 局部导入，避免 model/expr 循环依赖
+
+    warns: list[str] = []
+    concept_ids = {c.concept_id for c in doc.concepts}
+    metric_ids = {c.metric_id for c in doc.concepts if c.metric_id}
+    class_ids = [c.class_id for c in ax.classes]
+    defined_ids = [d.class_id for d in ax.defined_classes]
+
+    for label, ids in (("class", class_ids), ("defined_class", defined_ids)):
+        dups = {i for i in ids if ids.count(i) > 1}
+        if dups:
+            raise ValueError(f"{label} 重复：{sorted(dups)}")
+    clash = set(class_ids) & concept_ids
+    if clash:
+        raise ValueError(f"公理类与概念层重名：{sorted(clash)}")
+    clash = set(defined_ids) & (concept_ids | set(class_ids))
+    if clash:
+        raise ValueError(f"数值定义类与已有类/概念重名：{sorted(clash)}")
+
+    all_class_ids = concept_ids | set(class_ids) | set(defined_ids)
+    parent_of = {c.concept_id: c.parent_id for c in doc.concepts}
+    parent_of.update({c.class_id: c.parent for c in ax.classes})
+    parent_of.update({d.class_id: d.parent for d in ax.defined_classes})
+
+    for c in ax.classes + ax.defined_classes:
+        if c.parent and c.parent not in all_class_ids:
+            raise ValueError(f"{c.class_id}: parent {c.parent} 不存在")
+    # 父链环检测
+    for cid in list(parent_of):
+        seen, cur = set(), cid
+        while cur and parent_of.get(cur):
+            if cur in seen:
+                raise ValueError(f"父链成环：{cid}")
+            seen.add(cur)
+            cur = parent_of[cur]
+
+    prop_ids = [p.property_id for p in ax.object_properties]
+    dups = {i for i in prop_ids if prop_ids.count(i) > 1}
+    if dups:
+        raise ValueError(f"对象属性重复：{sorted(dups)}")
+    for p in ax.object_properties:
+        for field_name, ref in (("domain", p.domain), ("range", p.range)):
+            if ref and ref not in all_class_ids:
+                raise ValueError(f"{p.property_id}: {field_name} {ref} 不存在")
+        if p.inverse_of and p.inverse_of not in prop_ids:
+            raise ValueError(f"{p.property_id}: inverse_of {p.inverse_of} 不存在")
+        bad = set(p.characteristics) - AXIOM_CHARACTERISTICS
+        if bad:
+            raise ValueError(f"{p.property_id}: 非法 characteristics {sorted(bad)}")
+
+    for ch in ax.property_chains:
+        if not ch.properties:
+            raise ValueError(f"{ch.chain_id}: properties 为空")
+        for pid in ch.properties:
+            if pid not in prop_ids:
+                raise ValueError(f"{ch.chain_id}: 属性 {pid} 不存在")
+        if ch.implies not in prop_ids:
+            raise ValueError(f"{ch.chain_id}: implies {ch.implies} 不是已声明对象属性")
+
+    for d in ax.defined_classes:
+        try:
+            deps = expr.condition_vars(d.expression)
+        except expr.ExprError as e:
+            raise ValueError(f"{d.class_id}: 表达式无法解析：{e}") from e
+        unknown = sorted(deps - metric_ids)
+        if unknown:
+            raise ValueError(f"{d.class_id}: 表达式引用未知指标 {unknown}")
+        if d.evidence_metrics and set(d.evidence_metrics) != deps:
+            warns.append(
+                f"{d.class_id}: evidence_metrics {d.evidence_metrics} 与表达式依赖 {sorted(deps)} 不一致"
+            )
+        if d.severity not in DEFINED_CLASS_SEVERITIES:
+            raise ValueError(f"{d.class_id}: 非法 severity {d.severity}")
+    return warns
 
 
 def _validate(doc: OntologyDoc) -> list[str]:
