@@ -24,11 +24,16 @@ def _table(header, rows, section="", page=1, doc="000001_2025_年报"):
     )
 
 
+def _spec(kind: str) -> dict:
+    families = relations.load_header_config()["families"]
+    return next(f for f in families if f["rel_type"] == kind)
+
+
 def test_classify_four_kinds():
-    assert relations.classify(_table(["子公司全称", "持股比例"], [])) == "subsidiary_of"
-    assert relations.classify(_table(["公司名称", "关联方关系"], [])) == "related_party_of"
-    assert relations.classify(_table(["担保对象名称", "实际担保金额"], [])) == "guarantees_for"
-    assert relations.classify(_table(["股东名称", "持股比例"], [])) == "shareholder_of"
+    assert relations.classify(_table(["子公司全称", "持股比例"], []))[0] == "subsidiary_of"
+    assert relations.classify(_table(["公司名称", "关联方关系"], []))[0] == "related_party_of"
+    assert relations.classify(_table(["担保对象名称", "实际担保金额"], []))[0] == "guarantees_for"
+    assert relations.classify(_table(["股东名称", "持股比例"], []))[0] == "shareholder_of"
     assert relations.classify(_table(["营业收入", "营业成本"], [])) is None
 
 
@@ -37,13 +42,13 @@ def test_parse_subsidiary_and_shareholder():
         ["子公司全称", "主要经营地", "注册地", "业务性质", "注册资本", "直接", "间接"],
         [["甲公司", "深圳", "深圳", "制造", "1 亿", "80.00", "0.00"], ["合计", "", "", "", "", "", ""]],
     )
-    edges = relations.parse_table(table, "subsidiary_of", "000001")
+    edges = relations.parse_table(table, "subsidiary_of", _spec("subsidiary_of"), "000001")
     assert len(edges) == 1
     assert edges[0]["dst_id"] == "甲公司"
-    assert edges[0]["attrs"] == {"direct": "80.00", "indirect": "0.00"}
+    assert edges[0]["attrs"] == {"direct": 80.0, "indirect": 0.0}
 
     holder = _table(["股东名称", "股东类型", "持股比例"], [["张三", "境内自然人", "5.20%"]])
-    edges = relations.parse_table(holder, "shareholder_of", "000001")
+    edges = relations.parse_table(holder, "shareholder_of", _spec("shareholder_of"), "000001")
     assert edges[0]["dst_type"] == "person"
     assert edges[0]["attrs"]["ratio"] == 5.2
 

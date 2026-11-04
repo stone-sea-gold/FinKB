@@ -71,8 +71,44 @@ CREATE TABLE IF NOT EXISTS relations (
   dst_id     VARCHAR,
   source_doc VARCHAR,
   page_num   INTEGER,
-  attrs_json VARCHAR
+  attrs_json VARCHAR,
+  period     VARCHAR,
+  src_entity_id VARCHAR,
+  dst_entity_id VARCHAR
 );
+
+-- 实体主数据（ADR-059）：关系边里的人/机构名先过门禁，再在这里消歧。
+-- entity_id 是稳定主键（co:000002 / org:<hash> / person:<hash>），dst_id 仍保留原文，
+-- 方便回查；跨文档同名实体靠别名表合并。
+CREATE TABLE IF NOT EXISTS entities_master (
+  entity_id      VARCHAR PRIMARY KEY,
+  canonical_name VARCHAR,
+  entity_type    VARCHAR,
+  aliases_json   VARCHAR,
+  source         VARCHAR
+);
+
+CREATE TABLE IF NOT EXISTS entity_aliases (
+  alias      VARCHAR,
+  entity_id  VARCHAR,
+  alias_type VARCHAR
+);
+
+-- 附注锚点（S2）：指标 → 报表页（facts 来源）+ 附注章节页（section 标题匹配）。
+CREATE TABLE IF NOT EXISTS note_anchors (
+  doc_id      VARCHAR,
+  company     VARCHAR,
+  period      VARCHAR,
+  metric_id   VARCHAR,
+  anchor_type VARCHAR,
+  page_num    INTEGER,
+  section     VARCHAR,
+  title       VARCHAR,
+  source      VARCHAR
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_note_anchors
+  ON note_anchors (doc_id, metric_id, anchor_type, page_num, section, period);
 
 -- facts 级跨文档冲突（ADR-046）：同一 company+metric+period+caliber 在不同文档里数值不一致。
 CREATE TABLE IF NOT EXISTS conflicts (
@@ -160,6 +196,16 @@ class FactStore:
         self.conn.execute(SCHEMA_SQL)
         # 旧库升级：relations 加 attrs_json（ADR-046）；facts 加 dict_version（补丁 O3）。
         self.conn.execute("ALTER TABLE relations ADD COLUMN IF NOT EXISTS attrs_json VARCHAR")
+        # S2 实体治理：关系边加期间与实体主键（ADR-059）。
+        self.conn.execute("ALTER TABLE relations ADD COLUMN IF NOT EXISTS period VARCHAR")
+        self.conn.execute("ALTER TABLE relations ADD COLUMN IF NOT EXISTS src_entity_id VARCHAR")
+        self.conn.execute("ALTER TABLE relations ADD COLUMN IF NOT EXISTS dst_entity_id VARCHAR")
+        # 旧库的 note_anchors 唯一索引不含 period，重建成含 period 的版本。
+        self.conn.execute("DROP INDEX IF EXISTS uq_note_anchors")
+        self.conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_note_anchors "
+            "ON note_anchors (doc_id, metric_id, anchor_type, page_num, section, period)"
+        )
         self.conn.execute("ALTER TABLE facts ADD COLUMN IF NOT EXISTS dict_version INTEGER")
         # 期间口径（ADR-055）：ROE 这类率值在半年/季报里是年化值，不标出来就会
         # 和年报的年度值混在一起排队。

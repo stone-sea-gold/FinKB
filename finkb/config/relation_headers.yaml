@@ -1,0 +1,61 @@
+# 关系表表头族（ADR-059，S2）
+#
+# 年报里的关系表表头有 15+ 种写法，`relations.py` 原来只认 4 个精确字符串，
+# 结果 29 份文档只抽出 5 家的边。这里把「表头 → 关系类型 → 名字列 / 属性列」
+# 写成配置，代码只负责按序匹配、按列取值。
+#
+# 匹配顺序有讲究：先认担保（最容易和「关联方担保」混），再认子公司、股东，
+# 最后认关联方（最宽）。`exclude_any` 命中任一子串就跳过整张表。
+version: 1
+
+families:
+  - rel_type: guarantees_for
+    match_any: [担保对象名称, 被担保方, 被担保对象]
+    exclude_any: [担保总额]
+    name_any: [担保对象名称, 被担保方, 被担保对象]
+    attrs:
+      amount:
+        any: [实际担保金额, 担保金额, 担保额度, 担保余额]
+        type: text
+      guarantee_type:
+        any: [担保类型, 担保方式, 担保期]
+        type: text
+
+  - rel_type: subsidiary_of
+    match_any: [子公司名称, 子公司全称]
+    exclude_any: [少数股东持股比例, 少数股东权益, 主要财务信息, 非全资子公司]
+    name_any: [子公司名称, 子公司全称]
+    attrs:
+      direct:
+        any: [直接]
+        type: percent
+      indirect:
+        any: [间接]
+        type: percent
+      ratio:
+        any: [持股比例]
+        type: percent
+
+  - rel_type: shareholder_of
+    match_any: [股东名称, 股东名称全称, 法人股东名称, 有限售条件股东名称, 股东单位名称]
+    exclude_any: [任职人员姓名, 董事姓名, 期初限售股数, 本期解除限售股数]
+    name_any: [股东名称, 股东名称全称, 法人股东名称, 有限售条件股东名称, 股东单位名称]
+    attrs:
+      ratio:
+        any: [比例]
+        type: percent
+      holder_type:
+        any: [股东性质, 股东类型]
+        type: text
+
+  - rel_type: related_party_of
+    match_any: [关联方名称, 关联方]
+    exclude_any: [是否在公司关联方获取报酬, 是否在公司关联方获取薪酬]
+    name_any: [关联方名称, 关联方]
+    attrs:
+      relationship:
+        any: [关联关系]
+        type: text
+      amount:
+        any: [本期发生额, 本期金额, 期末余额, 期末账面余额, 金额]
+        type: text

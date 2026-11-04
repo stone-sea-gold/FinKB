@@ -120,12 +120,14 @@ def test_defined_class_skips_when_metric_missing(mem_store) -> None:
 def test_materialize_edges_inverse_and_chain(mem_store) -> None:
     s, _doc, ax = mem_store
     s.conn.execute(
-        "INSERT INTO relations VALUES (?,?,?,?,?,?,?,?)",
-        ["company", "000001", "subsidiary_of", "entity", "SUB_A", "000001_2025_年报", 20, None],
+        "INSERT INTO relations (src_type, src_id, rel_type, dst_type, dst_id, source_doc, page_num, attrs_json, period) "
+        "VALUES (?,?,?,?,?,?,?,?,?)",
+        ["company", "000001", "subsidiary_of", "entity", "SUB_A", "000001_2025_年报", 20, None, "2025"],
     )
     s.conn.execute(
-        "INSERT INTO relations VALUES (?,?,?,?,?,?,?,?)",
-        ["entity", "SUB_A", "guarantees_for", "entity", "GUAR_B", "000001_2025_年报", 21, None],
+        "INSERT INTO relations (src_type, src_id, rel_type, dst_type, dst_id, source_doc, page_num, attrs_json, period) "
+        "VALUES (?,?,?,?,?,?,?,?,?)",
+        ["entity", "SUB_A", "guarantees_for", "entity", "GUAR_B", "000001_2025_年报", 21, None, "2025"],
     )
     out = infer.materialize_edges(s.conn, ax, "run-test")
     assert out["base_edges"] == 2
@@ -165,8 +167,9 @@ def test_abox_has_company_facts_and_provenance(file_store) -> None:
     s, _db, doc, ax = file_store
     _add_fact(s, "revenue", 100.0, company="000001", page=12)
     s.conn.execute(
-        "INSERT INTO relations VALUES (?,?,?,?,?,?,?,?)",
-        ["company", "000001", "subsidiary_of", "entity", "SUB_A", "000001_2025_年报", 20, None],
+        "INSERT INTO relations (src_type, src_id, rel_type, dst_type, dst_id, source_doc, page_num, attrs_json, period) "
+        "VALUES (?,?,?,?,?,?,?,?,?)",
+        ["company", "000001", "subsidiary_of", "entity", "SUB_A", "000001_2025_年报", 20, None, "2025"],
     )
     g = export.build_abox(s.conn, doc, ax)
     company = URIRef("https://finkb.local/provenance#company/000001")
@@ -226,8 +229,9 @@ def test_owlrl_closure_filters_trivial_triples(file_store, tmp_path: Path) -> No
     s, db, _doc, _ax = file_store
     _add_fact(s, "revenue", 100.0)
     s.conn.execute(
-        "INSERT INTO relations VALUES (?,?,?,?,?,?,?,?)",
-        ["company", "000001", "subsidiary_of", "entity", "SUB_A", "000001_2025_年报", 20, None],
+        "INSERT INTO relations (src_type, src_id, rel_type, dst_type, dst_id, source_doc, page_num, attrs_json, period) "
+        "VALUES (?,?,?,?,?,?,?,?,?)",
+        ["company", "000001", "subsidiary_of", "entity", "SUB_A", "000001_2025_年报", 20, None, "2025"],
     )
     s.close()
 

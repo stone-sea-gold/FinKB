@@ -22,6 +22,9 @@ from pathlib import Path
 
 from finkb.fact_engine.basis import annotate_period_basis
 from finkb.fact_engine.conflicts import detect_conflicts
+from finkb.fact_engine.entity_registry import annotate as annotate_entities
+from finkb.fact_engine.entity_registry import rebuild as rebuild_entities
+from finkb.fact_engine.notes import build as build_note_anchors
 from finkb.fact_engine.extractor import LLMClient, extract_table, missing_columns
 from finkb.fact_engine.metric_dict import UNIT_DERIVATION, Metric, load_dict_meta
 from finkb.fact_engine.selector import SourceTable, load_tables, select_tables, split_header_blocks
@@ -342,4 +345,9 @@ def ingest_documents(
     store.set_meta("conflicts_count", str(detect_conflicts(store)))
     # 率值的期间口径要等全部文档写完才能反算（ADR-055）。
     store.set_meta("period_basis", str(sum(annotate_period_basis(store).values())))
+    # 实体主数据与附注锚点都依赖全量边/事实，必须放在最后（ADR-059）。
+    results["_registry"] = rebuild_entities(store)
+    results["_annotate"] = annotate_entities(store)
+    if docs:
+        results["_note_anchors"] = build_note_anchors(store, docs[0].parent)
     return results
