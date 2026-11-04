@@ -89,3 +89,10 @@ def test_fact_lane_matches_gold_if_db_exists():
     payload = answer("万科A（000002）2025 年的营业收入是多少亿元？")
     assert payload["refused"] is False
     assert abs(payload["value"] - 2334.32769) < 1e-6
+
+
+def test_router_text_intent_beats_fact():
+    # 有指标词但问的是「规模/人员」→ 走 text，不走 fact
+    assert router.route("美的集团 2025 年的研发投入和研发人员规模如何？").name == "text"
+    # 纯数值问法仍然走 fact
+    assert router.route("美的集团 2025 年的研发费用是多少亿元？").name == "fact"

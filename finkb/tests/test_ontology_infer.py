@@ -252,3 +252,28 @@ def test_owlrl_closure_filters_trivial_triples(file_store, tmp_path: Path) -> No
         assert trivial == 0, "自反 sameAs / owl:Thing 噪音没有过滤"
     finally:
         con.close()
+
+
+def test_audit_reports_inference_lineage(file_store, tmp_path: Path) -> None:
+    """第⑦跳：没跑推理时跳过；跑过之后，缺血缘的推断要能被抓出来。"""
+    import duckdb
+
+    from finkb.ontology import audit
+
+    s, db, _doc, _ax = file_store
+    _add_fact(s, "total_assets", 1000.0)
+    _add_fact(s, "total_liabilities", 800.0)
+    assert audit.audit(s.conn)["hops"]["inference"] is None
+    s.close()
+
+    infer.run(db, tmp_path / "ontology", skip_owl=True)
+    con = duckdb.connect(str(db))
+    try:
+        assert audit.audit(con)["hops"]["inference"] == 0
+        con.execute(
+            "INSERT INTO inferred_triples (subject, predicate, object, rule_type, run_id) "
+            "VALUES ('a', 'b', 'c', NULL, NULL)"
+        )
+        assert audit.audit(con)["hops"]["inference"] == 1
+    finally:
+        con.close()

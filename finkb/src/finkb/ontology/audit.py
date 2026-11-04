@@ -19,7 +19,7 @@ from typing import Any
 import duckdb
 
 # 每一跳一个检查项；顺序即链顺序。
-HOPS = ("concept", "ancestry", "constraints", "evidence", "pages", "derived")
+HOPS = ("concept", "ancestry", "constraints", "evidence", "pages", "derived", "inference")
 
 
 def audit(
@@ -124,6 +124,10 @@ def audit(
     out["samples"]["derived"] = [{"concept_id": k, "missing": v[:6], "count": len(v)}
                                  for k, v in derived_bad.items() if v][:10]
 
+    # ⑦ 推理血缘：推断结果必须能回答「依据哪条规则、用了哪几条证据」。
+    # 尚未跑过 ontology infer 时不算断点（hop=None，门禁跳过）。
+    out["hops"]["inference"], out["samples"]["inference"] = _inference_hop(conn)
+
     out["concepts"] = {
         "total": conn.execute("SELECT count(*) FROM concepts").fetchone()[0],
         "by_layer": dict(conn.execute(
@@ -134,6 +138,34 @@ def audit(
         ).fetchall()],
     }
     return out
+
+
+def _inference_hop(conn: duckdb.DuckDBPyConnection) -> tuple[int | None, list[dict[str, Any]]]:
+    """⑦ 推理血缘：每条推断都要有 rule_id 与前提/证据；没跑过推理则返回 None。"""
+    try:
+        runs = conn.execute("SELECT count(*) FROM inference_runs").fetchone()[0]
+    except duckdb.CatalogException:
+        return None, []
+    if not runs:
+        return None, []
+    bad_concepts = conn.execute(
+        "SELECT class_id, company, period FROM inferred_concepts "
+        "WHERE rule_id IS NULL OR rule_id = '' "
+        "   OR evidence_fact_ids IS NULL OR len(evidence_fact_ids) = 0"
+    ).fetchall()
+    bad_edges = conn.execute(
+        "SELECT src_id, rel_type, dst_id FROM inferred_edges "
+        "WHERE rule_id IS NULL OR rule_id = '' "
+        "   OR premises_json IS NULL OR premises_json IN ('', '[]')"
+    ).fetchall()
+    bad_triples = conn.execute(
+        "SELECT count(*) FROM inferred_triples WHERE rule_type IS NULL OR run_id IS NULL"
+    ).fetchone()[0]
+    samples = ([{"kind": "concept", "detail": f"{r[0]} {r[1]}/{r[2]}"} for r in bad_concepts[:5]]
+               + [{"kind": "edge", "detail": f"{r[0]} -{r[1]}-> {r[2]}"} for r in bad_edges[:5]])
+    if bad_triples:
+        samples.append({"kind": "triple", "detail": f"{bad_triples} 条缺 rule_type/run_id"})
+    return len(bad_concepts) + len(bad_edges) + bad_triples, samples
 
 
 def _has_constraints(conn: duckdb.DuckDBPyConnection) -> bool:

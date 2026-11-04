@@ -82,13 +82,15 @@ def cmd_audit(args: argparse.Namespace) -> int:
         return 0
 
     names = {"concept": "①概念登记", "ancestry": "②祖先链", "constraints": "③约束覆盖",
-             "evidence": "④证据字段", "pages": "⑤页面引用", "derived": "⑥派生可算"}
+             "evidence": "④证据字段", "pages": "⑤页面引用", "derived": "⑥派生可算",
+             "inference": "⑦推理血缘"}
     print(f"事实总数 {report['total_facts']}；概念 "
           + " ".join(f"{k}={v}" for k, v in report["concepts"]["by_layer"].items()))
     for hop in audit.HOPS:
         n = report["hops"][hop]
         if n is None:
-            print(f"  {names[hop]:<8} —（未接 claims 库，跳过）")
+            reason = "尚未运行 ontology infer，跳过" if hop == "inference" else "未接 claims 库，跳过"
+            print(f"  {names[hop]:<8} —（{reason}）")
             continue
         mark = "✓" if n == 0 else ("·" if hop in ("pages", "derived") else "✗")
         print(f"  {names[hop]:<8} {mark} {n}"
@@ -97,7 +99,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
         print("  L2 无事实：" + ", ".join(report["concepts"]["l2_without_facts"]))
     # ⑤⑥ 是覆盖率指标（页面只引用结论、派生受抽取覆盖限制），不参与门禁；
     # ①②③④ 是结构断点，任何一条非零都说明「这个数凭什么信」答不上来。
-    broken = [h for h in ("concept", "ancestry", "constraints", "evidence")
+    broken = [h for h in ("concept", "ancestry", "constraints", "evidence", "inference")
               if report["hops"][h]]
     if args.strict and broken:
         print("  ✗ 结构性断点：" + ", ".join(f"{h}={report['hops'][h]}" for h in broken))
@@ -363,7 +365,7 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("audit", help="链条完整性体检：逐跳统计断点数")
     p.add_argument("--strict", action="store_true",
-                   help="结构断点（概念/祖先链/约束/证据）非零即退出码 1，供门禁用")
+                   help="结构断点（概念/祖先链/约束/证据/推理血缘）非零即退出码 1，供门禁用")
     p.add_argument("--format", choices=["text", "json"], default="text")
     p.set_defaults(func=cmd_audit)
     p = sub.add_parser("chain", help="解析指标 → 概念 → 事实 → 证据 → 页面")
