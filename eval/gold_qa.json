@@ -37,10 +37,11 @@
         {
           "doc_id": "000002_2025_年报",
           "page": 10,
-          "fact_id": 1
+          "metric_id": "revenue",
+          "period": "2025"
         }
       ],
-      "sql": "SELECT value_norm FROM facts WHERE fact_id = 1",
+      "sql": "SELECT value_norm FROM facts WHERE source_doc = '000002_2025_年报' AND page_num = 10 AND metric_id = 'revenue' AND period = '2025' AND caliber = '合并报表'",
       "note": "000002_2025_年报 p10「主要会计数据和财务指标」表 2025 年列。"
     },
     {
@@ -62,10 +63,11 @@
         {
           "doc_id": "600519_2025_年报",
           "page": 6,
-          "fact_id": 978
+          "metric_id": "net_profit",
+          "period": "2025"
         }
       ],
-      "sql": "SELECT value_norm FROM facts WHERE fact_id = 978",
+      "sql": "SELECT value_norm FROM facts WHERE source_doc = '600519_2025_年报' AND page_num = 6 AND metric_id = 'net_profit' AND period = '2025' AND caliber = '合并报表'",
       "note": "600519_2025_年报 p6 主要会计数据表；一行同时给出 2025/2024/2023 三年列。"
     },
     {
@@ -87,10 +89,11 @@
         {
           "doc_id": "600276_2025_年报",
           "page": 135,
-          "fact_id": 960
+          "metric_id": "rd_expense",
+          "period": "2025"
         }
       ],
-      "sql": "SELECT value_norm FROM facts WHERE fact_id = 960",
+      "sql": "SELECT value_norm FROM facts WHERE source_doc = '600276_2025_年报' AND page_num = 135 AND metric_id = 'rd_expense' AND period = '2025' AND caliber = '合并报表'",
       "note": "600276_2025_年报 p135 合并利润表「研发费用」行 2025 年度列。"
     },
     {
@@ -112,10 +115,11 @@
         {
           "doc_id": "601088_2025_年报",
           "page": 8,
-          "fact_id": 1116
+          "metric_id": "ocf",
+          "period": "2025"
         }
       ],
-      "sql": "SELECT value_norm FROM facts WHERE fact_id = 1116",
+      "sql": "SELECT value_norm FROM facts WHERE source_doc = '601088_2025_年报' AND page_num = 8 AND metric_id = 'ocf' AND period = '2025' AND caliber = '合并报表'",
       "note": "601088_2025_年报 p8 主要会计数据表 2025 年列（原表单位百万元）。"
     },
     {
@@ -137,10 +141,11 @@
         {
           "doc_id": "600900_2025_年报",
           "page": 7,
-          "fact_id": 1059
+          "metric_id": "roe_weighted",
+          "period": "2025"
         }
       ],
-      "sql": "SELECT value_norm FROM facts WHERE fact_id = 1059",
+      "sql": "SELECT value_norm FROM facts WHERE source_doc = '600900_2025_年报' AND page_num = 7 AND metric_id = 'roe_weighted' AND period = '2025' AND caliber = '合并报表'",
       "note": "600900_2025_年报 p7「主要财务指标」表 2025 年列。"
     },
     {
@@ -162,10 +167,11 @@
         {
           "doc_id": "000333_2025_年报",
           "page": 9,
-          "fact_id": 66
+          "metric_id": "eps_basic",
+          "period": "2025"
         }
       ],
-      "sql": "SELECT value_norm FROM facts WHERE fact_id = 66",
+      "sql": "SELECT value_norm FROM facts WHERE source_doc = '000333_2025_年报' AND page_num = 9 AND metric_id = 'eps_basic' AND period = '2025' AND caliber = '合并报表'",
       "note": "000333_2025_年报 p9 主要会计数据表 2025 年列。"
     },
     {
@@ -187,10 +193,11 @@
         {
           "doc_id": "601238_2025_年报",
           "page": 11,
-          "fact_id": 1512
+          "metric_id": "net_profit",
+          "period": "2025"
         }
       ],
-      "sql": "SELECT value_norm FROM facts WHERE fact_id = 1512",
+      "sql": "SELECT value_norm FROM facts WHERE source_doc = '601238_2025_年报' AND page_num = 11 AND metric_id = 'net_profit' AND period = '2025' AND caliber = '合并报表'",
       "note": "601238_2025_年报 p11「近三年主要会计数据」表 2025 年列；负值用于检验符号口径（坑-60）。"
     },
     {
@@ -212,10 +219,11 @@
         {
           "doc_id": "600036_2025_半年报",
           "page": 7,
-          "fact_id": 860
+          "metric_id": "revenue",
+          "period": "2025H1"
         }
       ],
-      "sql": "SELECT value_norm FROM facts WHERE fact_id = 860",
+      "sql": "SELECT value_norm FROM facts WHERE source_doc = '600036_2025_半年报' AND page_num = 7 AND metric_id = 'revenue' AND period = '2025H1' AND caliber = '合并报表'",
       "note": "600036_2025_半年报 p7「本集团主要会计数据和财务指标」表 2025 年 1-6 月列（原表单位百万元）。"
     },
     {
@@ -238,15 +246,17 @@
         {
           "doc_id": "002594_2025_年报",
           "page": 11,
-          "fact_id": 628
+          "metric_id": "revenue",
+          "period": "2025"
         },
         {
           "doc_id": "002594_2025_年报",
           "page": 11,
-          "fact_id": 629
+          "metric_id": "revenue",
+          "period": "2024"
         }
       ],
-      "sql": "SELECT (SELECT value_norm FROM facts WHERE fact_id = 628) - (SELECT value_norm FROM facts WHERE fact_id = 629)",
+      "sql": "SELECT (SELECT value_norm FROM facts WHERE source_doc = '002594_2025_年报' AND page_num = 11 AND metric_id = 'revenue' AND period = '2025' AND caliber = '合并报表') - (SELECT value_norm FROM facts WHERE source_doc = '002594_2025_年报' AND page_num = 11 AND metric_id = 'revenue' AND period = '2024' AND caliber = '合并报表')",
       "note": "跨期口径①：002594_2025_年报 p11「主要会计数据」表同页给出 2025 年与 2024 年两列（R2 锁定口径，不使用 2023/2024 年报）。"
     },
     {
@@ -269,15 +279,17 @@
         {
           "doc_id": "000625_2025_年报",
           "page": 6,
-          "fact_id": 299
+          "metric_id": "net_profit",
+          "period": "2025"
         },
         {
           "doc_id": "000625_2025_年报",
           "page": 6,
-          "fact_id": 300
+          "metric_id": "net_profit",
+          "period": "2024"
         }
       ],
-      "sql": "SELECT (SELECT value_norm FROM facts WHERE fact_id = 300) - (SELECT value_norm FROM facts WHERE fact_id = 299)",
+      "sql": "SELECT (SELECT value_norm FROM facts WHERE source_doc = '000625_2025_年报' AND page_num = 6 AND metric_id = 'net_profit' AND period = '2024' AND caliber = '合并报表') - (SELECT value_norm FROM facts WHERE source_doc = '000625_2025_年报' AND page_num = 6 AND metric_id = 'net_profit' AND period = '2025' AND caliber = '合并报表')",
       "note": "跨期口径①：000625_2025_年报 p6「主要会计数据」表同页给出 2025 年与 2024 年两列；答案为正的减少额。"
     },
     {
@@ -300,15 +312,17 @@
         {
           "doc_id": "601127_2026_半年报",
           "page": 6,
-          "fact_id": 1452
+          "metric_id": "revenue",
+          "period": "2026H1"
         },
         {
           "doc_id": "601127_2026_半年报",
           "page": 6,
-          "fact_id": 1453
+          "metric_id": "revenue",
+          "period": "2025H1"
         }
       ],
-      "sql": "SELECT (SELECT value_norm FROM facts WHERE fact_id = 1453) - (SELECT value_norm FROM facts WHERE fact_id = 1452)",
+      "sql": "SELECT (SELECT value_norm FROM facts WHERE source_doc = '601127_2026_半年报' AND page_num = 6 AND metric_id = 'revenue' AND period = '2025H1' AND caliber = '合并报表') - (SELECT value_norm FROM facts WHERE source_doc = '601127_2026_半年报' AND page_num = 6 AND metric_id = 'revenue' AND period = '2026H1' AND caliber = '合并报表')",
       "note": "跨期口径②：601127_2026_半年报 p6「主要会计数据」表同页给出本报告期（2026H1）与上年同期（2025H1）两列。"
     },
     {
@@ -331,15 +345,17 @@
         {
           "doc_id": "000625_2026_半年报",
           "page": 6,
-          "fact_id": 407
+          "metric_id": "revenue",
+          "period": "2026H1"
         },
         {
           "doc_id": "000625_2026_半年报",
           "page": 6,
-          "fact_id": 408
+          "metric_id": "revenue",
+          "period": "2025H1"
         }
       ],
-      "sql": "SELECT ((SELECT value_norm FROM facts WHERE fact_id = 407) / (SELECT value_norm FROM facts WHERE fact_id = 408) - 1) * 100",
+      "sql": "SELECT ((SELECT value_norm FROM facts WHERE source_doc = '000625_2026_半年报' AND page_num = 6 AND metric_id = 'revenue' AND period = '2026H1' AND caliber = '合并报表') / (SELECT value_norm FROM facts WHERE source_doc = '000625_2026_半年报' AND page_num = 6 AND metric_id = 'revenue' AND period = '2025H1' AND caliber = '合并报表') - 1) * 100",
       "note": "跨期口径②：000625_2026_半年报 p6 本报告期与上年同期两列；同比增速 =（本期 / 上年同期 - 1）× 100，负值表示下降。",
       "evidence_unit": "亿元"
     },
@@ -364,20 +380,23 @@
         {
           "doc_id": "000333_2025_年报",
           "page": 9,
-          "fact_id": 54
+          "metric_id": "revenue",
+          "period": "2025"
         },
         {
           "doc_id": "600519_2025_年报",
           "page": 6,
-          "fact_id": 972
+          "metric_id": "revenue",
+          "period": "2025"
         },
         {
           "doc_id": "600900_2025_年报",
           "page": 6,
-          "fact_id": 1037
+          "metric_id": "revenue",
+          "period": "2025"
         }
       ],
-      "sql": "SELECT SUM(value_norm) FROM facts WHERE fact_id IN (54, 972, 1037)",
+      "sql": "SELECT SUM(value_norm) FROM facts WHERE (source_doc = '000333_2025_年报' AND page_num = 9 AND metric_id = 'revenue' AND period = '2025' AND caliber = '合并报表') OR (source_doc = '600519_2025_年报' AND page_num = 6 AND metric_id = 'revenue' AND period = '2025' AND caliber = '合并报表') OR (source_doc = '600900_2025_年报' AND page_num = 6 AND metric_id = 'revenue' AND period = '2025' AND caliber = '合并报表')",
       "note": "跨司对比：三家均为 2025 年报、合并报表、营业总收入（亿元）；答案 = 三值求和。"
     },
     {
@@ -401,20 +420,23 @@
         {
           "doc_id": "000333_2025_年报",
           "page": 9,
-          "fact_id": 57
+          "metric_id": "net_profit",
+          "period": "2025"
         },
         {
           "doc_id": "600519_2025_年报",
           "page": 6,
-          "fact_id": 978
+          "metric_id": "net_profit",
+          "period": "2025"
         },
         {
           "doc_id": "600900_2025_年报",
           "page": 6,
-          "fact_id": 1043
+          "metric_id": "net_profit",
+          "period": "2025"
         }
       ],
-      "sql": "SELECT MAX(value_norm) - MIN(value_norm) FROM facts WHERE fact_id IN (57, 978, 1043)",
+      "sql": "SELECT MAX(value_norm) - MIN(value_norm) FROM facts WHERE (source_doc = '000333_2025_年报' AND page_num = 9 AND metric_id = 'net_profit' AND period = '2025' AND caliber = '合并报表') OR (source_doc = '600519_2025_年报' AND page_num = 6 AND metric_id = 'net_profit' AND period = '2025' AND caliber = '合并报表') OR (source_doc = '600900_2025_年报' AND page_num = 6 AND metric_id = 'net_profit' AND period = '2025' AND caliber = '合并报表')",
       "note": "跨司对比：三家均为 2025 年报、合并报表、归母净利润（亿元）；答案 = 最高值 - 最低值。"
     },
     {
@@ -438,20 +460,23 @@
         {
           "doc_id": "000333_2025_年报",
           "page": 9,
-          "fact_id": 69
+          "metric_id": "roe_weighted",
+          "period": "2025"
         },
         {
           "doc_id": "600519_2025_年报",
           "page": 6,
-          "fact_id": 996
+          "metric_id": "roe_weighted",
+          "period": "2025"
         },
         {
           "doc_id": "600900_2025_年报",
           "page": 7,
-          "fact_id": 1059
+          "metric_id": "roe_weighted",
+          "period": "2025"
         }
       ],
-      "sql": "SELECT MAX(value_norm) - MIN(value_norm) FROM facts WHERE fact_id IN (69, 996, 1059)",
+      "sql": "SELECT MAX(value_norm) - MIN(value_norm) FROM facts WHERE (source_doc = '000333_2025_年报' AND page_num = 9 AND metric_id = 'roe_weighted' AND period = '2025' AND caliber = '合并报表') OR (source_doc = '600519_2025_年报' AND page_num = 6 AND metric_id = 'roe_weighted' AND period = '2025' AND caliber = '合并报表') OR (source_doc = '600900_2025_年报' AND page_num = 7 AND metric_id = 'roe_weighted' AND period = '2025' AND caliber = '合并报表')",
       "note": "跨司对比：三家均为 2025 年报、合并报表、加权平均净资产收益率（%）；差值单位记作个百分点。"
     }
   ]

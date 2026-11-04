@@ -76,7 +76,10 @@ FACT_COLUMNS = (
     "page_num",
     "raw_text_matched",
 )
-FACT_SQL = "SELECT " + ", ".join(FACT_COLUMNS) + " FROM facts WHERE fact_id = ?"
+FACT_SQL = (
+    "SELECT " + ", ".join(FACT_COLUMNS) + " FROM facts "
+    "WHERE source_doc = ? AND page_num = ? AND metric_id = ? AND period = ? AND caliber = '合并报表'"
+)
 
 
 class CheckError(Exception):
@@ -133,10 +136,20 @@ def load_report_pages(doc_id: str, cache: dict[str, int]) -> int:
     return total
 
 
-def fetch_fact(con: duckdb.DuckDBPyConnection, fact_id: int) -> tuple:
-    rows = con.execute(FACT_SQL, [fact_id]).fetchall()
+def fetch_fact(con: duckdb.DuckDBPyConnection, qid: str, item: dict) -> tuple:
+    """按自然键（文档 + 物理页 + 指标 + 报告期 + 口径）取 fact。
+
+    不用 fact_id：它是自增代理键，事实库重灌后会整体错位（坑-81）。
+    """
+    rows = con.execute(
+        FACT_SQL,
+        [item["doc_id"], int(item["page"]), item["metric_id"], item["period"]],
+    ).fetchall()
     if len(rows) != 1:
-        raise CheckError(f"fact_id={fact_id} 在 facts 表中命中 {len(rows)} 行（期望 1 行）")
+        raise CheckError(
+            f"[{qid}] 证据 {item['doc_id']} p{item['page']} {item['metric_id']} {item['period']} "
+            f"在 facts 表中命中 {len(rows)} 行（期望 1 行）"
+        )
     return rows[0]
 
 
@@ -255,7 +268,7 @@ def check_question(
     if not isinstance(evidence, list) or not evidence:
         raise CheckError(f"[{qid}] evidence 必须是非空数组")
     for item in evidence:
-        for key in ("doc_id", "page", "fact_id"):
+        for key in ("doc_id", "page", "metric_id", "period"):
             if key not in item:
                 raise CheckError(f"[{qid}] evidence 缺少 {key}：{item!r}")
     companies_in_q = question["companies"]
@@ -319,7 +332,7 @@ def check_question(
     # ---- evidence 逐条核对（并收集 fact，用于跨期/跨司口径断言）----
     facts = []
     for item in evidence:
-        fact = fetch_fact(con, item["fact_id"])
+        fact = fetch_fact(con, qid, item)
         check_evidence(question, item, fact, page_cache, report_cache)
         facts.append(fact)
 

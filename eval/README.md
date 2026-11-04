@@ -9,7 +9,7 @@
 
 | 文件 | 作用 |
 |---|---|
-| `gold_qa.json` | 15 道题：问题、标准答案、证据（doc_id + 物理页码 + fact_id）、复算 SQL |
+| `gold_qa.json` | 15 道题：问题、标准答案、证据（doc_id + 物理页码 + 指标 + 报告期）、复算 SQL |
 | `check.py` | 离线校验脚本：复算 SQL、核对答案、核对证据与物理页原文 |
 | `README.md` | 本文件（字段说明 / 运行方法 / 扩充方法） |
 
@@ -88,7 +88,7 @@
 | `companies` | 涉及公司代码数组 |
 | `periods` | 涉及报告期数组（`2025` / `2024` / `2025H1` / `2026H1`） |
 | `caliber` | 报表口径，当前全部为 `合并报表` |
-| `evidence` | 证据数组，每条 `{doc_id, page, fact_id}`：解析产物目录名 + **物理页码** + 事实库行号 |
+| `evidence` | 证据数组，每条 `{doc_id, page, metric_id, period}`：解析产物目录名 + **物理页码** + 指标 + 报告期（自然键，不用事实库行号，见坑-81） |
 | `sql` | 复算这道题的只读 SQL，必须返回 1 行 1 列数值 |
 | `note` | 人工备注：该页表名、列位置、跨期口径等 |
 
@@ -98,7 +98,7 @@
 2. **答案可复算**：每题 SQL 在事实库（只读）上执行，必须返回 1 行 1 列数值，且
    - `|SQL 结果 - answer_exact| <= 1e-6`；
    - SQL 结果四舍五入两位（ROUND_HALF_UP）必须等于 `answer`。
-3. **证据真实**：每条 `evidence.fact_id` 必须能在 `facts` 表查到，且 `source_doc` / `page_num` /
+3. **证据真实**：每条 `evidence` 按 `doc_id + page + metric_id + period`（合并报表）在 `facts` 表唯一命中，且 `source_doc` / `page_num` /
    `metric_id` / `company` / `period` / `caliber` / 单位与题目一致。
 4. **页码可核对**：`page` 必须在 `finkb/data/parsed/<doc_id>/report.json` 的页数范围内，
    `page_anchored.md` 中存在该页的 META，并且该 fact 的 `raw_text_matched`（原表里的数字字符串）
@@ -124,7 +124,7 @@
    "
    ```
 
-2. **写 SQL 复算**：单点题一般是 `SELECT value_norm FROM facts WHERE fact_id = ?`；
+2. **写 SQL 复算**：单点题一般是 `SELECT value_norm FROM facts WHERE source_doc = ... AND page_num = ... AND metric_id = ... AND period = ... AND caliber = '合并报表'`；
    跨期/跨司用差、比、SUM、MAX-MIN 组合（见现有题）。
 3. **填证据**：`doc_id` 取 fact 的 `source_doc`，`page` 取 `page_num`（物理页码），
    并打开 `finkb/data/parsed/<doc_id>/page_anchored.md` 看该页 META 与表格文字，确认行标签没取错。
