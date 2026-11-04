@@ -427,16 +427,17 @@ MinerU 把两格粘成一格的 OCR 错位（`601127_2025_半年报` 1 个、`60
 
 | 项 | 值 |
 |---|---|
-| 阶段 | Phase 0 **主体完成**；Phase 1 **L1 跑通并收口**（29 份重灌为唯一库 `data/facts.duckdb`：**1830 条**、0 未匹配、36 指标，2026-11-02 二次重灌纠正 13 条告警）；Phase 2 **L2 完整跑通**（29 份全部编译，153 页 active，lint 0 错 0 警，FTS5 检索 + 15 题评测全过；5 探针）；**L0.5 本体层已落地**（62 概念 / 71 关系 / 10 约束，六跳链条 + audit + 维度层；ADR-052～056）；**S1 推理运行时已落地**（公理层 7 类 / 10 属性 / 1 属性链 / 8 数值定义类；OWL 2 RL 物化 2,999 三元组；ADR-057）；**S2 实体治理与附注锚点已落地**（关系边 4,437、实体 1,474、附注锚 2,689；ADR-059） |
-| 测试 | **451 项全部通过**，离线 |
-| 源码规模 | `src/` 约 9200 行，`tests/` 约 6300 行，`tools/`（核验工具）2461 行，`eval/` 424 行 |
+| 阶段 | Phase 0 **主体完成**；Phase 1 **L1 跑通并收口**（29 份重灌为唯一库 `data/facts.duckdb`：**1830 条**、0 未匹配、36 指标，2026-11-02 二次重灌纠正 13 条告警）；Phase 2 **L2 完整跑通**（29 份全部编译，153 页 active，lint 0 错 0 警，FTS5 检索 + 15 题评测全过；5 探针）；**L0.5 本体层已落地**（62 概念 / 71 关系 / 10 约束，六跳链条 + audit + 维度层；ADR-052～056）；**S1 推理运行时已落地**（公理层 7 类 / 10 属性 / 1 属性链 / 8 数值定义类；OWL 2 RL 物化 2,999 三元组；ADR-057）；**S2 实体治理与附注锚点已落地**（关系边 4,437、实体 1,474、附注锚 2,689；ADR-059）；**S3 块级混合检索已落地**（15,764 块 / bge-m3 1024 维 / FTS5+向量 RRF；ADR-058）；**S4 三路问答已落地**（fact / ontology / text，50 题 50/50） |
+| 测试 | **479 项全部通过**，离线 |
+| 源码规模 | `src/` 14,110 行，`tests/` 7,395 行，`tools/`（核验工具）3,298 行，`eval/` 646 行 |
 | 真实数据验证 | 有（MinerU `vlm` 后端）：**29 份 / 14 家公司 / 4791 页**，10 类版式 |
 | 语料产出 | **5117 张物理表 → 6130 张逻辑表**；有表头 5729（93.5%）；跨页缝合 28 张，拒绝 21 条 |
 | 质量基线 | 守恒律 **359/359**；数值回查 36026 个抽样中 6 个查不到（99.98%，均为 MinerU 粘格）；`config/corpus-baseline.json` 已含 29 份 |
-| L2 产出 | **153 页 active**（29 摘要 + 107 探针 + 14 实体 + 3 跨公司概念）；claims 账本 **1570 条**（fact 1118 / query 169 / segment 283）；`segment_facts` **255 条（全部带 member_id）**；`relations` 621 条；`conflicts` 1 组（002594 2025Q1 eps 两个口径）；FTS5 检索索引 153 页 |
+| L2 产出 | **153 页 active**（29 摘要 + 107 探针 + 14 实体 + 3 跨公司概念）；claims 账本 **1,578 条**（fact 1,118 / query 177 / segment 283）；`segment_facts` **255 条（全部带 member_id）**；`relations` **4,437 条**（S2，全部回填 entity_id）；`entities_master` 1,474 / 别名 3,091；`note_anchors` 2,689（报表页 1,830 + 附注 859）；`conflicts` 1 组；FTS5 知识页索引 153 页 |
 | L0.5 产出 | 62 概念（L0 7 / L1 13 / L2 36 / L3 6）、71 关系、10 约束（5 error / 5 warn）、**3 维度 / 58 成员**；约束求值 73 组 → **0 错 0 警**；`audit` 四条结构断点全 0；推理物化：定义类 **96 命中** / 关系边推出 **378 条** / OWL RL **2,999 三元组** |
+| S3/S4 产出 | 块级索引 **15,764 块 / 4,329 页**（bge-m3 1024 维，`vectors.npy` 64.6MB）；20 题文字 **Recall@5 1.00**（带公司+期间过滤；无过滤 0.75）；三路问答 **50/50**（数字 15 + 文字 20 + 推理 10 + 负例 5） |
 | MinerU 真实联调 | ✅ **已做**（预签名上传链路，`vlm` 后端，200 页/文件上限由 `--auto-split` 自动分批） |
-| 版本控制 | ✅ **已建 git 仓库**（根目录 `/home/generalblack/code/works/reporting`，分支 `main`）。78 次提交 |
+| 版本控制 | ✅ **已建 git 仓库**（根目录 `/home/generalblack/code/works/reporting`，分支 `main`）。92 次提交 |
 
 ### 2.1 已完成
 
@@ -461,14 +462,18 @@ MinerU 把两格粘成一格的 OCR 错位（`601127_2025_半年报` 1 个、`60
 - **率值期间口径**：`facts.period_basis`，反算法标注（ADR-056）
 - **13 条约束告警归零**：补 `fx_effect` / `minority_interest` 两科目、现金流恒等式改四项、
   selector 优先合并现金流量表（坑-78）
+- **S3 块级混合检索**：`search/chunker.py`（15,764 块、verify 0 失配）、`search/embed.py`
+  （bge-m3 / 可恢复分片）、`search/hybrid.py`（jieba FTS5 + 加权 RRF + 稠密向量 + 元数据过滤）
+- **S4 三路问答**：`qa/`（fact 事实通道 / ontology 本体与附注 / text 原文检索；数字账本、
+  引用回查、负例拒答）；`eval/check_qa.py` 50 题 50/50
 
 ### 2.2 明确未做
 
 - 8 探针里的 06/07/08：方案只写了编号、没有定义（v3 §4 只定义 01–05），按「二期」处理；01–05 已实现
 - 检索路由、前端、跨期对比页（同一公司多年并列）
 - 按页 JSON 载体（P6）——已定 B：直接吃 `LogicalTable`（ADR-029）
-- 向量检索（补丁 P3）——设计已定，代码未写
-- 中文分词：FTS5 用 trigram 滑窗替代 `jieba`；2 字词无别名时查不到（见 README 已知限制）
+- 向量检索已在 S3 落地（ADR-058）；L3 前端（Web 三栏工作台）仍未做，S4 只有 CLI/API 雏形
+- 旧 153 页知识索引仍用 trigram；块级通道已用 jieba（ADR-058），两套索引暂不合并
 - 编译不幂等：同一文档重编会重写 claims、LLM 正文每次不同；token 成本仍未量化
 - 真实 `kill -9` 已实测（2026-11-01）：`tools/kill9_check.py`（可复跑，exit 0）：子进程在原子写的 `os.replace` 前加 30 秒延迟并落标记，父进程看到标记后 SIGKILL；目标页仍是完整旧版本、可解析，同目录残留 mkstemp 临时文件 `.killtest.md.*.tmp`，lint 能正常读该 vault
 
@@ -1541,6 +1546,45 @@ manifest 查不到时用 `date.today()` 兜底，且不告警。
 
 ---
 
+### ADR-058 混合检索：块级切分 + 中文 FTS5 加权 RRF + 稠密向量（2026-11-04）
+
+**背景**：ADR-002 把 L2 检索定为「FTS5 为主、向量兜底」，但旧索引只覆盖 153 个知识页、
+trigram 对 2 字词不稳；v3.1 要求块级混合检索，能回答年报原文里的定性问题（海外布局 / 风险 /
+研发人员 / 行业环境）。同时本机无 GPU、7.6G 内存，不能上本地大模型或常驻向量服务。
+
+**决策**：
+
+1. **检索单位改为 chunk**：`search/chunker.py` 从 `page_anchored.md` 按页切块（正文合并到约
+   300 字、表格超 1,200 字按行切并重复表头），块带 `doc_id/company/period/page_num/section/
+   block_type`；15,764 块覆盖 4,329 页。`verify` 保证每块正文能在原页回查（0 失配）。
+2. **新通道独立于旧索引**：块级索引落 `data/_search/`（`chunks.db` + `vectors.npy`），旧 153 页
+   的 `search/index.py` 与 `search.db` 保持不动，互不影响。
+3. **中文检索用 jieba 预分词 + FTS5 unicode61**：build 时把 token 写入 `chunks_fts`；查询时
+   **按词加权 RRF**——每词单独 MATCH，权重 `log((N+1)/(df+1))`（`term_df` 表），抑制公司名与
+   通用词淹没；稠密向量与 FTS 用 RRF(k=60) 融合。
+4. **元数据过滤在检索层做**：company / period / doc_id / block_type / section；问答路由从槽位
+   抽到过滤条件（公司+期间），这是文字题 Recall@5 从 0.75 提到 1.00 的关键。
+5. **embedding 可恢复、可降级**：按 batch 落 `vectors_parts/`，重跑跳过已有分片；无 key 或
+   断网时 `search` 自动降级 FTS-only；离线测试用 `FakeEmbedder`，不触网。
+
+**实测**（29 份真实语料，2026-11-04）：
+
+- 15,764 块 / 4,329 页；1024 维；`vectors.npy` 64,569,472 字节；全量构建 **10m39s**
+  （bge-m3，batch 64 约 1.3s/批，共 247 批，含重试）。
+- 20 道文字题 Recall@5：FTS-only 原始 **0.50**、hybrid 原始 **0.75**、hybrid+公司期间过滤
+  **1.00**（20/20）。首轮 0.75/0.75/0.85 的失败样本（茅台、长城、长电）都是跨公司召回，
+  加过滤后消失。
+- 单问检索约 0.3–0.6s（含 jieba 加载与查询 embedding）。
+
+**代价**：多 `jieba` 依赖（缺失时退化字二元组，召回下降）；向量 64MB 不进 git；新增语料要重建
+（可恢复，29 份约 11 分钟）；embedding 依赖外部 API，需 `SILICONFLOW_API_KEY`。
+
+**失效条件**：块数破 10 万 → 需要 ANN（当前 numpy 暴力点积）；语料跨语言 → 换多语模型；
+需要表格数值精确检索 → 仍走 facts 通道（ADR-001），不靠向量；embedding 供应商变更 →
+只改 `embed.py` 的 `SiliconFlowEmbedder`，检索层接口不变。
+
+---
+
 ### ADR-059 实体主数据与关系边治理：门禁 → 注册表 → 回填（2026-11-04）
 
 **背景**：S2 之前 `relations` 只有 621 条边、覆盖 5 家公司，`dst_id` 是裸字符串，15 条把
@@ -2361,17 +2405,20 @@ section_path + 行内标记认表，按行名认成员，成员名归一化后�
 | 页眉清洗（pypdf 路径） | ✅ 已验证 | 268 页，剥离 534 行，签名命中 268/268 |
 | 缝合算法（构造数据） | ✅ 已验证 | 15 项测试覆盖两页/三页/列数/重复表头/页首非表格 |
 | 清洗（MinerU 路径） | ✅ 已验证 | 实测 MinerU 对页眉/页码**打类型标签**，直接标记 `is_noise`，无需统计推断 |
-| 硅基流动 API | ❌ 未接入 | 向量兜底（P3）无代码，key 未配置 |
-| 中文分词 | ⚠️ 用 FTS5 trigram 滑窗替代 | `jieba` 未安装；trigram 对 3 字以上词有效，2 字词要靠 `metric_dict.aliases` 别名扩展才稳 |
+| 硅基流动 API | ✅ **2026-11-04 接入** | `BAAI/bge-m3`（1024 维），batch 64 约 1.3s/批；key 在 `config/.env` 的 `SILICONFLOW_API_KEY`；断网/无 key 自动降级 FTS-only |
+| 中文分词 | ✅ **jieba 0.42.1 已装** | 新块级通道用 jieba 预分词（ADR-058）；旧 153 页索引仍 trigram，未合并 |
 | `rowspan`/`colspan` | ✅ 已展开 | `_expand_merged_cells` 统一展开；仍有个别物理表逐页丢空列（坑-40），表现是跨页列数不一致、拒绝缝合 |
 | **L2 多文档编译** | ✅ **2026-11-01，29 份 / 153 页 active** | `wiki_scope.yaml` 登记 29 份；每份 1 摘要 + 5 探针（结构页/海外页无数据时跳过）；lint 0 错 0 警；首批 1338 秒 + 新探针 442 秒，token 成本仍未量化 |
 | **L2 实体 / 概念页** | ✅ 14 实体 + 3 概念 | 实体页由 `relations` 生成（无数字、无 LLM）；概念页跨公司对比，走同一 claims 账本与门禁 |
 | **L2 检索（FTS5）** | ✅ 153 页索引 | `finkb/src/finkb/search/`：trigram + `metric_dict.aliases` 扩展 + bm25；「营收」实测命中 3 页；2 字词无别名时查不到 |
+| **块级混合检索（S3）** | ✅ **15,764 块 / 4,329 页** | jieba FTS5 + bge-m3 稠密 + 加权 RRF + 元数据过滤；20 题 Recall@5 带过滤 1.00（原始 hybrid 0.75）；块锚 verify 0 失配（ADR-058） |
+| **三路问答（S4）** | ✅ **50/50** | 数字 15 + 文字 20 + 推理 10 + 负例 5；`eval/check_qa.py` 离线可复跑；三路 = fact（SQL）/ ontology（定义类+关系边+附注）/ text（混合检索） |
+| **L3 交互层** | ⚠️ 只有 CLI/API 雏形 | `python -m finkb.qa` 可问答；Web 三栏工作台未做 |
 | **L2 评测集** | ✅ 15/15 | `eval/gold_qa.json`（单点 8 / 跨期 4 / 跨司 3）+ `eval/check.py` 离线复算，断言含 fact 存在、页锚存在、原文含该数字 |
 | **L2 验收（故障注入）** | ✅ 4/4 | 临时副本注入假锚点/断链/无源数字/截断页：分别被 R8/R1/R9 拦，截断页仍可解析（`finkb/.tmp/accept_faults.py`） |
 | **真实 `kill -9`** | ✅ 已验证 | `finkb/tools/kill9_check.py`（可复跑，exit 0）：把 `os.replace` 前加 30 秒延迟（落标记确认已进入该窗口），SIGKILL 后目标页仍为完整旧版、`read_page` 解析成功，残留 mkstemp 临时文件不污染页面 |
 | **8 探针** | ⚠️ 实现 5 个（01–05） | 01 核心财务 / 02 分产品结构 / 03 研发投入 / 04 海外收入 / 05 现金流与资本结构已跑通；06/07/08 方案只有编号没有定义（v3 §4 只定义到 05），不自行编造（ADR-051） |
-| **关系抽取** | ✅ **29 份，4,437 条边**（S2） | 表头族配置化后覆盖 14 家公司；实体 1,474 / 别名 3,091，边全部回填 entity_id。**precision 未做人工金标**（S4 抽检），实体同名跨公司可能并错 |
+| **关系抽取** | ✅ **29 份，4,437 条边**（S2） | 表头族配置化后覆盖 14 家公司；实体 1,474 / 别名 3,091，边全部回填 entity_id。S4 用 10 道推理题覆盖，**precision 仍未做人工金标**，实体同名跨公司可能并错 |
 | **附注锚点** | ⚠️ **36/36 报表页锚，23/36 附注锚**（S2） | 有附注的文档只有 20 份（12 年报+8 半年报，9 季报无附注）；核心 13 项 12 项 ≥80%，finance_expense 75%。「36 项都 ≥90%」不现实，验收线已按 20 份文档重算 |
 | **实体消歧** | ⚠️ **规则版**（S2） | 去后缀最短写法合并别名；未人工审核，跨公司重名（如「XX集团」）可能并错，S4 再抽检 |
 | **矛盾检测** | ✅ **1 组** | 只做 facts 级同科目跨文档数值不一致；文本语义矛盾未做（ADR-046） |
@@ -2431,8 +2478,8 @@ P43→P44 那张证券投资表（14 列）在 pypdf 文本层能清楚看到首
 | 安装项目 | `cd finkb && ../.venv/bin/pip install --no-build-isolation -e .`（装后可用 `finkb` 命令） |
 | 跑测试 | `cd finkb && ../.venv/bin/python -m pytest` |
 | 继承的系统包 | duckdb 1.5.3、pytest 9.0.3、pydantic 2.13.4、numpy、pandas、requests |
-| 额外安装 | **pypdf 6.21.1**、**PyMuPDF**（`audit.py verify-cells` / `recall` 回查 PDF 用）、**rdflib 7.6.0 + owlrl 7.6.2**（可选，`pip install -e '.[ontology]'`；只有 `ontology export/infer` 需要） |
-| 未安装 | `jieba`（Phase 3 的中文 FTS 需要） |
+| 额外安装 | **pypdf 6.21.1**、**PyMuPDF**（`audit.py verify-cells` / `recall` 回查 PDF 用）、**rdflib 7.6.0 + owlrl 7.6.2**（可选，`pip install -e '.[ontology]'`；只有 `ontology export/infer` 需要）、**jieba 0.42.1**（S3 块级 FTS 分词；缺失时退化为字二元组） |
+| 未安装 | 无（S3 起 `jieba` 已装入 venv） |
 
 > 为什么用 `--system-site-packages`：系统 Python 受 PEP 668 保护，直接 `pip install`
 > 会被拒绝；从零装全套媒体包又太慢。继承系统包 + 只补 pypdf 是最省时的组合。
@@ -2449,6 +2496,7 @@ P43→P44 那张证券投资表（14 列）在 pypdf 文本层能清楚看到首
 | 优先级 | 已存在的环境变量**优先**，`.env` 不覆盖它们 → 支持 `MINERU_API_TOKEN=xxx <cmd>` 临时覆盖 |
 
 支持的变量：`MINERU_API_TOKEN`（必填）、`MINERU_BASE_URL`、`MINERU_MODEL_VERSION`、
+`SILICONFLOW_API_KEY`（S3 混合检索 embedding；缺失时降级 FTS-only）、
 `MINERU_LANGUAGE`、`MINERU_POLL_INTERVAL`、`MINERU_POLL_TIMEOUT`。
 
 **刻意不引入 python-dotenv**：格式足够简单，自带 20 行解析器（支持 `#` 注释、
@@ -2564,6 +2612,30 @@ git checkout 57f9fed -- _ref               # 恢复到工作区
 ## 11. 变更记录
 
 > 时间线：2026-10-21 之后的条目来自 git 提交历史，之前的是**重建**的。
+
+### 2026-11-04 —— S4：三路问答（fact / ontology / text）与 50 题评测
+
+- 新建 `qa/`：`fact_lane.py`（规则槽位 + 模板 SQL，15 题 15/15）、`router.py`（三路分流）、
+  `answer.py`（fact/ontology/text 三通道 + 负例拒答）、`synthesizer.py`（`{{cN}}` 账本渲染）、
+  `verifier.py`（引用回查 + 数字绑定）、`__main__.py`（CLI）。
+- 评测：`eval/check_qa.py`（50 题 = 数字 15 + 文字 20 + 推理 10 + 负例 5），全过 50/50；
+  `eval/recall.py`（Recall@5 三档对照）；`eval/gold_reasoning.json`、`eval/gold_negative.json`、
+  `eval/text_qa.json`。
+- 修复：路由 text-intent 优先于 fact、公司短名（万科）、聚合题不误拒、文本通道跳过数字绑定、
+  关系边去重与门禁过滤、计数账本整数格式。
+- 测试：新增 `tests/test_qa.py` 9 项；全套 **451 → 479 项通过**；`scripts/check.sh` 全绿。
+
+### 2026-11-04 —— S3：块级切分 + 混合检索（ADR-058）
+
+- 新建 `search/chunker.py`：按页切块 15,764（text 9,283 / table 6,481）、覆盖 4,329 页；
+  `--verify` 0 失配。
+- 新建 `search/embed.py`：`Embedder` 协议 + `SiliconFlowEmbedder`（bge-m3 / 1024 维 /
+  可恢复分片）+ `FakeEmbedder`（离线测试）。
+- 新建 `search/hybrid.py`：jieba 预分词 FTS5（unicode61）+ `term_df` 加权 RRF + numpy 稠密
+  检索 + RRF(k=60) 融合 + company/period/doc_id/block_type 过滤；CLI `build` / `query`。
+- 实测：全量构建 10m39s、`vectors.npy` 64.6MB；20 题 Recall@5 带过滤 **1.00**（原始 hybrid 0.75）。
+- 测试：新增 `test_chunker.py` 6、`test_embed.py` 5、`test_hybrid.py` 8；pyproject 加
+  `search` 可选依赖（jieba）。
 
 ### 2026-11-04 —— S2：实体治理、关系边重抽与附注锚点
 

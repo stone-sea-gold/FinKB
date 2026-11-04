@@ -1,0 +1,114 @@
+{
+  "schema_version": 1,
+  "description": "本体推理题 10 道：5 道数值定义类、3 道关系边、2 道附注穿透。",
+  "questions": [
+    {
+      "id": "R01",
+      "type": "class",
+      "question": "哪些公司 2025 年的资产负债率超过 70%？",
+      "class_id": "finkb:HighLeverage",
+      "period": "2025",
+      "expected_companies": [
+        "000002",
+        "002594",
+        "600030",
+        "601127"
+      ]
+    },
+    {
+      "id": "R02",
+      "type": "class",
+      "question": "哪些公司 2025 年的经营现金流为负？",
+      "class_id": "finkb:NegativeOcf",
+      "period": "2025",
+      "expected_companies": [
+        "000002",
+        "601238"
+      ]
+    },
+    {
+      "id": "R03",
+      "type": "class",
+      "question": "哪些公司 2025 年的研发强度（研发投入占营业收入）超过 5%？",
+      "class_id": "finkb:RdIntensive",
+      "period": "2025",
+      "expected_companies": [
+        "002594",
+        "600276"
+      ]
+    },
+    {
+      "id": "R04",
+      "type": "class",
+      "question": "哪些公司 2025 年的现金充裕（现金占总资产超过 30%）？",
+      "class_id": "finkb:CashRich",
+      "period": "2025",
+      "expected_companies": [
+        "600276",
+        "601127"
+      ]
+    },
+    {
+      "id": "R05",
+      "type": "class",
+      "question": "哪些公司 2025 年的 ROE 低（净资产收益率低于 5%）？",
+      "class_id": "finkb:LowRoe",
+      "period": "2025",
+      "expected_companies": [
+        "000002",
+        "601238"
+      ]
+    },
+    {
+      "id": "R06",
+      "type": "relation",
+      "question": "比亚迪 2025 年报的子公司有哪些？",
+      "rel_type": "subsidiary_of",
+      "company": "002594",
+      "expected_contains": [
+        "比亚迪汽车有限公司",
+        "合肥比亚迪汽车有限公司"
+      ]
+    },
+    {
+      "id": "R07",
+      "type": "relation",
+      "question": "美的集团的主要股东有哪些？",
+      "rel_type": "shareholder_of",
+      "company": "000333",
+      "expected_contains": [
+        "美的控股有限公司"
+      ]
+    },
+    {
+      "id": "R08",
+      "type": "relation",
+      "question": "中国神华的担保对象有哪些？",
+      "rel_type": "guarantees_for",
+      "company": "601088",
+      "expected_contains": [
+        "呼伦贝尔两伊铁路有限责任公司"
+      ]
+    },
+    {
+      "id": "R09",
+      "type": "note",
+      "question": "比亚迪 2025 年存货的附注页是哪一页？",
+      "expected_pages": [
+        148,
+        174,
+        175
+      ]
+    },
+    {
+      "id": "R10",
+      "type": "note",
+      "question": "美的集团 2025 年研发费用的附注页是哪一页？",
+      "expected_pages": [
+        52,
+        53,
+        226
+      ]
+    }
+  ]
+}
