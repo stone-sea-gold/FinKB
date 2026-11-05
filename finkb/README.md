@@ -114,6 +114,22 @@ python -m finkb.search.hybrid query "海外 布局" --company 002594 --period 20
 python -m finkb.qa "万科A 2025 年营业收入是多少亿元？"
 cd .. && .venv/bin/python eval/check_qa.py   # 50 题：数字/文字/推理/负例
 ```
+
+三档问答（ADR-060；`auto` 逐级回落，`--explain` 看剪枝/残差门）：
+
+```bash
+python -m finkb.qa "万科A 2025 年营业收入是多少亿元？" --explain        # Tier 1 指标
+python -m finkb.qa "哪些公司 2025 年资产负债率超过 70%？" --tier ontology  # Tier 2 本体
+python -m finkb.qa "比亚迪 2025 年报里如何描述海外布局？" --tier document # Tier 3 文档
+```
+
+质量门禁（`scripts/check.sh` 已包含）：
+
+```bash
+python tools/metric_check.py --db data/facts.duckdb          # 指标定义 + SQL 安全 + 连库
+python -m finkb.ontology.quality --db data/facts.duckdb      # 本体结构质量（9 项）
+python -m finkb.fact_engine.data_check --db data/facts.duckdb # 约束求值/实体回填/附注覆盖
+cd .. && .venv/bin/python eval/recall.py --no-dense --min-recall 0.9  # 离线召回 + MRR
 ```
 
 批量编译器在 `finkb/.tmp/batch_compile.py`（读 `config/wiki_scope.yaml`，逐份编译并写

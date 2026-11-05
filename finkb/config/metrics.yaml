@@ -1,0 +1,79 @@
+# 指标治理 v1（ADR-060）
+#
+# 目的：把「Tier 1 能直接回答的指标」从代码里的临时模板收成一份可检查的清单。
+# 规则：
+#   - metric_dict.yaml 里的 36 个直接披露科目，默认都是 Tier 1（kind=fact），
+#     共用 fact_sql 模板；
+#   - 比率/同比这类派生值只能走 config/wiki_queries.yaml 的命名 SQL（ADR-047），
+#     这里只声明引用（kind=query + ref），不重复写 SQL；
+#   - 还没定义 SQL 的派生指标放 pending，只警告不阻塞（对应「软校验」）；
+#   - `tools/metric_check.py` 做硬/软校验：结构、SQL 只读、参数个数、能否执行、
+#     概念是否存在；硬错误退出 1。
+#
+# 新增/修改指标时：改这里 + wiki_queries.yaml（如果是派生），然后跑
+#   ../.venv/bin/python tools/metric_check.py --db data/facts.duckdb
+version: 1
+updated_at: "2026-11-05"
+description: "Tier 1 指标清单：36 个直接披露科目 + 5 个命名 SQL 派生指标"
+
+# 直接披露科目的通用查询模板；参数顺序固定为 (company, period, metric_id)。
+fact_sql: |
+  SELECT fact_id, company, period, metric_id, value_norm, norm_unit, source_doc, page_num
+  FROM facts_dedup
+  WHERE company = ? AND period = ? AND metric_id = ?
+  ORDER BY fact_id
+  LIMIT 1
+
+# 派生指标：kind=query 表示执行 wiki_queries.yaml 里的同名 SQL。
+metrics:
+  debt_ratio:
+    name: 资产负债率
+    aliases: [资产负债率, 负债率, 资产负债比率]
+    unit: "%"
+    kind: query
+    ref: debt_ratio
+    ontology_concepts: [self:debt_ratio]
+    description: 负债总额 / 资产总额 × 100
+  gross_margin:
+    name: 毛利率
+    aliases: [毛利率, 销售毛利率]
+    unit: "%"
+    kind: query
+    ref: gross_margin
+    ontology_concepts: [self:gross_margin]
+    description: (营业总收入 - 营业成本) / 营业总收入 × 100
+  net_margin:
+    name: 净利率
+    aliases: [净利率, 销售净利率]
+    unit: "%"
+    kind: query
+    ref: net_margin
+    ontology_concepts: [self:net_margin]
+    description: 归属于上市公司股东的净利润 / 营业总收入 × 100
+  rd_ratio:
+    name: 研发费用率
+    aliases: [研发费用率, 研发投入占比, 研发费用占营业收入比重, 研发强度]
+    unit: "%"
+    kind: query
+    ref: rd_ratio
+    ontology_concepts: [self:rd_intensity]
+    description: 研发投入 / 营业总收入 × 100
+  yoy:
+    name: 同比增速
+    aliases: [同比增速, 同比增长率, 同比]
+    unit: "%"
+    kind: query
+    ref: yoy
+    ontology_concepts: []
+    description: (本期 - 上年同期) / 上年同期 × 100；参数是 fact_id
+
+# 已在 L3 本体里定义、但还没有命名 SQL 的派生指标：先记下来，不阻塞。
+pending:
+  expense_ratio:
+    name: 费用率
+    reason: 三费合计 / 营业总收入；等 S4 之后再定是否进 Tier 1
+    ontology_concepts: [self:expense_ratio]
+  equity_ratio:
+    name: 权益乘数
+    reason: 资产总额 / 所有者权益；语义偏杠杆，暂不单列
+    ontology_concepts: [self:equity_ratio]

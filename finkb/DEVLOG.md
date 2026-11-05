@@ -427,8 +427,8 @@ MinerU 把两格粘成一格的 OCR 错位（`601127_2025_半年报` 1 个、`60
 
 | 项 | 值 |
 |---|---|
-| 阶段 | Phase 0 **主体完成**；Phase 1 **L1 跑通并收口**（29 份重灌为唯一库 `data/facts.duckdb`：**1830 条**、0 未匹配、36 指标，2026-11-02 二次重灌纠正 13 条告警）；Phase 2 **L2 完整跑通**（29 份全部编译，153 页 active，lint 0 错 0 警，FTS5 检索 + 15 题评测全过；5 探针）；**L0.5 本体层已落地**（62 概念 / 71 关系 / 10 约束，六跳链条 + audit + 维度层；ADR-052～056）；**S1 推理运行时已落地**（公理层 7 类 / 10 属性 / 1 属性链 / 8 数值定义类；OWL 2 RL 物化 2,999 三元组；ADR-057）；**S2 实体治理与附注锚点已落地**（关系边 4,437、实体 1,474、附注锚 2,689；ADR-059）；**S3 块级混合检索已落地**（15,764 块 / bge-m3 1024 维 / FTS5+向量 RRF；ADR-058）；**S4 三路问答已落地**（fact / ontology / text，50 题 50/50） |
-| 测试 | **481 项全部通过**，离线 |
+| 阶段 | Phase 0 **主体完成**；Phase 1 **L1 跑通并收口**（29 份重灌为唯一库 `data/facts.duckdb`：**1830 条**、0 未匹配、36 指标，2026-11-02 二次重灌纠正 13 条告警）；Phase 2 **L2 完整跑通**（29 份全部编译，153 页 active，lint 0 错 0 警，FTS5 检索 + 15 题评测全过；5 探针）；**L0.5 本体层已落地**（62 概念 / 71 关系 / 10 约束，六跳链条 + audit + 维度层；ADR-052～056）；**S1 推理运行时已落地**（公理层 7 类 / 10 属性 / 1 属性链 / 8 数值定义类；OWL 2 RL 物化 2,999 三元组；ADR-057）；**S2 实体治理与附注锚点已落地**（关系边 4,437、实体 1,474、附注锚 2,689；ADR-059）；**S3 块级混合检索已落地**（15,764 块 / bge-m3 1024 维 / FTS5+向量 RRF；ADR-058）；**S4 三路问答已落地**（fact / ontology / text，50 题 50/50）；**P0/P1 改进已落地**（三档契约 + 指标治理 + 本体质量门禁 + 闭世界数据校验 + 召回 MRR，ADR-060） |
+| 测试 | **509 项全部通过**，离线 |
 | 源码规模 | `src/` 14,110 行，`tests/` 7,395 行，`tools/`（核验工具）3,298 行，`eval/` 646 行 |
 | 真实数据验证 | 有（MinerU `vlm` 后端）：**29 份 / 14 家公司 / 4791 页**，10 类版式 |
 | 语料产出 | **5117 张物理表 → 6130 张逻辑表**；有表头 5729（93.5%）；跨页缝合 28 张，拒绝 21 条 |
@@ -437,7 +437,7 @@ MinerU 把两格粘成一格的 OCR 错位（`601127_2025_半年报` 1 个、`60
 | L0.5 产出 | 62 概念（L0 7 / L1 13 / L2 36 / L3 6）、71 关系、10 约束（5 error / 5 warn）、**3 维度 / 58 成员**；约束求值 73 组 → **0 错 0 警**；`audit` 七跳结构断点全 0；推理物化：定义类 **96 命中** / 关系边推出 **378 条** / OWL RL **2,999 三元组** |
 | S3/S4 产出 | 块级索引 **15,764 块 / 4,329 页**（bge-m3 1024 维，`vectors.npy` 64.6MB）；20 题文字 **Recall@5 1.00**（带公司+期间过滤；无过滤 0.75）；三路问答 **50/50**（数字 15 + 文字 20 + 推理 10 + 负例 5） |
 | MinerU 真实联调 | ✅ **已做**（预签名上传链路，`vlm` 后端，200 页/文件上限由 `--auto-split` 自动分批） |
-| 版本控制 | ✅ **已建 git 仓库**（根目录 `/home/generalblack/code/works/reporting`，分支 `main`）。92 次提交 |
+| 版本控制 | ✅ **已建 git 仓库**（根目录 `/home/generalblack/code/works/reporting`，分支 `main`）。93 次提交 |
 
 ### 2.1 已完成
 
@@ -1634,6 +1634,56 @@ trigram 对 2 字词不稳；v3.1 要求块级混合检索，能回答年报原�
 
 ---
 
+### ADR-060 三档契约、指标治理与质量门禁（2026-11-05）
+
+**背景**：S4 的三路问答（fact/ontology/text）是隐式的——路由分数决定走哪条，失败时行为不一致
+（fact 缺数据直接拒答、ontology 失败降级 text），没有统一的档位/置信度/trace；指标（Tier 1）
+只有 `wiki_queries.yaml` 五条命名 SQL，没有定义、别名和 SQL 安全校验；本体层有 audit 查链条完整性，
+但没有 OntoQA/OoPS 式结构检查，也没有人真正把 `ontology_constraints` 在事实库上求值。
+COA 的三档契约（Tier1 指标 / Tier2 本体 / Tier3 文档，按顺序 fall-through + 能力剪枝 + 残差门）
+是把这些串起来的最小结构。
+
+**决策**：
+
+1. **三档契约** `qa/pipeline.py`：档位顺序固定 metric → ontology → document；`ask()` 返回
+   `tier/route/confidence/trace`；能力探测（`facts_dedup` / `inferred_concepts` / `chunks.db`）
+   缺失的档直接剪掉；路由提示 text 时只走文档、提示 ontology 时跳过指标、含「附注」且命中指标时
+   跳过指标；**残差门**：剥离公司/指标/期间后仍有「分产品/海外/客户/渠道」等限定词就降级，
+   不拿总数冒充分项。数值题命中指标但查不到数据时明确拒答，不再降级到文档。
+2. **指标治理 v1**：`config/metrics.yaml` 集中定义 Tier 1（36 个直接披露 + 5 个命名 SQL +
+   2 个 pending），`fact_engine/metric_governance.py` + `tools/metric_check.py` 做硬/软校验
+   （SQL 安全：只允许 SELECT/WITH、禁写与危险函数、单语句；参数个数/名称匹配；ref 与
+   ontology_concepts 存在；连库执行）；硬错误退出 1，并入 `check.sh`。
+3. **本体质量门禁** `ontology/quality.py`：9 项结构检查（重复标签、孤立概念、层级环、悬空引用、
+   缺 domain/range、互逆不配对、L2 概念无事实、定义类零命中、缺 definition）；error 级挡 CI，
+   warn 只报告。
+4. **闭世界数据校验** `fact_engine/data_check.py`：逐条求值 `ontology_constraints`
+   （acct_equation/range 用 `ontology.expr`，缺输入跳过；required_period/unit_check 按列检查），
+   加实体回填完整性、核心科目附注覆盖（分母 = 有附注的 20 份文档）。
+5. **检索评测补强**：`eval/recall.py` 增加 MRR@k 与 `--no-dense` 离线模式，
+   `check.sh` 跑 FTS 过滤后 Recall@5 下限 0.9。
+
+**实测（2026-11-05）**：
+
+- 三档：数字题 tier=metric、推理题 tier=ontology、文字题 tier=document；`eval/check_qa.py`
+  50/50 不变；`tests/test_pipeline.py` 9 项。
+- 指标治理：Tier 1 = 36 + 5、pending 2；SQL 安全检查 6 条；连库执行通过；
+  `tests/test_metric_governance.py` 6 项。
+- 质量门禁：9 项全 0（无 error 也无 warn）；`tests/test_ontology_quality.py` 7 项。
+- 数据校验：10 条约束、73 个(公司,期间)组；等式/范围/期间/单位 0 违规；
+  实体回填 4,437/4,437；附注覆盖 1 个 warn（finance_expense 15/20）；
+  `tests/test_data_check.py` 6 项。
+- 召回：FTS-only Recall@5 0.50、带公司+期间过滤 1.00；MRR@5 分别为 0.379 / 0.829。
+- 全套 **509 项通过**；`check.sh` 全绿（新增 4 道门禁）。
+
+**代价**：pipeline 每问探测一次能力（只读 DuckDB 连接，约 10ms）；残差门是词表规则，
+词表外的新限定词会漏（失效时补词）；指标治理仍是 v1（无 OSI 导入导出、无版本化审批）。
+
+**失效条件**：数据源变成多租户/多库 → 能力探测改为显式配置；残差门误伤比例高 → 改为基于
+指标口径的槽位匹配；本体概念破千 → 质量门禁增加基于 OWL 2 QL 的自动检查。
+
+---
+
 ## 6. 被推翻 / 废弃的方案（不要重提）
 
 | 曾提出 | 为什么废弃 | 替代 |
@@ -2612,6 +2662,23 @@ git checkout 57f9fed -- _ref               # 恢复到工作区
 ## 11. 变更记录
 
 > 时间线：2026-10-21 之后的条目来自 git 提交历史，之前的是**重建**的。
+
+### 2026-11-05 —— P0/P1：三档契约、指标治理、质量门禁与闭世界校验（ADR-060）
+
+- 新建 `qa/pipeline.py` 与 `tests/test_pipeline.py`：三档 fall-through（metric→ontology→document）、
+  能力剪枝、残差门、`tier/confidence/trace`；`answer.py` / `__main__.py` 改为委托 pipeline；
+  `eval/check_qa.py` 保持 50/50。
+- 新建 `config/metrics.yaml`、`fact_engine/metric_governance.py`、`tools/metric_check.py`、
+  `tests/test_metric_governance.py`：Tier 1 = 36 直接披露 + 5 命名 SQL + 2 pending；
+  SQL 安全 / 参数 / ref / 概念 / 连库 校验，硬错误退出 1。
+- 新建 `ontology/quality.py`、`tests/test_ontology_quality.py`：9 项结构检查（OntoQA/OoPS 式），
+  error 挡 CI、warn 只报告。
+- 新建 `fact_engine/data_check.py`、`tests/test_data_check.py`：约束求值（等式/范围/期间/单位）、
+  实体回填、核心科目附注覆盖。
+- `eval/recall.py` 增加 MRR@k 与 `--no-dense`；`scripts/check.sh` 增加指标治理、本体质量、
+  闭世界校验、离线召回四道门禁。
+- 同步数据：`ontology load` 重灌公理（补 `hasFinancialState` 的 inverse_of）。
+- 测试 **481 → 509 项通过**；`check.sh` 全绿；`eval/check_qa.py` 50/50。
 
 ### 2026-11-04 —— audit 升级七跳：新增「推理血缘」体检
 

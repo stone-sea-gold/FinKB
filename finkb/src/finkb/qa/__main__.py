@@ -1,27 +1,37 @@
-"""CLI：python -m finkb.qa "问题" [--json]"""
+"""CLI：python -m finkb.qa "问题" [--json] [--tier auto|metric|ontology|document] [--explain]"""
 
 from __future__ import annotations
 
 import argparse
 import json
 
-from finkb.qa.answer import answer
+from finkb.qa.pipeline import TIER_LABELS, ask
 from finkb.qa.synthesizer import render
 from finkb.qa.verifier import verify
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="FinKB 三路问答（抽取式，离线）")
+    parser = argparse.ArgumentParser(description="FinKB 三档问答（抽取式，离线）")
     parser.add_argument("question")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--tier", choices=("auto", "metric", "ontology", "document"), default="auto",
+                        help="只跑指定档位；默认 auto（按契约逐级回落）")
+    parser.add_argument("--explain", action="store_true", help="打印档位选择与剪枝过程")
     args = parser.parse_args()
-    payload = answer(args.question)
+
+    payload = ask(args.question, tier=args.tier)
     rendered, used = render(payload.get("text", ""), payload.get("ledger", []))
     check = verify({**payload, "text": rendered})
     if args.json:
-        print(json.dumps({**payload, "text": rendered, "used_ledger": used, "verify": check}, ensure_ascii=False, indent=2))
+        print(json.dumps({**payload, "text": rendered, "used_ledger": used, "verify": check},
+                         ensure_ascii=False, indent=2))
         return
-    print(f"路由：{payload['route']}　{'（拒答）' if payload.get('refused') else ''}")
+    tier = payload.get("tier", "?")
+    print(f"档位：{TIER_LABELS.get(tier, tier)}（{tier}）　置信度：{payload.get('confidence', 0):.2f}"
+          f"　{'（拒答）' if payload.get('refused') else ''}")
+    if args.explain:
+        for step in payload.get("trace", []):
+            print("  " + json.dumps(step, ensure_ascii=False))
     print(f"答案：{rendered}")
     if payload.get("ledger"):
         print("账本：")

@@ -17,7 +17,6 @@ import duckdb
 from finkb.fact_engine.selector import FINKB_ROOT
 from finkb.ontology.operators import note_drill_down
 from finkb.qa import fact_lane
-from finkb.qa.router import route as route_question
 
 FACT_DB = FINKB_ROOT / "data" / "facts.duckdb"
 SCOPE_PATH = FINKB_ROOT / "config" / "wiki_scope.yaml"
@@ -204,23 +203,19 @@ def _refuse(question: str, reason: str) -> dict:
     return {"route": "fact", "question": question, "refused": True, "text": reason, "data": {}, "ledger": [], "citations": []}
 
 
-def answer(question: str) -> dict:
-    """路由并回答；任何通道失败都降级为原文通道。"""
+def precheck(question: str) -> dict | None:
+    """进入三档前的确定性拒答；返回 None 表示交给 pipeline。"""
     slot = fact_lane.extract(question)
     if any(token in question for token in OUT_OF_SCOPE_TOKENS):
         return _refuse(question, "问题涉及的指标不在本项目语料范围内。")
     aggregate = any(word in question for word in ("哪些", "所有", "各公司", "全部"))
     if NUMERIC_INTENT_RE.search(question) and slot.metric is not None and not slot.companies and not aggregate:
         return _refuse(question, "问题提到的公司不在语料范围内。")
-    chosen = route_question(question)
-    if chosen.name == "fact":
-        payload = fact_lane.answer(question)
-        if payload is not None:
-            payload["route"] = "fact"
-            return payload
-        return {"route": "fact", "question": question, "refused": True, "text": "没有找到对应的事实数据（可能指标、公司或期间不在语料内）。", "data": {}, "ledger": [], "citations": []}
-    if chosen.name == "ontology":
-        payload = answer_ontology(question)
-        if payload is not None:
-            return payload
-    return answer_text(question)
+    return None
+
+
+def answer(question: str) -> dict:
+    """三档契约的向后兼容入口：返回带 tier/trace/confidence 的超集。"""
+    from finkb.qa.pipeline import ask
+
+    return ask(question)

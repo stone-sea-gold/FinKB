@@ -34,6 +34,38 @@ else
 fi
 
 echo
+echo "== 指标治理（Tier 1 定义/SQL 安全/连库）=="
+if [ -f data/facts.duckdb ]; then
+  "$PYTHON" tools/metric_check.py --db data/facts.duckdb
+else
+  echo "跳过：data/facts.duckdb 不存在"
+fi
+
+echo
+echo "== 本体质量门禁（OntoQA/OoPS 式结构检查）=="
+if [ -f data/facts.duckdb ]; then
+  "$PYTHON" -m finkb.ontology.quality --db data/facts.duckdb
+else
+  echo "跳过：data/facts.duckdb 不存在"
+fi
+
+echo
+echo "== 闭世界数据校验（约束求值/实体回填/附注覆盖）=="
+if [ -f data/facts.duckdb ]; then
+  "$PYTHON" -m finkb.fact_engine.data_check --db data/facts.duckdb
+else
+  echo "跳过：data/facts.duckdb 不存在"
+fi
+
+echo
+echo "== 文字题召回（离线 FTS，Recall@5 下限 0.9）=="
+if [ -f data/_search/chunks.db ]; then
+  "$PYTHON" ../eval/recall.py --no-dense --min-recall 0.9
+else
+  echo "跳过：data/_search/chunks.db 不存在"
+fi
+
+echo
 echo "== 金标事实集 =="
 if [ -f data/facts.duckdb ]; then
   "$PYTHON" tools/gold_check.py --db data/facts.duckdb --gold config/gold_facts.yaml

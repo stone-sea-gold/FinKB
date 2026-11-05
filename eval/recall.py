@@ -1,7 +1,11 @@
-"""文字题 Recall@5 评测：FTS-only 与 FTS+稠密+RRF，含元数据过滤。"""
+"""文字题召回评测（P1-3）：FTS-only / FTS+稠密+RRF，含元数据过滤；报 Recall@k 与 MRR@k。
+
+``--no-dense`` 时不加载向量模型，纯离线跑（check.sh 可选用）。
+"""
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -32,69 +36,96 @@ def load_scope() -> dict[str, str]:
     return mapping
 
 
-def is_hit(results: list[dict], expected: list[dict]) -> bool:
-    for result in results:
+def reciprocal_rank(results: list[dict], expected: list[dict]) -> float:
+    """第一个命中页出现在第几位；没命中返回 0。"""
+    for rank, result in enumerate(results, start=1):
         for item in expected:
             if result.get("doc_id") == item["doc_id"] and result.get("page_num") in item["pages"]:
-                return True
-    return False
+                return 1.0 / rank
+    return 0.0
+
+
+def is_hit(results: list[dict], expected: list[dict]) -> bool:
+    return reciprocal_rank(results, expected) > 0
+
+
+def _filters(question: str, scope: dict[str, str]) -> dict[str, str]:
+    company = next((code for name, code in scope.items() if name and name in question), None)
+    slot = fact_lane.extract(question)
+    filters: dict[str, str] = {}
+    if company:
+        filters["company"] = company
+    if slot.periods:
+        filters["period"] = slot.periods[0]
+    return filters
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="文字题 Recall@k / MRR@k 评测")
+    parser.add_argument("--limit", type=int, default=5)
+    parser.add_argument("--no-dense", action="store_true", help="只用 FTS，不连 embedding API")
+    parser.add_argument("--min-recall", type=float, default=None, help="过滤后 Recall 低于该值时退出 1")
+    args = parser.parse_args()
+
     data = json.loads(QA_PATH.read_text(encoding="utf-8"))
     questions = data["questions"]
     scope = load_scope()
     chunks = hybrid.load_chunks(CHUNKS_PATH)
-    try:
+
+    vectors = None
+    embedder = None
+    if not args.no_dense:
         import numpy as np
 
         vectors = np.load(VECTORS_PATH)
-    except Exception:
-        vectors = None
-    embedder = SiliconFlowEmbedder()
+        embedder = SiliconFlowEmbedder()
 
-    stats = {"fts": 0, "fts_filtered": 0, "hybrid": 0, "hybrid_filtered": 0}
+    configs = ["fts", "fts_filtered"] + ([] if args.no_dense else ["hybrid", "hybrid_filtered"])
+    stats = {name: {"recall": 0, "mrr": 0.0} for name in configs}
     misses: list[str] = []
+
     for item in questions:
         question = item["question"]
-        company = next((code for name, code in scope.items() if name and name in question), None)
-        slot = fact_lane.extract(question)
-        filters = {"company": company} if company else {}
-        if slot.periods:
-            filters["period"] = slot.periods[0]
-        fts = hybrid.search(question, limit=5, chunks=chunks, db_path=DB_PATH, vectors_path=VECTORS_PATH)
-        fts_filtered = hybrid.search(
-            question, limit=5, chunks=chunks, db_path=DB_PATH, vectors_path=VECTORS_PATH,
-            filters=filters or None,
-        )
-        hybrid_results = hybrid.search(
-            question, limit=5, chunks=chunks, vectors=vectors, embedder=embedder,
-            db_path=DB_PATH, vectors_path=VECTORS_PATH,
-        )
-        filtered = hybrid.search(
-            question, limit=5, chunks=chunks, vectors=vectors, embedder=embedder,
-            filters=filters or None,
-            db_path=DB_PATH, vectors_path=VECTORS_PATH,
-        )
-        hit_fts = is_hit(fts, item["expected"])
-        hit_fts_filtered = is_hit(fts_filtered, item["expected"])
-        hit_hybrid = is_hit(hybrid_results, item["expected"])
-        hit_filtered = is_hit(filtered, item["expected"])
-        stats["fts"] += int(hit_fts)
-        stats["fts_filtered"] += int(hit_fts_filtered)
-        stats["hybrid"] += int(hit_hybrid)
-        stats["hybrid_filtered"] += int(hit_filtered)
-        if not hit_filtered:
-            misses.append(f"{item['id']} {question[:40]} company={company}")
+        filters = _filters(question, scope) or None
+        results = {
+            "fts": hybrid.search(question, limit=args.limit, chunks=chunks, db_path=DB_PATH),
+            "fts_filtered": hybrid.search(question, limit=args.limit, chunks=chunks, db_path=DB_PATH,
+                                          filters=filters),
+        }
+        if not args.no_dense:
+            results["hybrid"] = hybrid.search(
+                question, limit=args.limit, chunks=chunks, vectors=vectors, embedder=embedder,
+                db_path=DB_PATH, vectors_path=VECTORS_PATH,
+            )
+            results["hybrid_filtered"] = hybrid.search(
+                question, limit=args.limit, chunks=chunks, vectors=vectors, embedder=embedder,
+                filters=filters, db_path=DB_PATH, vectors_path=VECTORS_PATH,
+            )
+        for name in configs:
+            rr = reciprocal_rank(results[name], item["expected"])
+            stats[name]["recall"] += int(rr > 0)
+            stats[name]["mrr"] += rr
+        if not is_hit(results["fts_filtered"], item["expected"]):
+            misses.append(f"{item['id']} {question[:40]} filters={filters}")
+
     total = len(questions)
-    print(json.dumps({
+    report = {
         "total": total,
-        "fts_recall@5": round(stats["fts"] / total, 3),
-        "fts_filtered_recall@5": round(stats["fts_filtered"] / total, 3),
-        "hybrid_recall@5": round(stats["hybrid"] / total, 3),
-        "hybrid_filtered_recall@5": round(stats["hybrid_filtered"] / total, 3),
+        "limit": args.limit,
+        "dense": not args.no_dense,
+        **{
+            f"{name}_recall@{args.limit}": round(stats[name]["recall"] / total, 3)
+            for name in configs
+        },
+        **{
+            f"{name}_mrr@{args.limit}": round(stats[name]["mrr"] / total, 3)
+            for name in configs
+        },
         "misses": misses,
-    }, ensure_ascii=False, indent=2))
+    }
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    if args.min_recall is not None and report[f"fts_filtered_recall@{args.limit}"] < args.min_recall:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
