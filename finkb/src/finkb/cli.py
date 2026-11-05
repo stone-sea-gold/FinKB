@@ -292,6 +292,272 @@ def run_parse(args: argparse.Namespace) -> int:
     return 0
 
 
+# ---------------------------------------------------------------------------
+# 统一 CLI：ask / search / graph / eval / status
+# ---------------------------------------------------------------------------
+
+DEFAULT_FACTS_DB = DEFAULT_DATA_DIR / "facts.duckdb"
+DEFAULT_WIKI_DB = DEFAULT_DATA_DIR / "wiki.duckdb"
+DEFAULT_SEARCH_DIR = DEFAULT_DATA_DIR / "_search"
+REPO_ROOT = FINKB_ROOT.parent
+
+
+def _format_size(path: Path) -> str:
+    if not path.exists():
+        return "缺失"
+    if path.is_dir():
+        size = sum(item.stat().st_size for item in path.rglob("*") if item.is_file())
+    else:
+        size = path.stat().st_size
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024 or unit == "GB":
+            return f"{size:.1f}{unit}"
+        size /= 1024
+    return f"{size:.1f}GB"
+
+
+def run_ask(args: argparse.Namespace) -> int:
+    """``finkb ask``：三档问答；不给问题时进入交互循环。"""
+    from finkb.qa.console import run as run_question
+
+    def answer(question: str) -> None:
+        text, _ = run_question(
+            question,
+            tier=args.tier,
+            explain=args.explain,
+            as_json=args.json,
+            audit=args.audit_log,
+        )
+        print(text)
+
+    if args.question:
+        answer(args.question)
+        return 0
+    if not sys.stdin.isatty():
+        print("错误：没有提供问题（非交互模式请把问题作为参数传入）。", file=sys.stderr)
+        return 2
+    print("FinKB 问答（输入 :q 或 Ctrl-D 退出）")
+    while True:
+        try:
+            question = input("\n问> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return 0
+        if not question:
+            continue
+        if question.lower() in {":q", ":quit", "exit", "quit"}:
+            return 0
+        answer(question)
+
+
+def run_search(args: argparse.Namespace) -> int:
+    """``finkb search``：块级混合检索（FTS5 + 向量 + RRF）。"""
+    from finkb.search import hybrid
+
+    filters = {
+        "company": args.company,
+        "period": args.period,
+        "doc_id": args.doc,
+        "block_type": args.block_type,
+    }
+    embedder = None
+    if not args.no_dense:
+        try:
+            from finkb.search.embed import SiliconFlowEmbedder
+
+            embedder = SiliconFlowEmbedder()
+        except Exception:  # noqa: BLE001 - 缺 key/网络不通时自动退回 FTS
+            embedder = None
+    results = hybrid.search(args.query, limit=args.limit, filters=filters, embedder=embedder)
+    if args.json:
+        print(json.dumps(results, ensure_ascii=False, indent=2))
+        return 0
+    if embedder is None and not args.no_dense:
+        print("（仅关键词检索：未检测到可用的 embedding 配置）", file=sys.stderr)
+    if not results:
+        print("没有命中。")
+        return 0
+    for rank, item in enumerate(results, start=1):
+        section = (item.get("section") or "").replace("\n", " ")[:46]
+        excerpt = (item.get("text") or "").replace("\n", " ")[:80]
+        channels = "+".join(item.get("channels") or [])
+        print(
+            f"{rank:>2}. {item.get('doc_id')}#P{item.get('page_num')}"
+            f"  [{item.get('block_type')}]  {section}"
+        )
+        print(f"     {channels}  {excerpt}")
+    return 0
+
+
+def _graph_connection():
+    import duckdb
+
+    return duckdb.connect(str(DEFAULT_FACTS_DB), read_only=True)
+
+
+def _print_graph_overview(con) -> None:
+    counts = {
+        "概念": con.execute("SELECT COUNT(*) FROM concepts").fetchone()[0],
+        "概念关系": con.execute("SELECT COUNT(*) FROM concept_relations").fetchone()[0],
+        "定义类": con.execute("SELECT COUNT(*) FROM ontology_defined_classes").fetchone()[0],
+        "公司关系边": con.execute("SELECT COUNT(*) FROM relations").fetchone()[0],
+        "实体": con.execute("SELECT COUNT(*) FROM entities_master").fetchone()[0],
+        "推断概念": con.execute("SELECT COUNT(*) FROM inferred_concepts").fetchone()[0],
+        "推断边": con.execute("SELECT COUNT(*) FROM inferred_edges").fetchone()[0],
+    }
+    layers = dict(
+        con.execute("SELECT layer, COUNT(*) FROM concepts GROUP BY layer ORDER BY layer").fetchall()
+    )
+    print("本体与关系图概览")
+    for name, value in counts.items():
+        print(f"  {name:<8} {value}")
+    print("  概念分层  " + "  ".join(f"{layer}={count}" for layer, count in layers.items()))
+
+
+def _print_concept(con, concept_id: str) -> int:
+    row = con.execute(
+        "SELECT concept_id, label, layer, domain, definition, metric_id FROM concepts WHERE concept_id = ?",
+        [concept_id],
+    ).fetchone()
+    if row is None:
+        print(f"概念不存在：{concept_id}", file=sys.stderr)
+        return 1
+    print(f"{row[1]}（{row[0]}）  层={row[2]}  域={row[3]}  指标={row[5] or '-'}")
+    if row[4]:
+        print(f"定义：{row[4]}")
+    edges = con.execute(
+        "SELECT src_concept, rel_type, dst_concept FROM concept_relations "
+        "WHERE src_concept = ? OR dst_concept = ? ORDER BY rel_type, dst_concept",
+        [concept_id, concept_id],
+    ).fetchall()
+    if edges:
+        print("关系：")
+        for src, rel_type, dst in edges:
+            print(f"  {src}  --{rel_type}-->  {dst}")
+    return 0
+
+
+def run_graph(args: argparse.Namespace) -> int:
+    """``finkb graph``：关系图（公司/实体边）、概念图（概念与关系）。"""
+    con = _graph_connection()
+    try:
+        if args.concept:
+            return _print_concept(con, args.concept)
+        if args.overview or not args.entity:
+            _print_graph_overview(con)
+            return 0
+        entity = args.entity
+        row = con.execute(
+            "SELECT entity_id, canonical_name FROM entities_master "
+            "WHERE canonical_name = ? OR entity_id = ? LIMIT 1",
+            [entity, f"co:{entity}"],
+        ).fetchone()
+        if row is None:
+            row = con.execute(
+                "SELECT m.entity_id, m.canonical_name FROM entity_aliases a "
+                "JOIN entities_master m USING (entity_id) WHERE a.alias = ? LIMIT 1",
+                [entity],
+            ).fetchone()
+        if row is None:
+            print(f"实体未登记：{entity}", file=sys.stderr)
+            return 1
+        entity_id, canonical = row
+        params: list = [entity_id, entity_id]
+        where = "(r.src_entity_id = ? OR r.dst_entity_id = ?)"
+        if args.rel_type:
+            where += " AND r.rel_type = ?"
+            params.append(args.rel_type)
+        counts = con.execute(
+            "SELECT rel_type, COUNT(*) FROM relations r WHERE "
+            + where
+            + " GROUP BY rel_type ORDER BY 2 DESC",
+            params,
+        ).fetchall()
+        sql = (
+            "SELECT r.rel_type, ms.canonical_name, r.src_id, md.canonical_name, r.dst_id, "
+            "       r.source_doc, r.page_num "
+            "FROM relations r "
+            "LEFT JOIN entities_master ms ON ms.entity_id = r.src_entity_id "
+            "LEFT JOIN entities_master md ON md.entity_id = r.dst_entity_id "
+            "WHERE " + where + " ORDER BY r.rel_type, r.dst_id LIMIT ?"
+        )
+        rows = con.execute(sql, params + [args.limit]).fetchall()
+        print(f"{canonical}（{entity_id}）的关系边：" + "  ".join(f"{t}={c}" for t, c in counts))
+        for rel_type, src_name, src_id, dst_name, dst_id, doc, page in rows:
+            src = src_name or src_id
+            dst = dst_name or dst_id
+            print(f"  {rel_type:<16} {src}  →  {dst}  ({doc}#P{page})")
+        return 0
+    finally:
+        con.close()
+
+
+def run_eval(args: argparse.Namespace) -> int:
+    """``finkb eval``：跑问答评测 / 召回评测 / 完整验收。"""
+    import subprocess
+
+    if args.full:
+        command = ["bash", str(FINKB_ROOT / "scripts" / "check.sh")]
+        cwd = FINKB_ROOT
+    elif args.recall:
+        command = [
+            sys.executable,
+            str(REPO_ROOT / "eval" / "recall.py"),
+            "--no-dense",
+            "--min-recall",
+            "0.9",
+        ]
+        cwd = REPO_ROOT
+    else:
+        command = [sys.executable, str(REPO_ROOT / "eval" / "check_qa.py")]
+        cwd = REPO_ROOT
+    print("运行：" + " ".join(command))
+    return subprocess.call(command, cwd=str(cwd))
+
+
+def run_status(args: argparse.Namespace) -> int:
+    """``finkb status``：数据资产与索引的健康快照。"""
+    import sqlite3
+
+    import duckdb
+
+    print("数据与索引")
+    for label, path in (
+        ("事实库", DEFAULT_FACTS_DB),
+        ("知识页库", DEFAULT_WIKI_DB),
+        ("切块索引", DEFAULT_SEARCH_DIR / "chunks.db"),
+        ("向量文件", DEFAULT_SEARCH_DIR / "vectors.npy"),
+        ("知识页目录", FINKB_ROOT / "wiki_vault"),
+    ):
+        print(f"  {label:<6} {_format_size(path):>8}  {path}")
+
+    if DEFAULT_FACTS_DB.exists():
+        con = duckdb.connect(str(DEFAULT_FACTS_DB), read_only=True)
+        try:
+            facts = con.execute("SELECT COUNT(*) FROM facts").fetchone()[0]
+            facts_dedup = con.execute("SELECT COUNT(*) FROM facts_dedup").fetchone()[0]
+            relations = con.execute("SELECT COUNT(*) FROM relations").fetchone()[0]
+            entities = con.execute("SELECT COUNT(*) FROM entities_master").fetchone()[0]
+            concepts = con.execute("SELECT COUNT(*) FROM concepts").fetchone()[0]
+            inferred = con.execute("SELECT COUNT(*) FROM inferred_concepts").fetchone()[0]
+        finally:
+            con.close()
+        print(
+            f"\n事实 {facts} 条（去重口径 {facts_dedup} 条）/ 关系边 {relations} 条"
+            f" / 实体 {entities} 个 / 概念 {concepts} 个 / 推断 {inferred} 条"
+        )
+
+    chunks_db = DEFAULT_SEARCH_DIR / "chunks.db"
+    if chunks_db.exists():
+        conn = sqlite3.connect(chunks_db)
+        try:
+            chunks = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+        finally:
+            conn.close()
+        print(f"切块 {chunks} 个")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="finkb", description="FinKB 命令行工具")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -340,6 +606,53 @@ def build_parser() -> argparse.ArgumentParser:
         "--workdir", default=str(DEFAULT_DATA_DIR / "parsed"), help="MinerU 下载与解压目录"
     )
     parse_cmd.set_defaults(func=run_parse)
+
+    ask_cmd = subparsers.add_parser("ask", help="三档问答（不给问题则进入交互模式）")
+    ask_cmd.add_argument("question", nargs="?", help="自然语言问题；省略则进入交互循环")
+    ask_cmd.add_argument(
+        "--tier",
+        choices=("auto", "metric", "ontology", "document"),
+        default="auto",
+        help="只跑指定档位；默认 auto（逐级回落）",
+    )
+    ask_cmd.add_argument("--explain", action="store_true", help="打印档位选择与剪枝过程")
+    ask_cmd.add_argument("--json", action="store_true", help="输出 JSON")
+    ask_cmd.add_argument("--audit-log", action="store_true", help="写入 data/qa_audit.jsonl")
+    ask_cmd.set_defaults(func=run_ask)
+
+    search_cmd = subparsers.add_parser("search", help="块级混合检索（FTS5 + 向量）")
+    search_cmd.add_argument("query", help="检索词")
+    search_cmd.add_argument("--company", help="公司代码，如 002594")
+    search_cmd.add_argument("--period", help="期间，如 2025 / 2025H1")
+    search_cmd.add_argument("--doc", help="文档 id，如 002594_2025_年报")
+    search_cmd.add_argument(
+        "--type", dest="block_type", choices=("text", "table"), help="块类型"
+    )
+    search_cmd.add_argument("--limit", type=int, default=8)
+    search_cmd.add_argument(
+        "--no-dense", dest="no_dense", action="store_true", help="只用关键词检索"
+    )
+    search_cmd.add_argument("--json", action="store_true")
+    search_cmd.set_defaults(func=run_search)
+
+    graph_cmd = subparsers.add_parser("graph", help="关系图 / 概念图")
+    graph_cmd.add_argument("entity", nargs="?", help="公司名/代码/实体名；省略则显示概览")
+    graph_cmd.add_argument("--type", dest="rel_type", help="只看法定关系类型，如 subsidiary_of")
+    graph_cmd.add_argument("--concept", help="概念 id，如 self:gross_margin")
+    graph_cmd.add_argument("--overview", action="store_true", help="显示本体/关系图概览")
+    graph_cmd.add_argument("--limit", type=int, default=20)
+    graph_cmd.set_defaults(func=run_graph)
+
+    eval_cmd = subparsers.add_parser(
+        "eval", help="评测：默认 50 题问答；--recall 召回；--full 全套验收"
+    )
+    eval_cmd.add_argument("--recall", action="store_true", help="只跑文字题召回评测")
+    eval_cmd.add_argument("--full", action="store_true", help="跑 scripts/check.sh 全套验收")
+    eval_cmd.set_defaults(func=run_eval)
+
+    status_cmd = subparsers.add_parser("status", help="数据资产与索引健康快照")
+    status_cmd.set_defaults(func=run_status)
+
     return parser
 
 

@@ -67,7 +67,7 @@ finkb/
 │       └── mineru_client.py        # MinerU 客户端 + content_list 适配 + pypdf 兜底
 ├── wiki_vault/                      # L2 知识页（index / summaries / explorations / entities / concepts / _draft）
 ├── eval/                           # 评测集：数字 15 题（check.py）+ 50 题问答（check_qa.py）
-├── tests/                          # 521 项测试，全部离线可跑
+├── tests/                          # 529 项测试，全部离线可跑
 ├── scripts/check.sh                # 一条命令验收（测试 + 语料基线 + 金标）
 ├── config/corpus-baseline.json     # 29 文档 × 5 个数字的退步基线
 ├── config/metric_dict.yaml        # L1 指标字典 v3（36 个指标 / 80 个别名）
@@ -195,7 +195,33 @@ Token 从 <https://mineru.net/apiManage/token> 获取。
 MINERU_API_TOKEN=xxx ../.venv/bin/python -m finkb.cli parse ...
 ```
 
-## 命令行用法
+## 统一 CLI（问答 / 检索 / 图谱 / 评测）
+
+`pip install -e .` 后会生成 `finkb` 命令，日常使用只需这一个入口：
+
+```bash
+finkb ask "比亚迪 2025 年营业收入是多少亿元？"          # 三档问答（Tier 1/2/3 自动回落）
+finkb ask "哪些公司 2025 年资产负债率超过 70%？" --explain
+finkb ask "比亚迪 2025 年报里如何描述海外布局？" --tier document
+finkb ask                                              # 不给问题：进入交互模式（:q 退出）
+
+finkb search "海外 布局" --company 002594 --period 2025 --limit 5
+finkb search "研发人员" --type table --no-dense          # 只用关键词
+
+finkb graph 比亚迪 --limit 10                           # 公司/实体关系边
+finkb graph --concept self:gross_margin                 # 概念、公式与上下位关系
+finkb graph --overview                                  # 本体与关系图概览
+
+finkb status                                           # 数据资产/索引健康快照
+finkb eval                                             # 50 题问答评测
+finkb eval --recall                                    # 文字题召回 + MRR（离线）
+finkb eval --full                                      # scripts/check.sh 全套验收
+```
+
+说明：`ask`/`search` 默认离线读本地库；`search` 检测到 `SILICONFLOW_API_KEY` 时自动加向量路，
+否则退回纯关键词。`finkb-mcp` 是给外部 agent 的 MCP 入口，日常问答不需要它。
+
+## 命令行用法（PDF 解析）
 
 ```bash
 # ① 先做小范围联调（强烈建议）：只解析 P43-P44，验证真实跨页表
@@ -286,7 +312,7 @@ result.stitch.records           # 审计记录（页码序列 + 缝合理由）
 
 | 项 | 结果 |
 |---|---|
-| 测试 | **521 项通过**，离线 |
+| 测试 | **529 项通过**，离线 |
 | 语料 | 29 份 / 14 家公司 / 4791 页 / 10 类版式 |
 | 逻辑表 | 6130 张；有表头 **5729（93.5%）** |
 | 守恒律 | **359/359**（年报 16 条 / 半年报 13 条 / 季报 10 条） |
