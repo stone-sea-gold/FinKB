@@ -25,6 +25,7 @@ search = ["jieba>=0.42"]
 
 [project.scripts]
 finkb = "finkb.cli:main"
+finkb-mcp = "finkb.qa.mcp_server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

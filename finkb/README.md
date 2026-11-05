@@ -67,7 +67,7 @@ finkb/
 │       └── mineru_client.py        # MinerU 客户端 + content_list 适配 + pypdf 兜底
 ├── wiki_vault/                      # L2 知识页（index / summaries / explorations / entities / concepts / _draft）
 ├── eval/                           # 评测集：数字 15 题（check.py）+ 50 题问答（check_qa.py）
-├── tests/                          # 481 项测试，全部离线可跑
+├── tests/                          # 521 项测试，全部离线可跑
 ├── scripts/check.sh                # 一条命令验收（测试 + 语料基线 + 金标）
 ├── config/corpus-baseline.json     # 29 文档 × 5 个数字的退步基线
 ├── config/metric_dict.yaml        # L1 指标字典 v3（36 个指标 / 80 个别名）
@@ -121,6 +121,15 @@ cd .. && .venv/bin/python eval/check_qa.py   # 50 题：数字/文字/推理/负
 python -m finkb.qa "万科A 2025 年营业收入是多少亿元？" --explain        # Tier 1 指标
 python -m finkb.qa "哪些公司 2025 年资产负债率超过 70%？" --tier ontology  # Tier 2 本体
 python -m finkb.qa "比亚迪 2025 年报里如何描述海外布局？" --tier document # Tier 3 文档
+```
+
+Agent 接入与审计（ADR-061；MCP stdio，5 个工具）：
+
+```bash
+finkb-mcp                                        # 或 python -m finkb.qa.mcp_server
+# MCP 工具：ask / query_metric / search_documents / describe_ontology / traverse_relations
+python -m finkb.qa "比亚迪 2025 年营业收入是多少亿元？" --audit-log
+# 审计日志默认 data/qa_audit.jsonl（已 gitignore），可用 FINKB_QA_AUDIT 改路径
 ```
 
 质量门禁（`scripts/check.sh` 已包含）：
@@ -277,7 +286,7 @@ result.stitch.records           # 审计记录（页码序列 + 缝合理由）
 
 | 项 | 结果 |
 |---|---|
-| 测试 | **481 项通过**，离线 |
+| 测试 | **521 项通过**，离线 |
 | 语料 | 29 份 / 14 家公司 / 4791 页 / 10 类版式 |
 | 逻辑表 | 6130 张；有表头 **5729（93.5%）** |
 | 守恒律 | **359/359**（年报 16 条 / 半年报 13 条 / 季报 10 条） |

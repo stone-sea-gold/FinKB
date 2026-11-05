@@ -427,8 +427,8 @@ MinerU 把两格粘成一格的 OCR 错位（`601127_2025_半年报` 1 个、`60
 
 | 项 | 值 |
 |---|---|
-| 阶段 | Phase 0 **主体完成**；Phase 1 **L1 跑通并收口**（29 份重灌为唯一库 `data/facts.duckdb`：**1830 条**、0 未匹配、36 指标，2026-11-02 二次重灌纠正 13 条告警）；Phase 2 **L2 完整跑通**（29 份全部编译，153 页 active，lint 0 错 0 警，FTS5 检索 + 15 题评测全过；5 探针）；**L0.5 本体层已落地**（62 概念 / 71 关系 / 10 约束，六跳链条 + audit + 维度层；ADR-052～056）；**S1 推理运行时已落地**（公理层 7 类 / 10 属性 / 1 属性链 / 8 数值定义类；OWL 2 RL 物化 2,999 三元组；ADR-057）；**S2 实体治理与附注锚点已落地**（关系边 4,437、实体 1,474、附注锚 2,689；ADR-059）；**S3 块级混合检索已落地**（15,764 块 / bge-m3 1024 维 / FTS5+向量 RRF；ADR-058）；**S4 三路问答已落地**（fact / ontology / text，50 题 50/50）；**P0/P1 改进已落地**（三档契约 + 指标治理 + 本体质量门禁 + 闭世界数据校验 + 召回 MRR，ADR-060） |
-| 测试 | **509 项全部通过**，离线 |
+| 阶段 | Phase 0 **主体完成**；Phase 1 **L1 跑通并收口**（29 份重灌为唯一库 `data/facts.duckdb`：**1830 条**、0 未匹配、36 指标，2026-11-02 二次重灌纠正 13 条告警）；Phase 2 **L2 完整跑通**（29 份全部编译，153 页 active，lint 0 错 0 警，FTS5 检索 + 15 题评测全过；5 探针）；**L0.5 本体层已落地**（62 概念 / 71 关系 / 10 约束，六跳链条 + audit + 维度层；ADR-052～056）；**S1 推理运行时已落地**（公理层 7 类 / 10 属性 / 1 属性链 / 8 数值定义类；OWL 2 RL 物化 2,999 三元组；ADR-057）；**S2 实体治理与附注锚点已落地**（关系边 4,437、实体 1,474、附注锚 2,689；ADR-059）；**S3 块级混合检索已落地**（15,764 块 / bge-m3 1024 维 / FTS5+向量 RRF；ADR-058）；**S4 三路问答已落地**（fact / ontology / text，50 题 50/50）；**P0/P1 改进已落地**（三档契约 + 指标治理 + 本体质量门禁 + 闭世界数据校验 + 召回 MRR，ADR-060）；**P2 语义层接口已落地**（MCP stdio 5 工具 + 可选 JSONL 审计日志，ADR-061） |
+| 测试 | **521 项全部通过**，离线 |
 | 源码规模 | `src/` 14,110 行，`tests/` 7,395 行，`tools/`（核验工具）3,298 行，`eval/` 646 行 |
 | 真实数据验证 | 有（MinerU `vlm` 后端）：**29 份 / 14 家公司 / 4791 页**，10 类版式 |
 | 语料产出 | **5117 张物理表 → 6130 张逻辑表**；有表头 5729（93.5%）；跨页缝合 28 张，拒绝 21 条 |
@@ -1684,6 +1684,41 @@ COA 的三档契约（Tier1 指标 / Tier2 本体 / Tier3 文档，按顺序 fal
 
 ---
 
+### ADR-061 语义层接口：MCP stdio 适配器与可选审计日志（2026-11-05）
+
+**背景**：COA 把「Agent 如何接入语义层」做成产品的一部分——6 个 MCP 工具、薄协议适配器、按用户鉴权。
+FinKB 的问答目前只有 CLI（`python -m finkb.qa`），外部 agent 无法直接复用三档契约、指标查询、
+块检索、本体与关系边。另外，问答结果没有留痕，无法复盘「为什么这题走了 document 档」。
+
+**决策**：
+
+1. **MCP stdio 薄适配器** `qa/mcp_server.py`：newline-delimited JSON-RPC 2.0（MCP 2024-11-05）。
+   暴露 5 个工具——`ask`（三档问答）、`query_metric`（Tier 1 精确值）、`search_documents`（FTS 块检索）、
+   `describe_ontology`（概念/关系/定义类）、`traverse_relations`（实体关系边）。
+   适配器不复制业务逻辑：ask 委托 `pipeline.ask`，检索委托 `search.hybrid`，本体/关系只读 DuckDB；
+   数字仍由 SQL 计算（ADR-001）。
+2. **审计日志** `qa/audit_log.py` + CLI `--audit-log`：把 question/tier/confidence/refused/route/
+   citations/trace 追加为 JSONL；默认 `data/qa_audit.jsonl`（已 gitignore），环境变量
+   `FINKB_QA_AUDIT` 可改路径；不开启时零开销。
+3. **不做 grounding 提案流**：现有概念已有 `basis`/`basis_uri` 精确对齐（FIBO/CAS），不自动归纳本体，
+   「待映射概念」人工确认流程留到真的有外部本体接入需求时再做。
+4. **不做鉴权/多租户**：stdio 模式跑在本人本机，鉴权边界=操作系统账户；接网关时再补 token 与授权。
+
+**实测（2026-11-05）**：
+
+- `tests/test_mcp_server.py` 9 项：initialize、tools/list 5 个、通知无响应、未知方法 -32601、
+  ask(metric) 档位/账本、query_metric 002594/2025/revenue=8039.64958、describe_ontology
+  62 概念/8 定义类、traverse_relations 比亚迪子公司边、search_documents 公司过滤。
+- `tests/test_qa_audit.py` 3 项：JSONL 字段、追加两行、环境变量覆盖。
+- 全套 **509 → 521 项通过**；`eval/check_qa.py` 50/50 不变。
+
+**代价**：stdio 常驻进程每次查询重新建 DuckDB 只读连接（毫秒级）；审计日志无轮转，量大时换 SQLite/表。
+
+**失效条件**：多用户/远程接入 → 必须加鉴权与速率限制；工具数 >10 或需要资源订阅 → 换官方 SDK/
+框架；审计需要合规留存 → 改结构化存储并加保留策略。
+
+---
+
 ## 6. 被推翻 / 废弃的方案（不要重提）
 
 | 曾提出 | 为什么废弃 | 替代 |
@@ -2662,6 +2697,19 @@ git checkout 57f9fed -- _ref               # 恢复到工作区
 ## 11. 变更记录
 
 > 时间线：2026-10-21 之后的条目来自 git 提交历史，之前的是**重建**的。
+
+### 2026-11-05 —— P2：MCP 语义层接口与可选审计日志（ADR-061）
+
+- 新建 `qa/mcp_server.py`：MCP stdio（JSON-RPC 2.0）薄适配器，5 个工具
+  `ask` / `query_metric` / `search_documents` / `describe_ontology` / `traverse_relations`；
+  业务全部委托 `qa.pipeline` / `search.hybrid` / 只读 DuckDB，数字仍由 SQL 算。
+- 新建 `qa/audit_log.py` 与 `qa/__main__.py --audit-log`：JSONL 审计（question/tier/confidence/
+  refused/route/citations/trace），默认 `data/qa_audit.jsonl` 且已 gitignore，`FINKB_QA_AUDIT`
+  可覆盖路径。
+- `pyproject.toml` 增加 `finkb-mcp = "finkb.qa.mcp_server:main"` 入口。
+- 新增 `tests/test_mcp_server.py` 9 项、`tests/test_qa_audit.py` 3 项。
+- 测试 **509 → 521 项通过**；`eval/check_qa.py` 50/50 不变。
+- 不做 grounding 提案流与鉴权（理由与触发条件见 ADR-061）。
 
 ### 2026-11-05 —— P0/P1：三档契约、指标治理、质量门禁与闭世界校验（ADR-060）
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 
+from finkb.qa.audit_log import log as audit_log
 from finkb.qa.pipeline import TIER_LABELS, ask
 from finkb.qa.synthesizer import render
 from finkb.qa.verifier import verify
@@ -17,9 +18,13 @@ def main() -> None:
     parser.add_argument("--tier", choices=("auto", "metric", "ontology", "document"), default="auto",
                         help="只跑指定档位；默认 auto（按契约逐级回落）")
     parser.add_argument("--explain", action="store_true", help="打印档位选择与剪枝过程")
+    parser.add_argument("--audit-log", action="store_true",
+                        help="把本次问答追加到 data/qa_audit.jsonl（可用 FINKB_QA_AUDIT 指定路径）")
     args = parser.parse_args()
 
     payload = ask(args.question, tier=args.tier)
+    if args.audit_log:
+        audit_log({**payload, "question": args.question})
     rendered, used = render(payload.get("text", ""), payload.get("ledger", []))
     check = verify({**payload, "text": rendered})
     if args.json:
