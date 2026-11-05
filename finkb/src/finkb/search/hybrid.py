@@ -13,7 +13,9 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import sqlite3
+from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
@@ -25,7 +27,24 @@ CHUNKS_PATH = FINKB_ROOT / "data" / "_search" / "chunks.jsonl"
 DB_PATH = FINKB_ROOT / "data" / "_search" / "chunks.db"
 VECTORS_PATH = FINKB_ROOT / "data" / "_search" / "vectors.npy"
 RRF_K = 60
-FILTER_FIELDS = ("company", "period", "doc_id", "block_type")
+FILTER_FIELDS = ("company", "period", "doc_id", "block_type", "report_type")
+
+# 问句里的功能词不承载证据；留着只会让「如何/描述」把审计报告顶到第一。
+STOPWORDS = frozenset(
+    "如何 怎么 怎样 什么 哪些 哪个 为什么 是否 多少 请问 请 描述 介绍 说明 一下 情况 变化 "
+    "关于 对于 根据 相关 主要 分别 以及 还有 公司 需要 可以 我们 他们 这个 那个 这些 那些 "
+    "其中 目前 现在 何时 哪里 有没有 能否 可否 告诉 看看 帮我 一个 进行 存在 表示 认为 "
+    "披露 包括 内容 方面 有关 具体 相关 情况 时候".split()
+)
+
+
+def _content_tokens(text: str) -> list[str]:
+    """用于打分的内容词：去单字、去功能词。"""
+    return [token for token in tokenize(text) if len(token) >= 2 and token not in STOPWORDS]
+
+
+def _doc_report_type(doc_id: str) -> str:
+    return str(doc_id).rsplit("_", 1)[-1] if "_" in str(doc_id) else ""
 
 
 def tokenize(text: str) -> list[str]:
@@ -86,28 +105,38 @@ def build_index(
         DROP TABLE IF EXISTS chunks_fts;
         CREATE TABLE chunks (
             chunk_id TEXT PRIMARY KEY, doc_id TEXT, company TEXT, period TEXT,
-            page_num INTEGER, section TEXT, block_type TEXT, text TEXT
+            report_type TEXT, page_num INTEGER, section TEXT, block_type TEXT,
+            table_header TEXT, text TEXT
         );
         CREATE VIRTUAL TABLE chunks_fts USING fts5(
-            chunk_id UNINDEXED, tokens, tokenize='unicode61'
+            chunk_id UNINDEXED, section, table_header, body, tokenize='unicode61'
         );
         """
     )
     chunk_rows = [
         (
             chunk["chunk_id"], chunk["doc_id"], chunk["company"], chunk["period"],
-            int(chunk["page_num"]), chunk.get("section", ""), chunk["block_type"], chunk["text"],
+            _doc_report_type(chunk["doc_id"]), int(chunk["page_num"]),
+            chunk.get("section", ""), chunk["block_type"], chunk.get("table_header", ""), chunk["text"],
         )
         for chunk in chunks
     ]
     fts_rows = [
-        (chunk["chunk_id"], " ".join(tokenize(chunk["text"]))) for chunk in chunks
+        (
+            chunk["chunk_id"],
+            " ".join(_content_tokens(chunk.get("section", ""))),
+            " ".join(_content_tokens(chunk.get("table_header", ""))),
+            " ".join(_content_tokens(chunk["text"])),
+        )
+        for chunk in chunks
     ]
-    conn.executemany("INSERT INTO chunks VALUES (?,?,?,?,?,?,?,?)", chunk_rows)
-    conn.executemany("INSERT INTO chunks_fts (chunk_id, tokens) VALUES (?,?)", fts_rows)
+    conn.executemany("INSERT INTO chunks VALUES (?,?,?,?,?,?,?,?,?,?)", chunk_rows)
+    conn.executemany(
+        "INSERT INTO chunks_fts (chunk_id, section, table_header, body) VALUES (?,?,?,?)", fts_rows
+    )
     df: dict[str, int] = {}
-    for _, tokens in fts_rows:
-        for token in set(tokens.split()):
+    for _, section, header, body in fts_rows:
+        for token in set((section + " " + header + " " + body).split()):
             df[token] = df.get(token, 0) + 1
     conn.execute("DROP TABLE IF EXISTS term_df")
     conn.execute("CREATE TABLE term_df (token TEXT PRIMARY KEY, df INTEGER)")
@@ -137,32 +166,77 @@ def _where(filters: dict | None) -> tuple[str, list]:
     return (" AND " + " AND ".join(clauses)) if clauses else "", params
 
 
-def _fts_search(conn, query: str, limit: int, filters: dict | None) -> list[tuple[str, float]]:
-    tokens = [token for token in tokenize(query) if len(token) >= 2]
+def _ngrams(question: str) -> list[str]:
+    """问句里的连续中文片段取 3–4 字 n-gram，作为「短语命中」的额外信号。
+
+    分词不一致时（问句切出「银行业务」、正文切出「投资银行」），词项对不上；
+    但「投资银」「银行业」这类字面片段仍能命中，且罕见片段权重高，能压住
+    公司名/表格里反复出现的通用词。
+    """
+    grams: list[str] = []
+    for run in re.findall(r"[\u4e00-\u9fff]{3,}", question or ""):
+        for size in (3, 4):
+            for index in range(len(run) - size + 1):
+                gram = run[index : index + size]
+                if gram not in STOPWORDS:
+                    grams.append(gram)
+    return list(dict.fromkeys(grams))
+
+
+def _term_search(
+    chunks: list[dict],
+    query: str,
+    limit: int,
+    filters: dict | None,
+) -> list[tuple[str, float]]:
+    """词项打分：直接在过滤后的块集合上算 tf-idf，不依赖分词结果与索引完全一致。
+
+    长问句里每个词单独看相关度；权重用**当前过滤子集**内的文档频率（查某家公司时，
+    公司名在它自己的文档里到处都是，按全局 df 会盖住「投资银行业务」这类真信号）；
+    章节标题命中权重更高（×3），因为「环境风险」「产能状况」常写在标题里。
+    """
+    tokens = list(dict.fromkeys(_content_tokens(query)))
     if not tokens:
         return []
-    total = conn.execute("SELECT count(*) FROM chunks").fetchone()[0] or 1
-    df_map = dict(conn.execute("SELECT token, df FROM term_df").fetchall())
-    where, params = _where(filters)
+    phrases = _ngrams(query)
+    all_tokens = tokens + [gram for gram in phrases if gram not in tokens]
+    subset = [chunk for chunk in chunks if _passes(chunk, filters)]
+    if not subset:
+        return []
+    rows: list[tuple[dict, dict[str, int]]] = []
+    for chunk in subset:
+        text, section, header = chunk.get("text") or "", chunk.get("section") or "", chunk.get("table_header") or ""
+        tf: dict[str, int] = {}
+        for token in all_tokens:
+            count = text.count(token) + 3 * section.count(token) + 2 * header.count(token)
+            if count:
+                tf[token] = count
+        if tf:
+            rows.append((chunk, tf))
+    if not rows:
+        return []
+    total = len(subset)
+    df = {token: sum(1 for _, tf in rows if token in tf) for token in all_tokens}
+    weights = {token: math.log((total + 1) / (df[token] + 0.5)) for token in all_tokens}
+    phrase_set = set(phrases)
     scores: dict[str, float] = {}
-    for token in dict.fromkeys(tokens):
-        weight = math.log((total + 1) / (df_map.get(token, 0) + 1))
-        if weight <= 0:
-            continue
-        rows = conn.execute(
-            f"SELECT c.chunk_id FROM chunks_fts JOIN chunks c ON c.chunk_id = chunks_fts.chunk_id "
-            f"WHERE chunks_fts MATCH ?{where} LIMIT ?",
-            [f'"{token}"', *params, limit * 3],
-        ).fetchall()
-        for rank, (chunk_id,) in enumerate(rows, start=1):
-            scores[str(chunk_id)] = scores.get(str(chunk_id), 0.0) + weight / (RRF_K + rank)
+    for chunk, tf in rows:
+        score = sum(
+            weights[token] * (1.0 + math.log1p(min(count, 3))) * (0.2 if token in phrase_set else 1.0)
+            for token, count in tf.items()
+        )
+        if score > 0:
+            scores[chunk["chunk_id"]] = score
     return sorted(scores.items(), key=lambda item: -item[1])[:limit]
 
 
 def _passes(chunk: dict, filters: dict | None) -> bool:
     for field in FILTER_FIELDS:
         value = (filters or {}).get(field)
-        if value and str(chunk.get(field)) != str(value):
+        if not value:
+            continue
+        actual = _doc_report_type(chunk.get("doc_id", "")) if field == "report_type" else chunk.get(field)
+        if str(actual) != str(value):
             return False
     section = (filters or {}).get("section")
     return not section or section in str(chunk.get("section", ""))
@@ -202,14 +276,7 @@ def search(
     if chunks is None:
         chunks = load_chunks(chunks_path)
     by_id = {chunk["chunk_id"]: chunk for chunk in chunks}
-    fts_results: list[tuple[str, float]] = []
-    db = Path(db_path or DB_PATH)
-    if db.exists():
-        conn = sqlite3.connect(db)
-        try:
-            fts_results = _fts_search(conn, query, limit * 3, filters)
-        finally:
-            conn.close()
+    fts_results = _term_search(chunks, query, limit * 3, filters)
     dense_results: list[tuple[str, float]] = []
     vectors_file = Path(vectors_path or VECTORS_PATH)
     if vectors is None and vectors_file.exists():
@@ -256,6 +323,7 @@ def main() -> None:
     query.add_argument("--period", default=None)
     query.add_argument("--doc", default=None)
     query.add_argument("--type", dest="block_type", default=None)
+    query.add_argument("--report-type", dest="report_type", default=None)
     args = parser.parse_args()
 
     if args.command == "build":
@@ -266,7 +334,10 @@ def main() -> None:
             embedder = SiliconFlowEmbedder()
         print(json.dumps(build_index(args.chunks, args.db, args.vectors, embedder, args.limit), ensure_ascii=False))
         return
-    filters = {"company": args.company, "period": args.period, "doc_id": args.doc, "block_type": args.block_type}
+    filters = {
+        "company": args.company, "period": args.period, "doc_id": args.doc,
+        "block_type": args.block_type, "report_type": args.report_type,
+    }
     from finkb.search.embed import SiliconFlowEmbedder
 
     try:

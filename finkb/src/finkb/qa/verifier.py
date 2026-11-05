@@ -12,7 +12,7 @@ from finkb.qa.synthesizer import format_value
 
 PARSED_DIR = FINKB_ROOT / "data" / "parsed"
 REF_RE = re.compile(r"\[Ref:\s*([^#\]]+)#P(\d+)\]")
-NUMBER_RE = re.compile(r"-?\d+(?:\.\d+)?")
+NUMBER_RE = re.compile(r"-?\d{1,3}(?:,\d{3})+(?:\.\d+)?|-?\d+(?:\.\d+)?")
 META_RE = re.compile(r'<!--\s*META:\s*(\{.*?\})\s*-->')
 
 
@@ -88,6 +88,12 @@ def verify(payload: dict) -> dict:
         allowed.add(format_value(value))
         allowed.add(f"{int(round(value))}")
         allowed.add(f"{value:g}")
+        raw = entry.get("raw_value")
+        if raw is not None:
+            raw = float(raw)
+            allowed.add(f"{raw:.2f}")
+            allowed.add(f"{int(round(raw))}")
+            allowed.add(f"{raw:g}")
     if payload.get("route") == "text":
         # 原文通道：数字是原文逐字摘录，不再做账本绑定；只校验引用页。
         return {"ok": not issues, "issues": issues, "refs_checked": len(refs), "numbers_checked": 0}
@@ -97,7 +103,7 @@ def verify(payload: dict) -> dict:
     stripped = re.sub(r"\b\d{6}\b", "", stripped)      # 股票代码
     stripped = re.sub(r"P\d+", "", stripped)            # 页码
     stripped = re.sub(r"第\s*\d+\s*页", "", stripped)   # “第 32 页”
-    numbers = NUMBER_RE.findall(stripped)
+    numbers = [number.replace(",", "") for number in NUMBER_RE.findall(stripped)]
     unbound = []
     for number in numbers:
         if number in allowed:

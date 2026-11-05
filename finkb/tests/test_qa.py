@@ -76,8 +76,8 @@ def test_verifier_ok_and_bad(tmp_path, monkeypatch):
 def test_negative_out_of_scope_refuses():
     from finkb.qa.answer import answer
 
-    payload = answer("比亚迪 2025 年的港股股价是多少？")
-    assert payload["refused"] is True
+    assert answer("比亚迪 2025 年的港股股价是多少？")["refused"] is True
+    assert answer("比亚迪 2025 年年报披露的在职员工总人数是多少？")["refused"] is True
 
 
 def test_fact_lane_matches_gold_if_db_exists():

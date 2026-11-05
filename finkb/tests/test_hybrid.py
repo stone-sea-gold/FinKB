@@ -83,6 +83,8 @@ def test_empty_query_returns_empty(tmp_path):
     assert hybrid.search("", db_path=db, chunks_path=chunks, embedder=None) == []
 
 
-def test_missing_db_falls_back_without_error(tmp_path):
+def test_missing_db_still_searches(tmp_path):
+    # 检索已改为直接在块集合上打分，FTS 索引库缺失也能工作（架构简化）。
     chunks = _chunks(tmp_path)
-    assert hybrid.search("存货", db_path=tmp_path / "nope.db", chunks_path=chunks, embedder=None) == []
+    results = hybrid.search("存货", db_path=tmp_path / "nope.db", chunks_path=chunks, embedder=None)
+    assert results and results[0]["chunk_id"] == "d1:p1:0"

@@ -19,8 +19,8 @@ from pathlib import Path
 import duckdb
 
 from finkb.fact_engine.selector import FINKB_ROOT
-from finkb.qa import fact_lane
-from finkb.qa.router import TEXT_INTENT_KEYWORDS, route as router_route
+from finkb.qa import fact_lane, understanding
+from finkb.qa.router import route as router_route
 
 FACT_DB = FINKB_ROOT / "data" / "facts.duckdb"
 CHUNKS_DB = FINKB_ROOT / "data" / "_search" / "chunks.db"
@@ -29,23 +29,6 @@ TIERS = ("metric", "ontology", "document")
 TIER_LABELS = {"metric": "Tier 1 指标", "ontology": "Tier 2 本体", "document": "Tier 3 文档"}
 ROUTE_BY_TIER = {"metric": "fact", "ontology": "ontology", "document": "text"}
 CONFIDENCE = {"metric": 0.95, "ontology": 0.85, "document": 0.7}
-
-# 指标口径回答不了的「范围限定词」：出现就降级，别拿总数冒充分项。
-QUALIFIER_TOKENS = (
-    "分产品", "分地区", "分行业", "分客户", "按产品", "按地区", "按行业", "按客户",
-    "业务分部", "子行业", "分部",
-    "海外", "境外", "境内", "国内", "国外", "出口", "内销",
-    "华东", "华南", "华北", "华中", "西南", "西北", "东北",
-    "客户", "渠道", "零售", "批发", "直销", "经销", "线上", "线下",
-)
-
-_FILLER = (
-    "请问", "一下", "是多少", "多少", "几", "亿元", "万元", "%", "％",
-    "同比增速", "同比", "合计", "总计", "最高值", "最低值", "最高", "最低",
-    "增加", "减少", "增长", "下降", "相比", "比较",
-)
-_NUMERIC_INTENT_RE = re.compile(r"(多少|几|增速|合计|最高|最低|相比|增加|减少|占比|比例|亿元|万元|%|％)")
-
 
 def capabilities() -> dict[str, bool]:
     """探测三档的数据可用性；任何异常都按「不可用」处理，不阻塞其它档。"""
@@ -71,20 +54,7 @@ def capabilities() -> dict[str, bool]:
 
 def residual_qualifiers(question: str) -> list[str]:
     """剥离公司/指标/期间/数字/问句填充词后，仍存在的范围限定词。"""
-    text = question.replace(" ", "")
-    for name in fact_lane._load_scope():
-        if len(name) >= 2:
-            text = text.replace(name, "")
-    slot = fact_lane.extract(question)
-    if slot.metric is not None:
-        for candidate in (slot.metric.metric_name, *slot.metric.aliases):
-            if candidate:
-                text = text.replace(candidate.replace(" ", ""), "")
-    text = fact_lane.PERIOD_RE.sub("", text)
-    text = re.sub(r"20\d{2}", "", text)
-    for filler in _FILLER:
-        text = text.replace(filler, "")
-    return [token for token in QUALIFIER_TOKENS if token in text]
+    return understanding.residual_qualifiers(question)
 
 
 def precheck(question: str) -> dict | None:

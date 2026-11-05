@@ -6,8 +6,6 @@ MVP 只做抽取式回答（不调 LLM）：事实通道输出账本，本体通
 
 from __future__ import annotations
 
-import re
-
 import json
 import re
 from pathlib import Path
@@ -151,27 +149,66 @@ def answer_ontology(question: str) -> dict | None:
     return None
 
 
-def _snippet(text: str, question: str, width: int = 220) -> str:
+def _snippet(text: str, question: str, width: int = 260) -> str:
+    """按命中词扩到句子边界，避免从半句开始截断。"""
     from finkb.search.hybrid import tokenize
 
     tokens = [token for token in tokenize(question) if len(token) >= 2]
     positions = [index for token in tokens if (index := text.find(token)) >= 0]
-    start = max(min(positions) - 60, 0) if positions else 0
-    return text[start : start + width].replace("\n", " ").strip()
+    pos = min(positions) if positions else 0
+    start = max(pos - 60, 0)
+    for separator in ("。", "；", "\n"):
+        index = text.rfind(separator, 0, pos)
+        if index >= 0:
+            start = index + 1
+            break
+    end = min(start + width, len(text))
+    for separator in ("。", "；", "\n"):
+        index = text.find(separator, pos, end + 40)
+        if index >= 0:
+            end = index + 1
+            break
+    return text[start:end].replace("\n", " ").strip()
+
+
+REPORT_TYPE_WORDS = (
+    ("年度报告", "年报"), ("年报", "年报"),
+    ("半年度报告", "半年报"), ("半年报", "半年报"),
+    ("一季度报告", "一季报"), ("一季报", "一季报"),
+    ("三季度报告", "三季报"), ("三季报", "三季报"),
+)
+
+
+def _report_type(question: str, periods: list[str]) -> str | None:
+    """显式报告类型优先；只给年份时默认年报（如“2025 比亚迪现金构成”）。"""
+    for word, value in REPORT_TYPE_WORDS:
+        if word in question:
+            return value
+    if len(periods) == 1 and re.fullmatch(r"20\d{2}", periods[0]):
+        return "年报"
+    return None
 
 
 def answer_text(question: str, limit: int = 5) -> dict:
     from finkb.search import hybrid
 
     slot = fact_lane.extract(question)
-    filters: dict = {}
+    base: dict = {}
     if slot.companies:
-        filters["company"] = slot.companies[0]
+        base["company"] = slot.companies[0]
     if slot.periods:
-        filters["period"] = slot.periods[0]
-    results = hybrid.search(question, limit=limit, filters=filters or None)
-    if not results and filters:
-        results = hybrid.search(question, limit=limit)
+        base["period"] = slot.periods[0]
+    report_type = _report_type(question, slot.periods)
+    attempts = []
+    if report_type:
+        attempts.append({**base, "report_type": report_type})
+    attempts.append(base)
+    attempts.append({})
+    results: list[dict] = []
+    for filters in attempts:
+        results = hybrid.search(question, limit=limit, filters=filters or None)
+        if results:
+            break
     ledger: list[dict] = []
     citations: list[str] = []
     evidence = []
@@ -196,7 +233,7 @@ def answer_text(question: str, limit: int = 5) -> dict:
 
 
 NUMERIC_INTENT_RE = re.compile(r"(多少|几|增速|合计|最高|最低|相比|增加|减少|占比|比例|亿元|万元|%|％)")
-OUT_OF_SCOPE_TOKENS = ("股价", "市值", "市盈率", "股息率", "员工总数", "员工人数", "港股", "美股")
+OUT_OF_SCOPE_TOKENS = ("股价", "市值", "市盈率", "股息率", "员工总数", "员工人数", "员工总人数", "在职员工", "港股", "美股")
 
 
 def _refuse(question: str, reason: str) -> dict:
@@ -210,7 +247,10 @@ def precheck(question: str) -> dict | None:
         return _refuse(question, "问题涉及的指标不在本项目语料范围内。")
     aggregate = any(word in question for word in ("哪些", "所有", "各公司", "全部"))
     if NUMERIC_INTENT_RE.search(question) and slot.metric is not None and not slot.companies and not aggregate:
-        return _refuse(question, "问题提到的公司不在语料范围内。")
+        from finkb.qa.understanding import scope_companies
+
+        names = "、".join(name for name, _ in scope_companies())
+        return _refuse(question, f"没有从问题中识别出公司。当前语料包含 {len(scope_companies())} 家公司：{names}。")
     return None
 
 
