@@ -47,9 +47,11 @@ from finkb.parser.noise_filter import strip_running_noise
 from finkb.parser.section_splitter import SplitOptions, split_all
 from finkb.parser.table_stitcher import stitch_tables
 
-FINKB_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_ENV_FILE = FINKB_ROOT / "config" / ".env"
-DEFAULT_DATA_DIR = FINKB_ROOT / "data"
+from finkb.common import paths
+
+FINKB_ROOT = paths.HOME
+DEFAULT_ENV_FILE = paths.env_file()
+DEFAULT_DATA_DIR = paths.data_dir()
 
 
 def load_env_file(path: Path) -> dict[str, str]:

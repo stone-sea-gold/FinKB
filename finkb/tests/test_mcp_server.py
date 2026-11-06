@@ -32,10 +32,16 @@ def test_initialize():
     assert "tools" in result["capabilities"]
 
 
-def test_tools_list_five():
+def test_tools_list():
     response = mcp_server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
     names = [tool["name"] for tool in response["result"]["tools"]]
     assert names == [
+        "init_library",
+        "library_status",
+        "list_documents",
+        "add_document",
+        "remove_document",
+        "rebuild_index",
         "ask",
         "query_metric",
         "search_documents",
@@ -96,3 +102,12 @@ def test_search_documents_with_filter():
     assert not is_error
     assert payload["results"]
     assert payload["results"][0]["company"] == "002594"
+
+
+def test_library_tools_dispatch():
+    payload, is_error = _call("list_documents", {})
+    assert not is_error
+    assert isinstance(payload["documents"], list)
+    payload, is_error = _call("add_document", {"company": "bad", "period": "2025", "report_type": "年报"})
+    assert is_error
+    assert "error" in payload

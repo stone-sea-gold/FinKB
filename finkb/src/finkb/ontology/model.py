@@ -12,6 +12,8 @@ from typing import Any
 
 import yaml
 
+from finkb.common import paths
+
 # 合法的层与关系类型。relation 用开放字符串，但校验时只警告不报错——
 # 扩展新关系类型不应该需要改代码。
 LAYERS = ("L0", "L1", "L2", "L3")
@@ -225,7 +227,7 @@ class OntologyDoc:
 
 def default_path() -> Path:
     """``finkb/config/ontology.yaml``（相对包根往上一级）。"""
-    return Path(__file__).resolve().parents[3] / "config" / "ontology.yaml"
+    return paths.config_dir() / "ontology.yaml"
 
 
 def _s(v: Any) -> str | None:
@@ -311,7 +313,7 @@ def load(path: str | Path | None = None) -> OntologyDoc:
 
 def axioms_path() -> Path:
     """``finkb/config/ontology_axioms.yaml``（公理层，手工维护）。"""
-    return Path(__file__).resolve().parents[3] / "config" / "ontology_axioms.yaml"
+    return paths.config_dir() / "ontology_axioms.yaml"
 
 
 def load_axioms(

@@ -28,9 +28,10 @@ from finkb.wiki.frontmatter import (
     validate,
 )
 
-FINKB_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_VAULT = FINKB_ROOT / "wiki_vault"
-DEFAULT_SCOPE = FINKB_ROOT / "config" / "wiki_scope.yaml"
+from finkb.common import paths
+
+DEFAULT_VAULT = paths.wiki_vault_dir()
+DEFAULT_SCOPE = paths.config_dir() / "wiki_scope.yaml"
 
 TYPE_DIRS = {
     "summary": "summaries",

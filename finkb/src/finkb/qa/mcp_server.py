@@ -12,6 +12,7 @@ import sys
 import duckdb
 
 from finkb.fact_engine.selector import FINKB_ROOT
+from finkb import library
 from finkb.qa.pipeline import ask as ask_pipeline
 from finkb.search import hybrid
 
@@ -23,6 +24,58 @@ CHUNKS_PATH = FINKB_ROOT / "data" / "_search" / "chunks.jsonl"
 CHUNKS_DB = FINKB_ROOT / "data" / "_search" / "chunks.db"
 
 TOOLS = [
+    {
+        "name": "init_library",
+        "description": "初始化本地知识库目录（data/config/raw/wiki_vault），幂等；首次使用先调这个。",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "library_status",
+        "description": "查看本地知识库状态：目录、文档数、事实/关系/切块/向量计数、LLM 与 MinerU 是否就绪。",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "list_documents",
+        "description": "列出本地知识库已导入的文档（doc_id/公司/期间/报告类型）。",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "add_document",
+        "description": "导入一份 A 股年报：传 PDF（解析后入库）或已解析目录（直接入库）；随后建切块与检索索引。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "company": {"type": "string", "description": "6 位股票代码，如 600519"},
+                "period": {"type": "string", "description": "2025 / 2025H1 / 2025Q1 / 2025Q3"},
+                "report_type": {"type": "string", "enum": ["年报", "半年报", "一季报", "三季报"]},
+                "pdf_path": {"type": "string", "description": "本机 PDF 路径"},
+                "parsed_dir": {"type": "string", "description": "已解析产物目录（含 report.json）"},
+                "company_name": {"type": "string"},
+                "parse_mode": {"type": "string", "enum": ["auto", "offline", "mineru"]},
+                "skip_facts": {"type": "boolean", "description": "只解析+切块，不跑 LLM 事实抽取"},
+                "skip_wiki": {"type": "boolean", "description": "不编译 wiki 页面"},
+                "embed": {"type": "boolean", "description": "同时建向量索引（需要 SILICONFLOW_API_KEY）"},
+            },
+            "required": ["company", "period", "report_type"],
+        },
+    },
+    {
+        "name": "remove_document",
+        "description": "删除一份文档及其事实/关系/wiki/索引数据（不可恢复）。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"doc_id": {"type": "string", "description": "如 600519_2025_年报"}},
+            "required": ["doc_id"],
+        },
+    },
+    {
+        "name": "rebuild_index",
+        "description": "重建全部切块与检索索引（可选同时重建向量索引）。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"embed": {"type": "boolean", "description": "重建向量索引（需要 key）"}},
+        },
+    },
     {
         "name": "ask",
         "description": "三档问答（metric 指标 / ontology 本体 / document 文档），返回答案、档位、置信度与引用。",
@@ -98,6 +151,29 @@ def _connect() -> duckdb.DuckDBPyConnection:
 
 
 def call_tool(name: str, args: dict) -> dict:
+    if name == "init_library":
+        return library.init_library()
+    if name == "library_status":
+        return library.status()
+    if name == "list_documents":
+        return {"documents": library.list_documents()}
+    if name == "add_document":
+        return library.add_document(
+            company=str(args["company"]),
+            period=str(args["period"]),
+            report_type=str(args["report_type"]),
+            pdf_path=args.get("pdf_path"),
+            parsed_dir=args.get("parsed_dir"),
+            company_name=args.get("company_name"),
+            parse_mode=str(args.get("parse_mode", "auto")),
+            skip_facts=bool(args.get("skip_facts")),
+            skip_wiki=bool(args.get("skip_wiki")),
+            embed=bool(args.get("embed")),
+        )
+    if name == "remove_document":
+        return library.remove_document(str(args["doc_id"]))
+    if name == "rebuild_index":
+        return library.rebuild_indexes(bool(args.get("embed")))
     if name == "ask":
         return ask_pipeline(str(args["question"]), tier=args.get("tier", "auto"))
     if name == "query_metric":

@@ -29,7 +29,9 @@ import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-FINKB_ROOT = Path(__file__).resolve().parents[3]
+from finkb.common import paths
+
+FINKB_ROOT = paths.HOME
 REPO_ROOT = FINKB_ROOT.parent
 
 BS_ANCHORS = (
@@ -144,7 +146,7 @@ def doc_period(doc_id: str) -> str:
 
 def load_manifest(path: Path | None = None) -> dict[tuple[str, str, str], dict]:
     """读 ``raw/manifest.csv``，键是 (股票代码, 会计年度, 报告类型)。"""
-    p = path or (REPO_ROOT / "raw" / "manifest.csv")
+    p = path or (paths.raw_dir() / "manifest.csv")
     out: dict[tuple[str, str, str], dict] = {}
     if not p.exists():
         return out

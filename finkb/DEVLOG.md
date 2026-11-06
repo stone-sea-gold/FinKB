@@ -427,8 +427,8 @@ MinerU 把两格粘成一格的 OCR 错位（`601127_2025_半年报` 1 个、`60
 
 | 项 | 值 |
 |---|---|
-| 阶段 | Phase 0 **主体完成**；Phase 1 **L1 跑通并收口**（29 份重灌为唯一库 `data/facts.duckdb`：**1830 条**、0 未匹配、36 指标，2026-11-02 二次重灌纠正 13 条告警）；Phase 2 **L2 完整跑通**（29 份全部编译，153 页 active，lint 0 错 0 警，FTS5 检索 + 15 题评测全过；5 探针）；**L0.5 本体层已落地**（62 概念 / 71 关系 / 10 约束，六跳链条 + audit + 维度层；ADR-052～056）；**S1 推理运行时已落地**（公理层 7 类 / 10 属性 / 1 属性链 / 8 数值定义类；OWL 2 RL 物化 2,999 三元组；ADR-057）；**S2 实体治理与附注锚点已落地**（关系边 4,437、实体 1,474、附注锚 2,689；ADR-059）；**S3 块级混合检索已落地**（15,764 块 / bge-m3 1024 维 / FTS5+向量 RRF；ADR-058）；**S4 三路问答已落地**（fact / ontology / text，50 题 50/50）；**P0/P1 改进已落地**（三档契约 + 指标治理 + 本体质量门禁 + 闭世界数据校验 + 召回 MRR，ADR-060）；**P2 语义层接口已落地**（MCP stdio 5 工具 + 可选 JSONL 审计日志，ADR-061）；**统一 CLI 已封装**（`finkb ask/search/graph/eval/status`）；**问答理解层已加固**（规则理解 + 覆盖守卫 + 模糊公司 + 多实体/多期间 + 可选 LLM 读题；ADR-062） |
-| 测试 | **547 项全部通过**，离线 |
+| 阶段 | Phase 0 **主体完成**；Phase 1 **L1 跑通并收口**（29 份重灌为唯一库 `data/facts.duckdb`：**1830 条**、0 未匹配、36 指标，2026-11-02 二次重灌纠正 13 条告警）；Phase 2 **L2 完整跑通**（29 份全部编译，153 页 active，lint 0 错 0 警，FTS5 检索 + 15 题评测全过；5 探针）；**L0.5 本体层已落地**（62 概念 / 71 关系 / 10 约束，六跳链条 + audit + 维度层；ADR-052～056）；**S1 推理运行时已落地**（公理层 7 类 / 10 属性 / 1 属性链 / 8 数值定义类；OWL 2 RL 物化 2,999 三元组；ADR-057）；**S2 实体治理与附注锚点已落地**（关系边 4,437、实体 1,474、附注锚 2,689；ADR-059）；**S3 块级混合检索已落地**（15,764 块 / bge-m3 1024 维 / FTS5+向量 RRF；ADR-058）；**S4 三路问答已落地**（fact / ontology / text，50 题 50/50）；**P0/P1 改进已落地**（三档契约 + 指标治理 + 本体质量门禁 + 闭世界数据校验 + 召回 MRR，ADR-060）；**P2 语义层接口已落地**（MCP stdio 5 工具 + 可选 JSONL 审计日志，ADR-061）；**统一 CLI 已封装**（`finkb ask/search/graph/eval/status`）；**问答理解层已加固**（规则理解 + 覆盖守卫 + 模糊公司 + 多实体/多期间 + 可选 LLM 读题；ADR-062）；**MCP v1 本地知识库已落地**（FINKB_HOME 代码/数据分离 + 6 个库管理工具，数据不随分发交付；ADR-063） |
+| 测试 | **560 项全部通过**，离线 |
 | 源码规模 | `src/` 14,110 行，`tests/` 7,395 行，`tools/`（核验工具）3,298 行，`eval/` 646 行 |
 | 真实数据验证 | 有（MinerU `vlm` 后端）：**29 份 / 14 家公司 / 4791 页**，10 类版式 |
 | 语料产出 | **5117 张物理表 → 6130 张逻辑表**；有表头 5729（93.5%）；跨页缝合 28 张，拒绝 21 条 |
@@ -1765,6 +1765,46 @@ LLM 读题成为主路径 → 必须加超时/重试/成本预算与离线回放
 
 ---
 
+### ADR-063 本地知识库与 MCP v1：代码/数据分离（2026-11-06）
+
+**背景**：项目自带的 29 份语料、facts、向量、wiki 都是开发期数据，不应随分发物交付；
+用户需要在自己的机器上导入 A 股年报、建库、查询。原路径常量散落在 selector / metric_dict /
+wiki.vault / wiki.claims / cli / lint / search.index / ontology.model / ontology.export 共 9 处，
+无法换根目录；MCP 只有问答工具，没有库管理。
+
+**决策**：
+
+1. **`FINKB_HOME` 作为唯一数据根**（默认源码树；pip 安装后 `~/.finkb`）；新增
+   `common/paths.py` 集中提供 config/data/raw/parsed/search/wiki_vault 路径，9 处
+   `parents[N]` 全部改走它。路径在进程启动时确定。
+2. **新增 `finkb/library.py`**：init/add/list/remove/status/rebuild。add 复用现有
+   parse → ingest → wiki compile → chunk/index 流水线；缺 LLM key 时只做解析+切块并
+   warning；doc_id 沿用 `{6位代码}_{年份}_{报告类型}`（与现有语料一致，避免期间后缀重复）。
+3. **MCP 扩到 11 个工具**：新增 init_library / library_status / list_documents /
+   add_document / remove_document / rebuild_index；`finkb-mcp --home` 在 import 业务模块
+   之前设置 FINKB_HOME（`qa/mcp_main.py`）。
+4. **配置模板复制**：用户库缺配置时从包内 `config/` 复制；`wiki_scope.yaml` 是用户文档清单，
+   不复制，初始化为空。
+5. **分发边界**：`data/`、`raw/*.pdf`、`*.duckdb`、`*.npy`、`library.json` 均 gitignore；
+   README 写明“项目自带数据不随分发交付，用户自建本地库”。
+
+**实测（2026-11-06）**：
+
+- 新建 `/tmp` 空库 → `library add` 已解析的 601127 一季报（跳过 wiki）→ facts 59 /
+  relations 20 / entities 15 / note_anchors 59，切块 23；`finkb ask` 该季报营收
+  → Tier 1 191.47 亿元（原文 19,147,080,403.63 元），引用 P1。
+- `finkb-mcp --home /tmp/finkb-e2e`：initialize / tools/list（11 个）/ library_status 正常。
+- `pytest -o addopts="" -q` **560 passed**；新增 `tests/test_library.py` 12 项 +
+  MCP 工具清单/分派测试。
+
+**代价**：运行中不能切库（需重启 MCP）；`auto` 解析用离线兜底（表格结构弱），
+MinerU 需显式 `--parse-mode mineru`；用户库的 wiki 编译仍依赖 LLM key。
+
+**失效条件**：需要运行中切库/多库并行 → 改为每次调用传 home 或引入 Home 对象；
+分发需要内置模型/默认配置打包 → 把 config 与语料拆成 wheel data-files 或独立资源包。
+
+---
+
 ## 6. 被推翻 / 废弃的方案（不要重提）
 
 | 曾提出 | 为什么废弃 | 替代 |
@@ -2741,6 +2781,17 @@ git checkout 57f9fed -- _ref               # 恢复到工作区
 ---
 
 ## 11. 变更记录
+
+### 2026-11-06 —— 本地知识库与 MCP v1（ADR-063）
+
+- 新增 `common/paths.py`（FINKB_HOME 路径分层）与 `library.py`
+  （init/add/list/remove/status/rebuild）；selector/metric_dict/wiki.vault/wiki.claims/
+  cli/lint/search.index/ontology.model/ontology.export 共 9 处路径常量改走 paths。
+- MCP 工具 5 → 11（新增库管理 6 个）；新增 `qa/mcp_main.py` 支持 `finkb-mcp --home`；
+  pyproject 入口改为 `finkb.qa.mcp_main:main`。
+- 新增 `tests/test_library.py`（12 项）与 MCP 工具清单/分派测试；测试 **547 → 560 项通过**。
+- 分发边界：用户数据全部落 FINKB_HOME，data/raw/wiki_vault 不进 git；
+  README 增加「本地知识库」段、MCP 工具说明与边界。
 
 ### 2026-11-05 —— 问答理解层与检索改造（ADR-062）
 

@@ -18,8 +18,9 @@ from pathlib import Path
 
 import yaml
 
-FINKB_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_METRIC_DICT = FINKB_ROOT / "config" / "metric_dict.yaml"
+from finkb.common import paths
+
+DEFAULT_METRIC_DICT = paths.config_dir() / "metric_dict.yaml"
 
 # unit_default -> (unit_family, norm_unit)，对齐方案 v2.2 P9
 UNIT_DERIVATION: dict[str, tuple[str, str]] = {

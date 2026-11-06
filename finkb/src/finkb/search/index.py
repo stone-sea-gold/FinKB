@@ -16,13 +16,13 @@ from pathlib import Path
 
 import yaml
 
+from finkb.common import paths
 from finkb.wiki.vault import DEFAULT_VAULT, iter_pages
 
-FINKB_ROOT = Path(__file__).resolve().parents[3]
 # 索引库放 data/_search/：沿用 .gitignore 里 `finkb/data/_*/` 的派生数据目录约定，
 # 不用为了一个可重建的索引去改 .gitignore。
-DEFAULT_DB = FINKB_ROOT / "data" / "_search" / "search.db"
-DEFAULT_METRIC_DICT = FINKB_ROOT / "config" / "metric_dict.yaml"
+DEFAULT_DB = paths.search_dir() / "search.db"
+DEFAULT_METRIC_DICT = paths.config_dir() / "metric_dict.yaml"
 
 # bm25 的列权重，顺序同 pages_fts 的列（path, title, description, body）：
 # 标题命中比正文命中更相关，给 10 倍；path 只给 1 倍（文件名也算线索，但不该压过正文）。

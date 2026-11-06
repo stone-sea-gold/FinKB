@@ -22,9 +22,10 @@ from pathlib import Path
 import duckdb
 import yaml
 
-FINKB_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_CLAIMS_DB = FINKB_ROOT / "data" / "wiki.duckdb"
-DEFAULT_QUERIES = FINKB_ROOT / "config" / "wiki_queries.yaml"
+from finkb.common import paths
+
+DEFAULT_CLAIMS_DB = paths.wiki_db()
+DEFAULT_QUERIES = paths.config_dir() / "wiki_queries.yaml"
 
 CLAIM_KINDS = ("fact", "query", "quote")
 PLACEHOLDER = re.compile(r"\{\{(c\d+)\}\}")

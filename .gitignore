@@ -42,3 +42,11 @@ tmp/
 
 # 调研临时目录：CAS 国标包解压等一次性素材
 .scratch/
+
+# 本地知识库注册表（用户导入记录，不入库）
+finkb/data/library.json
+# 解析中转目录（MinerU 下载/解压）
+finkb/data/mineru_work/
+
+# 临时脚本与产物
+.tmp/

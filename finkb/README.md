@@ -67,7 +67,7 @@ finkb/
 │       └── mineru_client.py        # MinerU 客户端 + content_list 适配 + pypdf 兜底
 ├── wiki_vault/                      # L2 知识页（index / summaries / explorations / entities / concepts / _draft）
 ├── eval/                           # 评测集：数字 15 题（check.py）+ 50 题问答（check_qa.py）
-├── tests/                          # 547 项测试，全部离线可跑
+├── tests/                          # 560 项测试，全部离线可跑
 ├── scripts/check.sh                # 一条命令验收（测试 + 语料基线 + 金标）
 ├── config/corpus-baseline.json     # 29 文档 × 5 个数字的退步基线
 ├── config/metric_dict.yaml        # L1 指标字典 v3（36 个指标 / 80 个别名）
@@ -137,14 +137,43 @@ python -m finkb.qa "比亚迪 2025 年报里如何描述海外布局？" --tier 
 FINKB_LLM_UNDERSTAND=1 finkb ask "赛力斯 2025 年第一季度营业收入是多少亿元？"
 ```
 
-Agent 接入与审计（ADR-061；MCP stdio，5 个工具）：
+Agent 接入与审计（ADR-061 / ADR-063；MCP stdio，11 个工具）：
 
 ```bash
-finkb-mcp                                        # 或 python -m finkb.qa.mcp_server
-# MCP 工具：ask / query_metric / search_documents / describe_ontology / traverse_relations
+finkb-mcp                                        # 默认知识库（源码树或 ~/.finkb）
+finkb-mcp --home ~/finkb-data                    # 指定用户本地库（也可用 FINKB_HOME）
+# 问答/检索/图谱 5 个工具：ask / query_metric / search_documents / describe_ontology / traverse_relations
+# 本地库 6 个工具：init_library / library_status / list_documents / add_document / remove_document / rebuild_index
 python -m finkb.qa "比亚迪 2025 年营业收入是多少亿元？" --audit-log
 # 审计日志默认 data/qa_audit.jsonl（已 gitignore），可用 FINKB_QA_AUDIT 改路径
 ```
+
+## 本地知识库（用户自建，v1）
+
+项目自带的 29 份年报及其 facts / 向量 / wiki **不随分发提供**；用户用自己的年报建库。
+所有用户数据放在 `FINKB_HOME`（默认：源码树 `finkb/`；pip 安装后 `~/.finkb`）：
+
+```bash
+export FINKB_HOME=~/finkb-data
+
+python -m finkb.library init                     # 建目录 + 复制配置模板
+python -m finkb.library add --pdf ~/下载/600519_2025_年报.pdf \
+  --company 600519 --period 2025 --type 年报 --name 贵州茅台
+python -m finkb.library add --parsed ./已解析目录 \
+  --company 600519 --period 2025 --type 年报 --name 贵州茅台
+python -m finkb.library list
+python -m finkb.library status
+python -m finkb.library rebuild --embed          # 重建切块 + 索引（--embed 需 SILICONFLOW_API_KEY）
+python -m finkb.library remove 600519_2025_年报
+```
+
+- `add` 默认「解析 → LLM 事实抽取 → wiki 编译 → 切块/索引」；缺 `LLM_API_KEY` 时只做解析+切块并给出 warning。
+- `--parse-mode auto|offline|mineru`：`auto` 用离线兜底（不消耗 MinerU 额度）；`mineru` 需要 token。
+- `--no-facts` / `--no-wiki` 可只建原文检索库；同一份文档重复导入会覆盖该文档的数据。
+- 支持的期间：`2025`（年报）、`2025H1`（半年报）、`2025Q1`（一季报）、`2025Q3`（三季报）。
+- 通过 MCP 使用同一套能力（`init_library` / `add_document` / `remove_document` / `rebuild_index` / `list_documents` / `library_status`）。
+- **分发边界**：仓库里的 `data/`、`raw/*.pdf`、`wiki_vault/` 是开发期产物；打包/发布时不要带上，
+  代码只需要 `src/` 与 `config/` 模板。用户数据始终在 `FINKB_HOME`。
 
 质量门禁（`scripts/check.sh` 已包含）：
 
@@ -371,6 +400,11 @@ result.stitch.records           # 审计记录（页码序列 + 缝合理由）
   本身不披露三列表（已逐份核对，不是漏抽）。
 - **两套检索并存**：旧 153 页知识索引仍用 trigram；块级通道用 jieba + bge-m3 向量 + RRF（ADR-058），
   暂未合并；稠密检索依赖 SiliconFlow API，无 key 时自动降级 FTS-only。
+- **本地库 v1 的边界**：只支持 A 股年报/半年报/一季报/三季报四类；`auto` 解析走离线兜底
+  （表格结构弱于 MinerU）；向量索引需要 `SILICONFLOW_API_KEY`，wiki 编译需要 `LLM_API_KEY`；
+  `finkb eval` 的 50 题只针对项目自带的 29 份语料，不适用于用户库。
+- **本地库数据位置**：`FINKB_HOME` 下的 `data/`、`raw/`、`wiki_vault/`、`config/` 都是用户数据，
+  不进 git、不随代码分发；`finkb-mcp --home` 与 `FINKB_HOME` 等价，必须在进程启动前确定。
 - **L2 编译不幂等**：重编会重写 claims、LLM 正文每次不同；token 成本未量化。
 - **L2 关系与冲突只做结构化部分**：关系仅四类表（子公司/关联方/股东/担保），
   矛盾仅 facts 级数值不一致；文本语义矛盾、客户/供应商名单未做（ADR-046）。

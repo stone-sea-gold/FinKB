@@ -23,6 +23,8 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from finkb.common import paths
 from urllib.parse import quote
 
 import duckdb
@@ -224,7 +226,7 @@ def build_tbox(doc: model.OntologyDoc, ax: model.AxiomDoc) -> "Graph":
 
 def _scope_names(path: str | Path | None = None) -> dict[str, str]:
     """公司代码 → 公司简称（来自 wiki_scope.yaml；缺文件不影响导出）。"""
-    p = Path(path) if path else Path(__file__).resolve().parents[3] / "config" / "wiki_scope.yaml"
+    p = Path(path) if path else paths.config_dir() / "wiki_scope.yaml"
     if not p.exists():
         return {}
     raw = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
