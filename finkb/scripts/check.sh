@@ -15,7 +15,11 @@ echo "== 单元测试 =="
 
 echo
 echo "== 全语料守恒律 + 基线对照 =="
-"$PYTHON" tools/audit.py corpus --baseline config/corpus-baseline.json --pdf-root ../raw
+if [ -d ../raw ]; then
+  "$PYTHON" tools/audit.py corpus --baseline config/corpus-baseline.json --pdf-root ../raw
+else
+  echo "跳过：../raw 不存在（仓库不含开发语料）"
+fi
 
 echo
 echo "== 本体链条完整性 =="

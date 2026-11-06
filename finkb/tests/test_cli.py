@@ -11,6 +11,11 @@ import json
 import pytest
 
 from finkb.cli import main
+from finkb.qa.fact_lane import FACT_DB
+
+pytestmark = pytest.mark.skipif(
+    not FACT_DB.exists(), reason="需要开发语料 data/facts.duckdb（仓库不含数据）"
+)
 
 
 def test_ask_metric(capsys):

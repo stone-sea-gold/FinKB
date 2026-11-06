@@ -1,4 +1,4 @@
-"""MCP stdio server（P2）单测：协议握手、工具清单、5 个工具调用。
+"""MCP stdio server（P2）单测：协议握手、工具清单、问答/库管理工具调用。
 
 只调用协议处理函数，不启 stdio 进程；全部离线。
 """
@@ -7,7 +7,15 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from finkb.qa import mcp_server
+from finkb.qa.mcp_server import CHUNKS_PATH, FACT_DB
+
+pytestmark = pytest.mark.skipif(
+    not (FACT_DB.exists() and CHUNKS_PATH.exists()),
+    reason="需要开发语料 facts.duckdb / chunks.jsonl（仓库不含数据）",
+)
 
 
 def _call(name: str, arguments: dict) -> tuple[dict, bool]:

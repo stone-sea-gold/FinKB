@@ -62,3 +62,14 @@ FinKB-本体语义层对标报告.md
 # Python 构建产物
 build/
 dist/
+
+# ── 开发/规划材料（不随仓库分发）──────────────────────────
+# 方案、问题记录、盘点等文档只留在本地
+/CLAUDE.md
+/FinKB-*.md
+/docs/
+# 开发语料清单与抓取脚本（用户用自己的年报建库）
+/raw/
+/scrape-*.mjs
+/pull-*.mjs
+/.scratch/
