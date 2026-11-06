@@ -73,3 +73,6 @@ dist/
 /scrape-*.mjs
 /pull-*.mjs
 /.scratch/
+# 开发日志与协作约定（不随仓库分发）
+/finkb/DEVLOG.md
+/finkb/AGENTS.md
