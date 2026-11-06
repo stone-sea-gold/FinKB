@@ -32,32 +32,67 @@ def _suffix(period: str) -> str:
     return "年报"
 
 
-def _fetch(con, company: str, period: str, metric_id: str) -> dict | None:
+_DOC_SUFFIX_BY_KIND = {"年报": "", "半年报": "H1", "一季报": "Q1", "三季报": "Q3"}
+_TOLERANCE = 1e-6
+
+
+def _doc_period(doc_id: str) -> str | None:
+    """从 doc_id 推它自己的报告期间：002594_2025_一季报 → 2025Q1。"""
+    parts = doc_id.split("_")
+    if len(parts) < 3:
+        return None
+    suffix = _DOC_SUFFIX_BY_KIND.get(parts[-1])
+    if suffix is None:
+        return None
+    return f"{parts[-2]}{suffix}"
+
+
+def _fetch(
+    con, company: str, period: str, metric_id: str, *, source_doc: str | None = None
+) -> dict | None:
+    """取一条事实；用户点名报告时优先该报告，其次同年文档，最后最新公告。"""
     columns = (
         "fact_id, company, period, metric_id, value_norm, norm_unit, "
-        "value_raw, unit_of_account, source_doc, page_num"
+        "value_raw, unit_of_account, source_doc, page_num, report_date"
     )
-    row = con.execute(
-        f"SELECT {columns} FROM facts_dedup WHERE company=? AND period=? AND metric_id=? "
-        "AND source_doc LIKE ? "
-        "ORDER BY CASE WHEN source_doc LIKE ? THEN 0 ELSE 1 END, fact_id LIMIT 1",
-        [company, period, metric_id, f"%{_suffix(period)}", f"{company}_{period[:4]}%"],
-    ).fetchone()
-    if row is None:
-        row = con.execute(
-            f"SELECT {columns} FROM facts_dedup WHERE company=? AND period=? AND metric_id=? "
-            "ORDER BY fact_id LIMIT 1",
-            [company, period, metric_id],
-        ).fetchone()
-    if row is None:
+    rows = con.execute(
+        f"SELECT {columns} FROM facts WHERE company=? AND period=? AND metric_id=? "
+        "AND caliber='合并报表' "
+        "ORDER BY CASE WHEN source_doc = ? THEN 0 ELSE 1 END, "
+        "CASE WHEN source_doc LIKE ? THEN 0 ELSE 1 END, report_date DESC, fact_id",
+        [company, period, metric_id, source_doc or "", f"{company}_{period[:4]}%"],
+    ).fetchall()
+    if not rows:
         return None
-    return {
+    row = rows[0]
+    item = {
         "fact_id": int(row[0]), "company": row[1], "period": row[2], "metric_id": row[3],
         "value": float(row[4]), "unit": row[5],
         "raw_value": None if row[6] is None else float(row[6]),
         "raw_unit": row[7],
         "doc": row[8], "page": int(row[9]),
+        "report_date": str(row[10]) if row[10] is not None else None,
+        "role": "原报告" if _doc_period(row[8]) == period else "对比列",
+        "requested_doc": source_doc,
+        "doc_missing": bool(source_doc and row[8] != source_doc),
+        "alternatives": [],
     }
+    seen: set[tuple[str, float]] = set()
+    for other in rows[1:]:
+        value = float(other[4])
+        if abs(value - item["value"]) <= _TOLERANCE * max(1.0, abs(value), abs(item["value"])):
+            continue
+        key = (other[8], value)
+        if key in seen:
+            continue
+        seen.add(key)
+        item["alternatives"].append({
+            "fact_id": int(other[0]), "value": value, "unit": other[5],
+            "doc": other[8], "page": int(other[9]),
+            "report_date": str(other[10]) if other[10] is not None else None,
+            "role": "原报告" if _doc_period(other[8]) == period else "对比列",
+        })
+    return item
 
 
 _MONETARY_UNITS = {"元", "千元", "万元", "百万元", "亿元"}
@@ -90,7 +125,24 @@ def _ledger_entry(index: int, item: dict) -> dict:
         "period": item["period"],
         "raw_value": item.get("raw_value"),
         "raw_unit": item.get("raw_unit"),
+        "role": item.get("role"),
+        "report_date": item.get("report_date"),
     }
+
+
+def _source_note(item: dict, alt_ids: list[str], unit: str) -> str:
+    """来源说明：点名报告、对比列、以及同期间的另一口径。"""
+    notes: list[str] = []
+    if item.get("doc_missing"):
+        notes.append(f"（未在指定报告 {item['requested_doc']} 中找到该数字，改引 {item['doc']}）")
+    elif item.get("role") == "对比列":
+        notes.append(f"（该数字取自 {item['doc']} 的上年同期对比列）")
+    for alt_id, alt in zip(alt_ids, item.get("alternatives", [])):
+        notes.append(
+            "；另有" + alt["role"] + "口径 {{" + alt_id + "}} " + str(alt["unit"])
+            + "（" + alt["doc"] + "#P" + str(alt["page"]) + "）"
+        )
+    return "".join(notes)
 
 
 def _refusal(question: str, text: str, data: dict | None = None) -> dict:
@@ -126,7 +178,12 @@ def answer(question: str) -> dict | None:
         rows: list[dict] = []
         for company, company_name in zip(slot.companies, slot.company_names):
             for period in slot.periods:
-                item = _fetch(con, company, period, metric.metric_id)
+                requested = (
+                    slot.source_doc
+                    if slot.source_doc and slot.source_doc.startswith(f"{company}_")
+                    else None
+                )
+                item = _fetch(con, company, period, metric.metric_id, source_doc=requested)
                 if item is None:
                     return None
                 item["company_name"] = company_name
@@ -135,6 +192,18 @@ def answer(question: str) -> dict | None:
         con.close()
 
     ledger = [_ledger_entry(i + 1, item) for i, item in enumerate(rows)]
+    alt_ids: list[list[str]] = []
+    for item in rows:
+        ids: list[str] = []
+        for alt in item.get("alternatives", []):
+            entry = {
+                "id": f"c{len(ledger) + 1}", "value": alt["value"], "unit": alt["unit"],
+                "kind": "alternative", "doc": alt["doc"], "page": alt["page"],
+                "role": alt["role"], "report_date": alt["report_date"],
+            }
+            ledger.append(entry)
+            ids.append(entry["id"])
+        alt_ids.append(ids)
     unit = rows[0]["unit"]
     name = metric.metric_name
     companies = "、".join(slot.company_names)
@@ -150,7 +219,7 @@ def answer(question: str) -> dict | None:
             value = item["value"]
             text = (
                 f"{item['company_name']} {_period_label(item['period'])}的{name}为 "
-                f"{{{{c1}}}} {unit}{_raw_note(item)}。"
+                f"{{{{c1}}}} {unit}{_raw_note(item)}{_source_note(item, alt_ids[0], unit)}。"
             )
         else:
             # “A 和 B 分别多少”“一季报和半年报分别多少”：逐项列出，不再只答第一项。
@@ -205,11 +274,19 @@ def answer(question: str) -> dict | None:
         "slots": {
             "companies": slot.companies, "company_names": slot.company_names,
             "periods": slot.periods, "metric_id": metric.metric_id, "operation": slot.operation,
+            "source_doc": slot.source_doc,
         },
         "value": value,
         "unit": unit,
         "text": text,
         "ledger": ledger,
         "citations": [f"[Ref: {item['doc']}#P{item['page']}]" for item in rows],
-        "data": {"notes": slot.notes, "period_spans": slot.period_spans},
+        "data": {
+            "notes": slot.notes,
+            "period_spans": slot.period_spans,
+            "source_doc": slot.source_doc,
+            "document_period": slot.document_period,
+            "roles": [item.get("role") for item in rows],
+            "alternatives": [alt for item in rows for alt in item.get("alternatives", [])],
+        },
     }

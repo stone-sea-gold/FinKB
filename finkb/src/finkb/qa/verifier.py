@@ -100,6 +100,7 @@ def verify(payload: dict) -> dict:
     # 原文通道：数字只要在引用页原文中逐字出现即可（原文引用，不是生成）
     cited_text = " ".join(page_texts.get((doc, int(page)), "") for doc, page in refs)
     stripped = REF_RE.sub("", text)
+    stripped = re.sub(r"\b\d{6}_\d{4}_(?:年报|半年报|一季报|三季报)", "", stripped)  # 文档 id
     stripped = re.sub(r"\b\d{6}\b", "", stripped)      # 股票代码
     stripped = re.sub(r"P\d+", "", stripped)            # 页码
     stripped = re.sub(r"第\s*\d+\s*页", "", stripped)   # “第 32 页”

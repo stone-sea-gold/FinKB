@@ -111,3 +111,38 @@ def test_table_snippet_keeps_full_table():
     assert "68,395,197" in out
     assert "年末现金及现金等价物余额" in out
     assert "---" not in out
+
+
+def test_fact_lane_prefers_requested_report_if_db_exists():
+    from finkb.qa.fact_lane import FACT_DB
+
+    if not FACT_DB.exists():
+        pytest.skip("facts.duckdb 不存在")
+    result = fact_lane.answer("比亚迪2025年一季报披露的基本每股收益")
+    assert result and result["refused"] is False
+    assert result["ledger"][0]["doc"] == "002594_2025_一季报"
+    assert abs(result["ledger"][0]["value"] - 3.12) < 1e-9
+    assert result["citations"] == ["[Ref: 002594_2025_一季报#P7]"]
+
+
+def test_fact_lane_discloses_comparative_column_if_db_exists():
+    from finkb.qa.fact_lane import FACT_DB
+
+    if not FACT_DB.exists():
+        pytest.skip("facts.duckdb 不存在")
+    result = fact_lane.answer("比亚迪2026年一季报里2025年第一季度的基本每股收益")
+    assert result and result["refused"] is False
+    assert result["ledger"][0]["doc"] == "002594_2026_一季报"
+    text, _ = synthesizer.render(result["text"], result["ledger"])
+    assert "对比列" in text
+    assert "3.12" in text
+
+
+def test_fact_lane_prefers_same_year_report_if_db_exists():
+    from finkb.qa.fact_lane import FACT_DB
+
+    if not FACT_DB.exists():
+        pytest.skip("facts.duckdb 不存在")
+    result = fact_lane.answer("赛力斯2025年第一季度营业收入是多少")
+    assert result and result["refused"] is False
+    assert result["ledger"][0]["doc"] == "601127_2025_一季报"

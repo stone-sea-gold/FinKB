@@ -39,6 +39,9 @@ _PERIOD_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
 )
 _QUARTER_PATTERN = re.compile(r"(?P<y>20\d{2})\s*[Qq]\s*(?P<q>[1-4])")
 _BARE_YEAR = re.compile(r"(?<!\d)(20\d{2})(?!\d)")
+_DOC_PATTERN = re.compile(r"(?P<y>20\d{2})\s*年?\s*(?P<t>年度报告|年报|半年报|一季报|三季报)")
+_DOC_SUFFIX = {"年报": "", "年度报告": "", "半年报": "H1", "一季报": "Q1", "三季报": "Q3"}
+_DOC_NAME = {"": "年报", "H1": "半年报", "Q1": "一季报", "Q3": "三季报"}
 
 # 没有年份的期间词（“2025 年一季报和半年报”里的“半年报”），年份从上下文继承。
 _BARE_PERIOD_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
@@ -84,6 +87,8 @@ class Understanding:
     unresolved: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     source: str = "rules"
+    source_doc: str | None = None
+    document_period: str | None = None
 
 
 @lru_cache(maxsize=1)
@@ -255,6 +260,14 @@ def _coverage(question: str, u: Understanding) -> list[str]:
     return list(dict.fromkeys(unresolved))
 
 
+def _document_hint(text: str) -> tuple[str, str] | None:
+    """识别“2026 年一季报/2025 年报”这类文档限定词，返回 (年份, 期间后缀)。"""
+    match = _DOC_PATTERN.search(text)
+    if not match:
+        return None
+    return match.group("y"), _DOC_SUFFIX[match.group("t")]
+
+
 @lru_cache(maxsize=512)
 def _rules(question: str) -> Understanding:
     text = question.replace(" ", "")
@@ -264,6 +277,17 @@ def _rules(question: str) -> Understanding:
         u.companies, u.company_names, fuzzy_notes = _fuzzy_companies(text)
         u.notes.extend(fuzzy_notes)
     u.periods, u.period_spans = _parse_periods(question)
+    doc = _document_hint(question)
+    if doc:
+        doc_year, doc_suffix = doc
+        # “2026 年一季报里 2025 年第一季度”：文档年份不是查询期间，先剔除。
+        if any(period[:4] != doc_year for period in u.periods):
+            kept = [(p, s) for p, s in zip(u.periods, u.period_spans) if p[:4] != doc_year]
+            u.periods = [p for p, _ in kept]
+            u.period_spans = [s for _, s in kept]
+        u.document_period = f"{doc_year}{doc_suffix}"
+        if len(u.periods) == 1 and u.companies:
+            u.source_doc = f"{u.companies[0]}_{doc_year}_{_DOC_NAME[doc_suffix]}"
     u.metric = _metric_hit(text)
     u.operation = _operation(question)
     u.qualifiers = [token for token in QUALIFIER_TOKENS if token in text]

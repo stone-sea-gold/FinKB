@@ -119,3 +119,16 @@ def test_section_match_gets_boost(tmp_path):
     ]
     results = hybrid.search("环境风险", chunks=chunks, embedder=None)
     assert results and results[0]["chunk_id"] == "b:p1:0"
+
+
+def test_document_qualifier_extracts_source_doc():
+    from finkb.qa.understanding import understand
+
+    u = understand("比亚迪2026年一季报里2025年第一季度的基本每股收益是多少")
+    assert u.source_doc == "002594_2026_一季报"
+    assert u.document_period == "2026Q1"
+    assert u.periods == ["2025Q1"]
+
+    u2 = understand("比亚迪2025年一季报披露的基本每股收益")
+    assert u2.source_doc == "002594_2025_一季报"
+    assert u2.periods == ["2025Q1"]
