@@ -96,3 +96,18 @@ def test_router_text_intent_beats_fact():
     assert router.route("美的集团 2025 年的研发投入和研发人员规模如何？").name == "text"
     # 纯数值问法仍然走 fact
     assert router.route("美的集团 2025 年的研发费用是多少亿元？").name == "fact"
+
+def test_table_snippet_keeps_full_table():
+    from finkb.qa.answer import _table_snippet
+
+    text = (
+        "| 项目 | 2025年 | 2024年 |\n"
+        "| --- | --- | --- |\n"
+        "| 现金 | 68,395,197 | 102,256,542 |\n"
+        "| 年末现金及现金等价物余额 | 68,395,197 | 102,256,542 |"
+    )
+    out = _table_snippet(text)
+    assert "现金" in out
+    assert "68,395,197" in out
+    assert "年末现金及现金等价物余额" in out
+    assert "---" not in out

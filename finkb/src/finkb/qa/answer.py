@@ -171,6 +171,16 @@ def _snippet(text: str, question: str, width: int = 260) -> str:
     return text[start:end].replace("\n", " ").strip()
 
 
+_TABLE_SEPARATOR_RE = re.compile(r"^\s*\|(?:\s*:?-{3,}:?\s*\|)+\s*$")
+
+
+def _table_snippet(text: str, width: int = 1500) -> str:
+    """表格块保留完整表格（表头 + 表体），不按换行截断。"""
+    lines = [line.rstrip() for line in text.splitlines() if line.strip()]
+    lines = [line for line in lines if not _TABLE_SEPARATOR_RE.match(line)]
+    return "\n".join(lines)[:width]
+
+
 REPORT_TYPE_WORDS = (
     ("年度报告", "年报"), ("年报", "年报"),
     ("半年度报告", "半年报"), ("半年报", "半年报"),
@@ -220,7 +230,8 @@ def answer_text(question: str, limit: int = 5) -> dict:
         seen.add(key)
         evidence.append({
             "chunk_id": item["chunk_id"], "doc_id": item["doc_id"], "page_num": int(item["page_num"]),
-            "section": item.get("section", ""), "snippet": _snippet(item["text"], question),
+            "section": item.get("section", ""),
+            "snippet": _table_snippet(item["text"]) if item.get("block_type") == "table" else _snippet(item["text"], question),
         })
         citations.append(f"[Ref: {item['doc_id']}#P{item['page_num']}]")
         if len(evidence) >= 3:
