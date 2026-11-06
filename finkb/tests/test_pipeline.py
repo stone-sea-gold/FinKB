@@ -5,7 +5,14 @@
 
 from __future__ import annotations
 
+import pytest
+
 from finkb.qa import pipeline
+from finkb.qa.fact_lane import FACT_DB
+
+pytestmark = pytest.mark.skipif(
+    not FACT_DB.exists(), reason="需要开发语料 data/facts.duckdb（仓库不含数据）"
+)
 
 
 def _steps(payload: dict) -> list[dict]:

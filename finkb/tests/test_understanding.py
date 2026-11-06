@@ -7,6 +7,7 @@ import json
 import pytest
 
 from finkb.qa import fact_lane, synthesizer, understanding
+from finkb.qa.fact_lane import FACT_DB
 from finkb.search import hybrid
 from finkb.search.embed import FakeEmbedder
 
@@ -59,6 +60,12 @@ def test_residual_qualifiers():
     assert "分产品" in understanding.residual_qualifiers("美的集团 2025 年分产品的营业收入是多少？")
 
 
+_requires_facts = pytest.mark.skipif(
+    not FACT_DB.exists(), reason="需要开发语料 data/facts.duckdb（仓库不含数据）"
+)
+
+
+@_requires_facts
 def test_fact_answer_keeps_raw_value_and_period_label():
     payload = fact_lane.answer("比亚迪 2025 年营业收入是多少亿元？")
     assert payload is not None and not payload["refused"]
@@ -74,6 +81,7 @@ def test_fact_answer_refuses_unparsed_period():
     assert "时间限定" in payload["text"]
 
 
+@_requires_facts
 def test_fact_answer_period_is_human_readable():
     payload = fact_lane.answer("赛力斯 2025 年第一季度营业收入是多少")
     assert payload is not None and not payload["refused"]
