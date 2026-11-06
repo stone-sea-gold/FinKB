@@ -81,4 +81,4 @@ cd finkb
 
 ## License
 
-未定（如需开源协议请告知）。
+Apache License 2.0，见 [LICENSE](LICENSE)。

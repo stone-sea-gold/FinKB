@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "finkb"
 version = "0.1.0"
 description = "三层知识栈的 A 股财报知识库"
+license = { text = "Apache-2.0" }
 requires-python = ">=3.10"
 dependencies = [
     "duckdb>=1.0",
