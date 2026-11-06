@@ -9,6 +9,7 @@ description = "三层知识栈的 A 股财报知识库"
 requires-python = ">=3.10"
 dependencies = [
     "duckdb>=1.0",
+    "numpy>=1.26",
     "pydantic>=2.0",
     "pypdf>=4.0",
     "pyyaml>=6.0",
@@ -29,6 +30,16 @@ finkb-mcp = "finkb.qa.mcp_main:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# 配置模板随包安装：wheel 装到 <prefix>/share/finkb/config，
+# finkb.common.paths.package_config_dir() 会在源码树与安装目录之间自动选择。
+[tool.setuptools.data-files]
+"share/finkb/config" = [
+    "config/*.yaml",
+    "config/*.yml",
+    "config/*.json",
+    "config/.env.example",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

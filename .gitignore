@@ -50,3 +50,15 @@ finkb/data/mineru_work/
 
 # 临时脚本与产物
 .tmp/
+
+# ── 生成的知识库数据（不随仓库分发；用户用自己的年报建库）──────
+finkb/data/
+finkb/wiki_vault/
+
+# 视频转写素材与对标报告（不提交）
+docs/
+FinKB-本体语义层对标报告.md
+
+# Python 构建产物
+build/
+dist/

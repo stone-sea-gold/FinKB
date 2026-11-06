@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 from pathlib import Path
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[3]  # finkb/（源码树）
@@ -82,12 +83,25 @@ def audit_log_path() -> Path:
     return data_dir() / "qa_audit.jsonl"
 
 
+def package_config_dir() -> Path:
+    """找到随包安装的配置模板目录（源码树 / wheel 的 share/finkb/config）。"""
+    candidates = (
+        PACKAGE_ROOT / "config",
+        Path(sys.prefix) / "share" / "finkb" / "config",
+        Path(__file__).resolve().parent.parent / "config",
+    )
+    for candidate in candidates:
+        if (candidate / "metric_dict.yaml").exists():
+            return candidate
+    return candidates[0]
+
+
 def env_file() -> Path:
-    """优先用户库里的 .env；没有就回退源码树的 .env（方便本机开发）。"""
+    """优先用户库里的 .env；没有就回退包内的 .env（方便本机开发）。"""
     local = config_dir() / ".env"
     if local.exists():
         return local
-    return PACKAGE_ROOT / "config" / ".env"
+    return package_config_dir() / ".env"
 
 
 def ensure_home() -> Path:
@@ -101,7 +115,7 @@ def ensure_home() -> Path:
         raw_dir(),
     ):
         directory.mkdir(parents=True, exist_ok=True)
-    source = PACKAGE_ROOT / "config"
+    source = package_config_dir()
     if source.exists():
         for pattern in CONFIG_GLOBS:
             for src in source.glob(pattern):
@@ -111,6 +125,10 @@ def ensure_home() -> Path:
                 dst = config_dir() / src.name
                 if not dst.exists():
                     shutil.copy2(src, dst)
+        # 密钥模板单独复制（.env 本身永远不复制，也不进 git）。
+        env_example = source / ".env.example"
+        if env_example.exists() and not (config_dir() / ".env.example").exists():
+            shutil.copy2(env_example, config_dir() / ".env.example")
     scope = config_dir() / "wiki_scope.yaml"
     if not scope.exists():
         scope.write_text("version: 1\ndocs: []\n", encoding="utf-8")

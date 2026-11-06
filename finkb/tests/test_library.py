@@ -48,8 +48,18 @@ def test_ensure_home_creates_layout_and_templates(home):
     for directory in (home / "data" / "parsed", home / "data" / "_search", home / "config", home / "raw", home / "wiki_vault"):
         assert directory.is_dir()
     assert (home / "config" / "metric_dict.yaml").exists()
+    assert (home / "config" / ".env.example").exists()
     scope = library._read_scope()
     assert scope["docs"] == []
+
+
+def test_package_config_dir_falls_back_to_install_prefix(tmp_path, monkeypatch):
+    share = tmp_path / "share" / "finkb" / "config"
+    share.mkdir(parents=True)
+    (share / "metric_dict.yaml").write_text("version: 3\n", encoding="utf-8")
+    monkeypatch.setattr(paths, "PACKAGE_ROOT", tmp_path / "no-config-here")
+    monkeypatch.setattr(paths.sys, "prefix", str(tmp_path))
+    assert paths.package_config_dir() == share
 
 
 def test_scope_upsert_and_remove(home):

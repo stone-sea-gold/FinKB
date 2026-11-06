@@ -157,6 +157,9 @@ python -m finkb.qa "比亚迪 2025 年营业收入是多少亿元？" --audit-lo
 export FINKB_HOME=~/finkb-data
 
 python -m finkb.library init                     # 建目录 + 复制配置模板
+cp $FINKB_HOME/config/.env.example $FINKB_HOME/config/.env
+# 编辑 .env：至少填 LLM_API_KEY（建库必需）；可选 MINERU_API_TOKEN / SILICONFLOW_API_KEY
+
 python -m finkb.library add --pdf ~/下载/600519_2025_年报.pdf \
   --company 600519 --period 2025 --type 年报 --name 贵州茅台
 python -m finkb.library add --parsed ./已解析目录 \
@@ -201,29 +204,50 @@ cd finkb
 
 ## 安装
 
-```bash
-cd finkb
-../.venv/bin/pip install --no-build-isolation -e .
-```
-
-安装后可用 `finkb` 命令（也可用 `../.venv/bin/python -m finkb.cli`，需 `PYTHONPATH=src`）。
-
-## 配置 MinerU（真实解析需要）
+要求 Python **3.10+**（开发环境 3.12）；不需要 GPU / Java / Docker。
 
 ```bash
 cd finkb
-cp config/.env.example config/.env
-# 编辑 config/.env，填入 MINERU_API_TOKEN
+python3 -m venv ../.venv
+../.venv/bin/pip install -e ".[search,ontology]"
 ```
 
-Token 从 <https://mineru.net/apiManage/token> 获取。
-`config/.env` 已被 `.gitignore` 覆盖，不会提交；`config/.env.example` 会提交。
+- `search` 带 jieba（中文分词；缺失时退化为字二元组，召回下降）
+- `ontology` 带 rdflib/owlrl（只有本体导出/推理需要，日常问答可不装）
+- 从 GitHub 安装：`pip install "finkb[search,ontology] @ git+https://github.com/stone-sea-gold/FinKB.git#subdirectory=finkb"`
 
-支持的变量：
+安装后可用 `finkb` 与 `finkb-mcp` 命令（也可用 `python -m finkb.cli`，需 `PYTHONPATH=src`）。
+配置模板随包安装，`library init` 会自动复制到 `$FINKB_HOME/config/`。
+
+## 配置密钥（config/.env）
+
+源码开发用 `finkb/config/.env`；用户本地库用 `$FINKB_HOME/config/.env`（`library init` 会把模板复制过去）：
+
+```bash
+# 源码开发
+cp finkb/config/.env.example finkb/config/.env
+# 用户本地库
+python -m finkb.library init
+cp $FINKB_HOME/config/.env.example $FINKB_HOME/config/.env
+```
+
+`config/.env` 已被 `.gitignore` 覆盖，不会提交；`.env.example` 会提交。
 
 | 变量 | 必填 | 默认 | 说明 |
 |---|---|---|---|
-| `MINERU_API_TOKEN` | ✅ | — | Bearer token |
+| `LLM_API_KEY` | 建库必需 | — | OpenAI 兼容接口的 key（事实抽取 + wiki 编译） |
+| `LLM_BASE_URL` | | `https://opencode.ai/zen/go` | OpenAI 兼容服务地址 |
+| `LLM_MODEL` | | `deepseek-v4.1-flash` | 抽取/编译使用的模型 |
+| `SILICONFLOW_API_KEY` | | — | 向量索引与稠密检索（bge-m3）；缺了自动纯关键词 |
+| `MINERU_API_TOKEN` | | — | 仅 `--parse-mode mineru` 在线解析需要 |
+
+MinerU Token 从 <https://mineru.net/apiManage/token> 获取；SiliconFlow key 从 <https://siliconflow.cn> 获取。
+
+支持的 MinerU 变量：
+
+| 变量 | 必填 | 默认 | 说明 |
+|---|---|---|---|
+| `MINERU_API_TOKEN` | | — | Bearer token |
 | `MINERU_BASE_URL` | | `https://mineru.net` | API 根地址 |
 | `MINERU_MODEL_VERSION` | | `pipeline` | `pipeline` / `vlm` / `MinerU-HTML` |
 | `MINERU_LANGUAGE` | | `ch` | PaddleOCR 语言码，中文是 `ch` 不是 `zh` |

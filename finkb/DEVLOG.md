@@ -428,7 +428,7 @@ MinerU 把两格粘成一格的 OCR 错位（`601127_2025_半年报` 1 个、`60
 | 项 | 值 |
 |---|---|
 | 阶段 | Phase 0 **主体完成**；Phase 1 **L1 跑通并收口**（29 份重灌为唯一库 `data/facts.duckdb`：**1830 条**、0 未匹配、36 指标，2026-11-02 二次重灌纠正 13 条告警）；Phase 2 **L2 完整跑通**（29 份全部编译，153 页 active，lint 0 错 0 警，FTS5 检索 + 15 题评测全过；5 探针）；**L0.5 本体层已落地**（62 概念 / 71 关系 / 10 约束，六跳链条 + audit + 维度层；ADR-052～056）；**S1 推理运行时已落地**（公理层 7 类 / 10 属性 / 1 属性链 / 8 数值定义类；OWL 2 RL 物化 2,999 三元组；ADR-057）；**S2 实体治理与附注锚点已落地**（关系边 4,437、实体 1,474、附注锚 2,689；ADR-059）；**S3 块级混合检索已落地**（15,764 块 / bge-m3 1024 维 / FTS5+向量 RRF；ADR-058）；**S4 三路问答已落地**（fact / ontology / text，50 题 50/50）；**P0/P1 改进已落地**（三档契约 + 指标治理 + 本体质量门禁 + 闭世界数据校验 + 召回 MRR，ADR-060）；**P2 语义层接口已落地**（MCP stdio 5 工具 + 可选 JSONL 审计日志，ADR-061）；**统一 CLI 已封装**（`finkb ask/search/graph/eval/status`）；**问答理解层已加固**（规则理解 + 覆盖守卫 + 模糊公司 + 多实体/多期间 + 可选 LLM 读题；ADR-062）；**MCP v1 本地知识库已落地**（FINKB_HOME 代码/数据分离 + 6 个库管理工具，数据不随分发交付；ADR-063） |
-| 测试 | **560 项全部通过**，离线 |
+| 测试 | **561 项全部通过**，离线 |
 | 源码规模 | `src/` 14,110 行，`tests/` 7,395 行，`tools/`（核验工具）3,298 行，`eval/` 646 行 |
 | 真实数据验证 | 有（MinerU `vlm` 后端）：**29 份 / 14 家公司 / 4791 页**，10 类版式 |
 | 语料产出 | **5117 张物理表 → 6130 张逻辑表**；有表头 5729（93.5%）；跨页缝合 28 张，拒绝 21 条 |
@@ -1805,6 +1805,43 @@ MinerU 需显式 `--parse-mode mineru`；用户库的 wiki 编译仍依赖 LLM k
 
 ---
 
+### ADR-064 打包与分发：依赖声明、配置随包、仓库剥离数据（2026-11-06）
+
+**背景**：MCP v1 要分发给“没有开发语料”的用户，暴露两个打包缺口：
+① `numpy` 被 `search/hybrid.py`、`search/embed.py` 顶层 import，却没写进 dependencies，
+干净环境装完即 `ModuleNotFoundError`；② `config/` 不在 `src/` 下，setuptools 不会打进 wheel，
+`library init` 复制不到配置模板。另外仓库仍跟踪 860 个生成文件（`finkb/data/_b1/**`、
+`finkb/wiki_vault/**`），分发会把开发语料一起带出去。
+
+**决策**：
+
+1. **`numpy>=1.26` 进核心依赖**（不是 optional）：检索与向量模块在导入期就需要它。
+2. **配置模板随包安装**：`[tool.setuptools.data-files]` 把 `config/*.yaml|yml|json` 与
+   `.env.example` 装到 `<prefix>/share/finkb/config`；`paths.package_config_dir()` 三级回退
+   （源码树 `PACKAGE_ROOT/config` → `sys.prefix/share/finkb/config` → 包内 `config`）。
+   `ensure_home()` 复制 yaml 与 `.env.example`，但**不复制** `.env`（密钥）与 `wiki_scope.yaml`
+   （用户文档清单，初始化为空）。
+3. **仓库剥离生成数据**：`finkb/data/`、`finkb/wiki_vault/` 加入根 `.gitignore` 并
+   `git rm --cached`（本地文件保留）；`docs/`（视频转写）与 `FinKB-本体语义层对标报告.md` 不提交。
+4. **版本 0.1.0**，补根 `README.md`（安装、建库、MCP 配置、分发边界）。
+
+**实测（2026-11-06）**：
+
+- 构建 wheel：`finkb-0.1.0-py3-none-any.whl`，92 个文件、280,925 字节；包含
+  `share/finkb/config/*.yaml`、`.env.example`、`library.py`、`mcp_main.py`。
+- 干净 venv 安装（`--no-deps`）后：`package_config_dir() = venv/share/finkb/config`；
+  在空 `FINKB_HOME` 上 `ensure_home()` 生成 10 个配置模板（含 `.env.example`）与空的
+  `wiki_scope.yaml`。
+- `pytest -o addopts="" -q` **561 passed**；`scripts/check.sh` 此前在 560 项时 exit 0。
+
+**代价**：`data-files` 是 setuptools 机制，安装后配置在 `<prefix>/share` 而非包内；
+wheel 里仍带一份 `wiki_scope.yaml` 模板（`ensure_home` 会跳过，不影响用户库）。
+
+**失效条件**：改用 conda/系统包或非 setuptools 构建 → 需要把 config 收进 `src/finkb/config`
+并用 `importlib.resources` 读取；需要多版本配置并存 → 改为用户显式指定 config 目录。
+
+---
+
 ## 6. 被推翻 / 废弃的方案（不要重提）
 
 | 曾提出 | 为什么废弃 | 替代 |
@@ -2781,6 +2818,15 @@ git checkout 57f9fed -- _ref               # 恢复到工作区
 ---
 
 ## 11. 变更记录
+
+### 2026-11-06 —— 打包与分发修正（v0.1.0，ADR-064）
+
+- `numpy>=1.26` 加入核心依赖；`config/` 通过 setuptools `data-files` 装到
+  `<prefix>/share/finkb/config`；`paths.package_config_dir()` 三级回退；`ensure_home`
+  复制 `.env.example`（不复制 `.env` / `wiki_scope.yaml`）。
+- 仓库剥离生成数据：`finkb/data/`、`finkb/wiki_vault/` 加入 gitignore 并 `git rm --cached`；
+  `docs/` 与对标报告不提交；新增根 `README.md`。
+- 干净 venv 验证 wheel 安装后 `library init` 能复制配置；测试 **560 → 561 项通过**。
 
 ### 2026-11-06 —— 本地知识库与 MCP v1（ADR-063）
 
