@@ -109,7 +109,8 @@ def test_synthesis_falls_back_when_verification_fails():
 
 def test_synthesis_disabled_marks_no_backend():
     payload = pipeline.ask(TEXT_Q, synthesize=False)
-    assert payload["synthesis"] == {"used": False, "reason": "no_backend"}
+    assert payload["synthesis"]["used"] is False
+    assert payload["synthesis"]["reason"] == "no_backend"
 
 
 def test_synthesis_refused_becomes_refusal():

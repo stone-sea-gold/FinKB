@@ -169,6 +169,29 @@ finkb ask "那 2024 年呢？" --context '{"previous_question":"比亚迪 2025 �
 
 多轮验收（离线，12 组宿主模拟）：`python ../eval/check_context.py`。
 
+响应契约（P6；字段只增不改）：
+
+- 每个回答都带 `schema_version`（当前 `"1.0.0"`）与 `disclaimer`（研究参考、不构成投资建议）。
+  宿主可先看版本号，再决定是否按老字段解析。
+- 模式 A（默认，项目写答案）：`synthesis.used=true` 且 `synthesis.mode="A"`；无后端/校验不过时
+  回退抽取式（`synthesis.used=false`、`mode="extractive"`），不影响主字段。
+- 模式 B（宿主写答案）：`evidence`/`verify` 两个工具返回 `mode="B"` 与 `responsibility`
+  责任声明——**答案文本由宿主生成，FinKB 只提供证据与校验，不对宿主表述负责**。
+
+在 DSH（或其它支持 MCP 的宿主）中接入的最小配置：
+
+```json
+{
+  "mcpServers": {
+    "finkb": {"command": "finkb-mcp", "args": []}
+  }
+}
+```
+
+宿主侧流程：① 保存每轮问题与 `resolved_slots`；② 追问时把上一轮槽位作为 `context` 传回
+`ask`；③ 收到 `clarify` 就向用户补问；④ 需要宿主自己写答案时用 `evidence` 取包、写完调
+`verify` 校验；⑤ 会话历史/压缩/流式/展示都留在宿主，项目不保存。
+
 ## 本地知识库（用户自建，v1）
 
 项目自带的 29 份年报及其 facts / 向量 / wiki **不随分发提供**；用户用自己的年报建库。

@@ -283,12 +283,17 @@ def call_tool(name: str, args: dict) -> dict:
         pack = evidence_mod.build_pack(str(args["question"]), envelope)
         if name == "evidence":
             return {
+                "mode": "B",
+                "responsibility": "答案文本由宿主生成；FinKB 只提供证据包与校验工具，不对宿主生成的表述负责。",
                 "tier": envelope.get("tier"),
                 "refused": envelope.get("refused", False),
                 "evidence": pack.to_dict(),
             }
         result = normalize_response(dict(args["answer"]), pack)
-        return verify_synthesis(result, pack).to_dict()
+        verdict = verify_synthesis(result, pack).to_dict()
+        verdict["mode"] = "B"
+        verdict["responsibility"] = "答案文本由宿主生成；FinKB 只提供证据包与校验工具，不对宿主生成的表述负责。"
+        return verdict
     if name == "traverse_relations":
         con = _connect()
         try:

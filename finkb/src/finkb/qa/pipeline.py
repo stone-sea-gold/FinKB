@@ -27,6 +27,10 @@ from finkb.qa.synth_verify import compose_verified
 FACT_DB = FINKB_ROOT / "data" / "facts.duckdb"
 CHUNKS_DB = FINKB_ROOT / "data" / "_search" / "chunks.db"
 
+# 响应契约版本：字段只增不改；宿主可据此做兼容性判断（P6）。
+SCHEMA_VERSION = "1.0.0"
+DISCLAIMER = "本回答由 FinKB 知识库生成；数字来自事实库或检索片段，仅供研究参考，不构成投资建议。"
+
 TIERS = ("metric", "ontology", "document")
 TIER_LABELS = {"metric": "Tier 1 指标", "ontology": "Tier 2 本体", "document": "Tier 3 文档"}
 ROUTE_BY_TIER = {"metric": "fact", "ontology": "ontology", "document": "text"}
@@ -85,6 +89,8 @@ def _envelope(
     body["route"] = ROUTE_BY_TIER[tier]
     body["confidence"] = 0.0 if refused else (confidence if confidence is not None else CONFIDENCE[tier])
     body["trace"] = trace
+    body["schema_version"] = SCHEMA_VERSION
+    body["disclaimer"] = DISCLAIMER
     if meta:
         # 只增不改：多轮上下文元数据（resolved_question/resolved_slots/inherited/clarify）。
         body.update(meta)
@@ -119,7 +125,7 @@ def _synthesize(question: str, tier: str, payload: dict, backend, trace: list[di
         return payload
     if backend is None:
         payload = dict(payload)
-        payload["synthesis"] = {"used": False, "reason": "no_backend"}
+        payload["synthesis"] = {"used": False, "reason": "no_backend", "mode": "extractive"}
         return payload
     envelope = {**payload, "tier": tier, "route": ROUTE_BY_TIER[tier]}
     pack = evidence_mod.build_pack(question, envelope)
@@ -130,6 +136,7 @@ def _synthesize(question: str, tier: str, payload: dict, backend, trace: list[di
         payload["synthesis"] = {
             "used": False,
             "reason": "verify_failed",
+            "mode": "extractive",
             "attempts": verification.attempts,
             "errors": verification.errors[:5],
         }
@@ -141,7 +148,7 @@ def _synthesize(question: str, tier: str, payload: dict, backend, trace: list[di
             "text": "证据不足：" + ("；".join(result.missing) or "现有证据不足以回答这个问题。"),
             "ledger": payload.get("ledger", []),
             "citations": payload.get("citations", []),
-            "synthesis": {"used": True, "backend": result.backend, "checks": verification.checks},
+            "synthesis": {"used": True, "mode": "A", "backend": result.backend, "checks": verification.checks},
         }
     rendered, _used = synth_mod.render_synthesis(result, payload.get("ledger", []))
     citations: list[str] = []
@@ -153,6 +160,7 @@ def _synthesize(question: str, tier: str, payload: dict, backend, trace: list[di
     body["citations"] = citations
     body["synthesis"] = {
         "used": True,
+        "mode": "A",
         "backend": result.backend,
         "attempts": verification.attempts,
         "checks": verification.checks,
