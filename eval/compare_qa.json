@@ -1,0 +1,67 @@
+{
+  "cases": [
+    {
+      "id": "P01",
+      "topic": "区间解析：美的 2023-2025 营收",
+      "question": "美的集团 2023-2025 年营业收入",
+      "expect": {
+        "refused": false,
+        "periods": ["2023", "2024", "2025"],
+        "rows": 3,
+        "values_present": true,
+        "text_contains": ["2023", "2024", "2025"]
+      }
+    },
+    {
+      "id": "P02",
+      "topic": "三期间归母净利润：贵州茅台",
+      "question": "贵州茅台 2023-2025 年归母净利润",
+      "expect": {
+        "refused": false,
+        "periods": ["2023", "2024", "2025"],
+        "rows": 3,
+        "values_present": true
+      }
+    },
+    {
+      "id": "P03",
+      "topic": "半年报与年报并排：比亚迪",
+      "question": "比亚迪 2024H1 和 2024 年营业收入",
+      "expect": {
+        "refused": false,
+        "periods": ["2024H1", "2024"],
+        "rows": 2,
+        "values_present": true
+      }
+    },
+    {
+      "id": "P04",
+      "topic": "两期间：长江电力",
+      "question": "长江电力 2024-2025 年营业收入",
+      "expect": {
+        "refused": false,
+        "periods": ["2024", "2025"],
+        "rows": 2,
+        "values_present": true
+      }
+    },
+    {
+      "id": "P05",
+      "topic": "单期间拒答",
+      "question": "美的集团 2025 年营业收入",
+      "expect": {
+        "refused": true,
+        "text_contains": ["至少需要两个期间"]
+      }
+    },
+    {
+      "id": "P06",
+      "topic": "缺指标拒答",
+      "question": "美的集团 2023-2025 年",
+      "expect": {
+        "refused": true,
+        "text_contains": ["明确一个指标和公司"]
+      }
+    }
+  ]
+}

@@ -78,6 +78,14 @@ else
 fi
 
 echo
+echo "== 跨期对比（6 道离线验收）=="
+if [ -f data/facts.duckdb ]; then
+  "$PYTHON" ../eval/check_compare.py
+else
+  echo "跳过：data/facts.duckdb 不存在"
+fi
+
+echo
 echo "== 金标事实集 =="
 if [ -f data/facts.duckdb ]; then
   "$PYTHON" tools/gold_check.py --db data/facts.duckdb --gold config/gold_facts.yaml

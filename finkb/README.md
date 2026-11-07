@@ -137,13 +137,14 @@ python -m finkb.qa "比亚迪 2025 年报里如何描述海外布局？" --tier 
 FINKB_LLM_UNDERSTAND=1 finkb ask "赛力斯 2025 年第一季度营业收入是多少亿元？"
 ```
 
-Agent 接入与审计（ADR-061 / ADR-063；MCP stdio，13 个工具）：
+Agent 接入与审计（ADR-061 / ADR-063；MCP stdio，14 个工具）：
 
 ```bash
 finkb-mcp                                        # 默认知识库（源码树或 ~/.finkb）
 finkb-mcp --home ~/finkb-data                    # 指定用户本地库（也可用 FINKB_HOME）
 # 问答/检索/图谱 5 个工具：ask / query_metric / search_documents / describe_ontology / traverse_relations
 # 合成 2 个工具：evidence（取证据包）/ verify（校验宿主答案）
+# 对比 1 个工具：compare（同一指标多期间并排）
 # 本地库 6 个工具：init_library / library_status / list_documents / add_document / remove_document / rebuild_index
 python -m finkb.qa "比亚迪 2025 年营业收入是多少亿元？" --audit-log
 # 审计日志默认 data/qa_audit.jsonl（已 gitignore），可用 FINKB_QA_AUDIT 改路径
@@ -307,7 +308,21 @@ MinerU Token 从 <https://mineru.net/apiManage/token> 获取；SiliconFlow key �
 MINERU_API_TOKEN=xxx ../.venv/bin/python -m finkb.cli parse ...
 ```
 
-## 统一 CLI（问答 / 检索 / 图谱 / 评测）
+跨期对比（P7；可选能力）：
+
+- 同一公司、同一指标、多个期间并排返回数值/单位/引用；数字仍由事实库 SQL 计算。
+- 支持区间解析（`2023-2025` → 2023/2024/2025）与显式 `--periods`；
+  `data.rows` 给 `period/value/unit/doc/page/role`，缺失期间保留空行并在文本里写“无数据”。
+- 少于两个期间、或问题里没有明确指标/公司时拒答（不猜）。
+- 验收：`python ../eval/check_compare.py`（6 道离线）。
+
+```bash
+finkb compare "美的集团 2023-2025 年营业收入"
+finkb compare "比亚迪 2024H1 和 2024 年营业收入" --periods 2024H1,2024
+finkb compare "美的集团 2023-2025 年营业收入" --json
+```
+
+## 统一 CLI（问答 / 检索 / 对比 / 图谱 / 评测）
 
 `pip install -e .` 后会生成 `finkb` 命令，日常使用只需这一个入口：
 
@@ -316,6 +331,9 @@ finkb ask "比亚迪 2025 年营业收入是多少亿元？"          # 三档�
 finkb ask "哪些公司 2025 年资产负债率超过 70%？" --explain
 finkb ask "比亚迪 2025 年报里如何描述海外布局？" --tier document
 finkb ask                                              # 不给问题：进入交互模式（:q 退出）
+
+finkb compare "美的集团 2023-2025 年营业收入"           # 同一指标多期间并排
+finkb compare "比亚迪 2024H1 和 2024 年营业收入" --periods 2024H1,2024
 
 finkb search "海外 布局" --company 002594 --period 2025 --limit 5
 finkb search "研发人员" --type table --no-dense          # 只用关键词

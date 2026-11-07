@@ -365,6 +365,27 @@ def run_ask(args: argparse.Namespace) -> int:
         answer(question)
 
 
+def run_compare(args: argparse.Namespace) -> int:
+    """``finkb compare``：同一指标多期间并排对比（数字仍来自事实库）。"""
+    from finkb.qa.compare import compare
+
+    periods = None
+    if args.periods:
+        periods = [part.strip() for part in args.periods.split(",") if part.strip()]
+    payload = compare(args.question, periods=periods)
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 1 if payload.get("refused") else 0
+    print(payload.get("text", ""))
+    for entry in payload.get("ledger", []):
+        print(
+            f"  [{entry['id']}] {entry['company']} {entry['period']} "
+            f"{entry['metric_id']} = {entry['value']} {entry['unit']}"
+            f"（{entry['doc']}#P{entry['page']}）"
+        )
+    return 1 if payload.get("refused") else 0
+
+
 def run_search(args: argparse.Namespace) -> int:
     """``finkb search``：块级混合检索（FTS5 + 向量 + RRF）。"""
     from finkb.search import hybrid
@@ -642,6 +663,15 @@ def build_parser() -> argparse.ArgumentParser:
     synth.add_argument("--no-synth", dest="synthesize", action="store_false", help="只用抽取式回答")
     ask_cmd.set_defaults(synthesize=None)
     ask_cmd.set_defaults(func=run_ask)
+
+    compare_cmd = subparsers.add_parser("compare", help="跨期对比：同一指标多期间并排")
+    compare_cmd.add_argument("question", help="问题，如：美的集团 2023-2025 年营业收入")
+    compare_cmd.add_argument(
+        "--periods",
+        help="逗号分隔的期间（默认从问题解析），如 2023,2024,2025 或 2024H1,2024",
+    )
+    compare_cmd.add_argument("--json", action="store_true", help="输出 JSON")
+    compare_cmd.set_defaults(func=run_compare)
 
     search_cmd = subparsers.add_parser("search", help="块级混合检索（FTS5 + 向量）")
     search_cmd.add_argument("query", help="检索词")

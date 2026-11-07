@@ -51,6 +51,7 @@ def test_tools_list():
         "remove_document",
         "rebuild_index",
         "ask",
+        "compare",
         "query_metric",
         "search_documents",
         "describe_ontology",

@@ -170,3 +170,19 @@
 - 判定：`tier`、`refused`、`inherited`/`overridden`、`resolved_question` 关键词、
   `resolved_slots`、`clarify.missing`；
 - 离线、确定性，已加入 `scripts/check.sh` 门禁；退出码 0=全部通过，1=有失败。
+
+## 跨期对比验收（6 道，离线）
+
+`eval/compare_qa.json` + `eval/check_compare.py` 验收 P7 的结构化对比能力：
+同一公司、同一指标、多个期间并排返回数值/单位/引用，数字只来自事实库 SQL。
+
+```bash
+.venv/bin/python eval/check_compare.py            # 6 道
+.venv/bin/python eval/check_compare.py --case P01 # 只跑一道
+```
+
+- 覆盖：区间解析（`2023-2025`）、三期间、半年报与年报并排、两期间、
+  单期间拒答、缺指标拒答；
+- 判定：`refused`、`data.periods` 顺序、行数、数值/账本/引用是否齐全、
+  文案关键词，以及 `schema_version`/`disclaimer`；
+- 离线、确定性，已加入 `scripts/check.sh` 门禁；退出码 0=6/6，1=有失败。

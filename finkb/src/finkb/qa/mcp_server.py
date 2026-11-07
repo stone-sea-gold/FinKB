@@ -96,6 +96,22 @@ TOOLS = [
         },
     },
     {
+        "name": "compare",
+        "description": "跨期对比：同一公司同一指标多期间并排返回数值、单位与引用；数字由事实库 SQL 计算。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "question": {"type": "string", "description": "自然语言问题，如：美的集团 2023-2025 年营业收入"},
+                "periods": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "可选期间列表（2023 / 2024年 / 2024H1）；不给则从问题解析",
+                },
+            },
+            "required": ["question"],
+        },
+    },
+    {
         "name": "query_metric",
         "description": "按公司代码/期间/指标 id 查一个精确指标值（Tier 1 底层查询）。",
         "inputSchema": {
@@ -223,6 +239,10 @@ def call_tool(name: str, args: dict) -> dict:
             tier=args.get("tier", "auto"),
             context=args.get("context"),
         )
+    if name == "compare":
+        from finkb.qa.compare import compare as compare_qa
+
+        return compare_qa(str(args["question"]), periods=args.get("periods"))
     if name == "query_metric":
         con = _connect()
         try:

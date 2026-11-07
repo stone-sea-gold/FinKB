@@ -12,7 +12,7 @@
 - **检索**：FTS5 + jieba 加权 + bge-m3 向量 + RRF 融合；块级引用可回查（doc + page）。
 - **问答**：三档 fall-through（指标 SQL → 本体推理 → 原文检索）；数字只由 SQL/代码产生，不交给 LLM 编；证据不足明确拒答。
 - **合成（可选，默认关）**：受约束生成答案——数字用账本占位符、句子带页码引用，V1–V7 机器校验不过就回退抽取式（`FINKB_LLM_SYNTH=1` 开启）。
-- **接口**：统一 CLI（`finkb ask/search/graph/eval/status`）+ MCP stdio（13 个工具：问答 5 + 本地库管理 6 + 合成 2）。
+- **接口**：统一 CLI（`finkb ask/search/compare/graph/eval/status`）+ MCP stdio（14 个工具：问答 5 + 本地库管理 6 + 合成 2 + 对比 1）。
 
 ## 环境要求
 
@@ -137,6 +137,10 @@ finkb ask --tier metric --explain "赛力斯 2025 年第一季度营业收入是
 
 # 交互模式（:q 退出）
 finkb ask
+
+# 跨期对比：同一指标多期间并排（数字仍来自事实库，带页码引用）
+finkb compare "美的集团 2023-2025 年营业收入"
+finkb compare "比亚迪 2024H1 和 2024 年营业收入" --periods 2024H1,2024
 
 # 原文检索（块级）
 finkb search "研发投入" --company 002594 --period 2025
