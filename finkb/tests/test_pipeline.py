@@ -9,6 +9,9 @@ import pytest
 
 from finkb.qa import pipeline
 from finkb.qa.fact_lane import FACT_DB
+from finkb.qa.synth import FakeBackend
+
+TEXT_Q = "比亚迪 2025 年报里，公司如何描述海外市场的区域布局？"
 
 pytestmark = pytest.mark.skipif(
     not FACT_DB.exists(), reason="需要开发语料 data/facts.duckdb（仓库不含数据）"
@@ -79,3 +82,45 @@ def test_trace_contains_capability_and_hint():
     payload = pipeline.ask("万科A 2025 年的营业收入是多少亿元？")
     steps = {item["step"] for item in _steps(payload)}
     assert {"capability", "router_hint", "attempt"} <= steps
+
+
+def test_synthesis_document_with_backend():
+    env = pipeline.ask(TEXT_Q, synthesize=False)
+    assert env["tier"] == "document" and env["citations"]
+    ref = env["citations"][0]
+    answer = f"公司持续推进海外布局，海外业务覆盖多个国家。{ref}"
+    backend = FakeBackend([{"answer": answer, "used_ids": [], "refused": False, "missing": [], "notes": []}])
+    payload = pipeline.ask(TEXT_Q, synthesize=backend)
+    assert payload["synthesis"]["used"] is True
+    assert payload["synthesis"]["backend"] == "fake"
+    assert payload["text"] == answer
+    assert payload["citations"] == [ref]
+    assert all(payload["synthesis"]["checks"].values())
+
+
+def test_synthesis_falls_back_when_verification_fails():
+    backend = FakeBackend([{"answer": "公司持续推进海外布局。[Ref: 不存在_2025_年报#P1]", "used_ids": [], "refused": False, "missing": [], "notes": []}])
+    payload = pipeline.ask(TEXT_Q, synthesize=backend)
+    assert payload["synthesis"]["used"] is False
+    assert payload["synthesis"]["reason"] == "verify_failed"
+    assert payload["synthesis"]["attempts"] == 2
+    assert "第" in payload["text"]  # 回退到抽取式答案
+
+
+def test_synthesis_disabled_marks_no_backend():
+    payload = pipeline.ask(TEXT_Q, synthesize=False)
+    assert payload["synthesis"] == {"used": False, "reason": "no_backend"}
+
+
+def test_synthesis_refused_becomes_refusal():
+    backend = FakeBackend([{"answer": "", "used_ids": [], "refused": True, "missing": ["海外分区域数据"], "notes": []}])
+    payload = pipeline.ask(TEXT_Q, synthesize=backend)
+    assert payload["refused"] is True
+    assert payload["text"].startswith("证据不足：")
+
+
+def test_metric_tier_never_synthesizes():
+    backend = FakeBackend([])
+    payload = pipeline.ask("万科A（000002）2025 年的营业收入是多少亿元？", synthesize=backend)
+    assert payload["tier"] == "metric"
+    assert "synthesis" not in payload

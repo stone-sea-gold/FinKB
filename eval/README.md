@@ -138,3 +138,18 @@
 - 原表单位可能是万元/百万元，事实库已归一成 `norm_unit`（亿元 / % / 元/股）；题目单位以 `norm_unit` 为准。
 - 答案按“四舍五入两位”判定；如果以后题面改成“保留一位/整数”，需要同步调整 `answer` 和脚本的取整规则。
 - `check.py` 只证明“答案与事实库/原页一致”，不评价题目好坏；新题仍建议人工过一眼题面是否像真实提问。
+
+## 合成子系统评测（15 题，需真实模型）
+
+`eval/synth_qa.json` + `eval/check_synth.py` 评测“模式 A：项目内受约束生成”，与 `check_qa.py`
+（抽取式回答）互补：
+
+```bash
+# 需要先配置 FINKB_LLM_SYNTH=1 与 FINKB_LLM_SYNTH_API_KEY（可覆盖 BASE_URL/MODEL）
+.venv/bin/python eval/check_synth.py
+```
+
+- 正例（10 文档 + 2 本体）要求：`synthesis.used=true`、V1–V7 全过、答案含 `[Ref: …#P页码]`、长度 ≥20；
+- 负例（3 题）要求：拒答且不调用模型；
+- 退出码：0=15/15，1=有失败，2=未配置模型（跳过）；明细写 `finkb/data/_eval/synth_results.json`；
+- 该脚本**不进** `scripts/check.sh` 的离线门禁（需要网络与模型 key），只用于人工评测与抽检。

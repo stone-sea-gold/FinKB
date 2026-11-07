@@ -329,6 +329,7 @@ def run_ask(args: argparse.Namespace) -> int:
             explain=args.explain,
             as_json=args.json,
             audit=args.audit_log,
+            synthesize=args.synthesize,
         )
         print(text)
 
@@ -620,6 +621,10 @@ def build_parser() -> argparse.ArgumentParser:
     ask_cmd.add_argument("--explain", action="store_true", help="打印档位选择与剪枝过程")
     ask_cmd.add_argument("--json", action="store_true", help="输出 JSON")
     ask_cmd.add_argument("--audit-log", action="store_true", help="写入 data/qa_audit.jsonl")
+    synth = ask_cmd.add_mutually_exclusive_group()
+    synth.add_argument("--synth", dest="synthesize", action="store_true", help="启用 LLM 合成（需配置后端）")
+    synth.add_argument("--no-synth", dest="synthesize", action="store_false", help="只用抽取式回答")
+    ask_cmd.set_defaults(synthesize=None)
     ask_cmd.set_defaults(func=run_ask)
 
     search_cmd = subparsers.add_parser("search", help="块级混合检索（FTS5 + 向量）")

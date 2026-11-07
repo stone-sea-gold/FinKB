@@ -185,7 +185,9 @@ def _check_v4(result: SynthesisResult, pack: EvidencePack, rendered: str, checks
         return
     if pack.tier == "document":
         issues: list[str] = []
-        for sentence in _SENTENCE_SPLIT.split(rendered):
+        # 引用常写在句号之后（“句子。[Ref: …]”），先挪到句号前再按句检查。
+        normalized = re.sub(r"([。！？；\n])((?:\[Ref:[^\]]+\])+)", r"\2\1", rendered)
+        for sentence in _SENTENCE_SPLIT.split(normalized):
             sentence = sentence.strip()
             if not sentence or verifier.REF_RE.search(sentence):
                 continue

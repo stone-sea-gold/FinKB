@@ -21,6 +21,10 @@ def main() -> None:
         help="只跑指定档位；默认 auto（按契约逐级回落）",
     )
     parser.add_argument("--explain", action="store_true", help="打印档位选择与剪枝过程")
+    synth = parser.add_mutually_exclusive_group()
+    synth.add_argument("--synth", dest="synthesize", action="store_true", help="启用 LLM 合成（需配置后端）")
+    synth.add_argument("--no-synth", dest="synthesize", action="store_false", help="只用抽取式回答")
+    parser.set_defaults(synthesize=None)
     parser.add_argument(
         "--audit-log",
         action="store_true",
@@ -33,6 +37,7 @@ def main() -> None:
         explain=args.explain,
         as_json=args.json,
         audit=args.audit_log,
+        synthesize=args.synthesize,
     )
     print(text)
     raise SystemExit(code)

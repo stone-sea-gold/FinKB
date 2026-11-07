@@ -1,0 +1,95 @@
+{
+  "description": "合成子系统评测集（15 题）：10 道文档题 + 2 道本体题 + 3 道负例。正例要求合成启用且通过 V1–V7；负例要求拒答且不调模型。真实 LLM 运行，不进离线 check.sh。",
+  "questions": [
+    {
+      "id": "S01",
+      "question": "比亚迪 2025 年报里，公司如何描述海外市场的区域布局？",
+      "tier": "auto",
+      "expect": {"synthesis": true, "refused": false}
+    },
+    {
+      "id": "S02",
+      "question": "美的集团 2025 年报里，公司如何描述研发投入和研发人员情况？",
+      "tier": "auto",
+      "expect": {"synthesis": true, "refused": false}
+    },
+    {
+      "id": "S03",
+      "question": "贵州茅台 2025 年报里，公司如何描述销售渠道和经销商情况？",
+      "tier": "auto",
+      "expect": {"synthesis": true, "refused": false}
+    },
+    {
+      "id": "S04",
+      "question": "中国神华 2025 年报里，公司如何描述煤炭产销情况？",
+      "tier": "auto",
+      "expect": {"synthesis": true, "refused": false}
+    },
+    {
+      "id": "S05",
+      "question": "长江电力 2025 年报里，公司如何描述发电量和来水情况？",
+      "tier": "auto",
+      "expect": {"synthesis": true, "refused": false}
+    },
+    {
+      "id": "S06",
+      "question": "招商银行 2025 半年报里，公司如何描述资产质量？",
+      "tier": "auto",
+      "expect": {"synthesis": true, "refused": false}
+    },
+    {
+      "id": "S07",
+      "question": "中国平安 2025 半年报里，公司如何描述寿险及健康险业务？",
+      "tier": "auto",
+      "expect": {"synthesis": true, "refused": false}
+    },
+    {
+      "id": "S08",
+      "question": "长城汽车 2025 年报里，公司如何描述海外市场表现？",
+      "tier": "auto",
+      "expect": {"synthesis": true, "refused": false}
+    },
+    {
+      "id": "S09",
+      "question": "赛力斯 2025 年报里，公司如何描述新能源汽车销量？",
+      "tier": "auto",
+      "expect": {"synthesis": true, "refused": false}
+    },
+    {
+      "id": "S10",
+      "question": "恒瑞医药 2025 年报里，公司如何描述创新药研发进展？",
+      "tier": "auto",
+      "expect": {"synthesis": true, "refused": false}
+    },
+    {
+      "id": "S11",
+      "question": "哪些公司 2025 年的资产负债率超过 70%？",
+      "tier": "auto",
+      "expect": {"synthesis": true, "refused": false}
+    },
+    {
+      "id": "S12",
+      "question": "比亚迪的子公司有哪些？",
+      "tier": "auto",
+      "expect": {"synthesis": true, "refused": false}
+    },
+    {
+      "id": "S13",
+      "question": "比亚迪 2025 年的港股股价是多少？",
+      "tier": "auto",
+      "expect": {"synthesis": false, "refused": true}
+    },
+    {
+      "id": "S14",
+      "question": "字节跳动 2025 年的营业收入是多少亿元？",
+      "tier": "auto",
+      "expect": {"synthesis": false, "refused": true}
+    },
+    {
+      "id": "S15",
+      "question": "万科A 2020 年的营业收入是多少亿元？",
+      "tier": "auto",
+      "expect": {"synthesis": false, "refused": true}
+    }
+  ]
+}

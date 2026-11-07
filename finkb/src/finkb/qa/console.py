@@ -20,9 +20,10 @@ def run(
     explain: bool = False,
     as_json: bool = False,
     audit: bool = False,
+    synthesize: bool | None = None,
 ) -> tuple[str, int]:
     """回答一个问题并返回（要打印的文本, 退出码）。"""
-    payload = ask(question, tier=tier)
+    payload = ask(question, tier=tier, synthesize=synthesize)
     if audit:
         audit_log({**payload, "question": question})
     rendered, used = render(payload.get("text", ""), payload.get("ledger", []))
@@ -51,5 +52,14 @@ def run(
             )
     if payload.get("citations"):
         lines.append("引用：" + " ".join(payload["citations"]))
+    synthesis = payload.get("synthesis") or {}
+    if synthesis:
+        if synthesis.get("used"):
+            lines.append(f"合成：已启用（后端 {synthesis.get('backend', '?')}，校验通过）")
+        else:
+            reason = {"no_backend": "无可用模型后端，回退抽取式", "verify_failed": "校验未通过，回退抽取式"}.get(
+                synthesis.get("reason"), synthesis.get("reason") or "未启用"
+            )
+            lines.append(f"合成：{reason}")
     lines.append(f"校验：{'通过' if check['ok'] else '未通过 ' + str(check['issues'])}")
     return "\n".join(lines), 0

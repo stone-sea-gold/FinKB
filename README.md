@@ -11,7 +11,8 @@
 - **本体层**：62 概念 / 71 关系 / 10 约束 / 8 个数值定义类；OWL 2 RL 批量物化，推断带血缘（规则 + 证据事实）。
 - **检索**：FTS5 + jieba 加权 + bge-m3 向量 + RRF 融合；块级引用可回查（doc + page）。
 - **问答**：三档 fall-through（指标 SQL → 本体推理 → 原文检索）；数字只由 SQL/代码产生，不交给 LLM 编；证据不足明确拒答。
-- **接口**：统一 CLI（`finkb ask/search/graph/eval/status`）+ MCP stdio（11 个工具，问答 5 + 本地库管理 6）。
+- **合成（可选，默认关）**：受约束生成答案——数字用账本占位符、句子带页码引用，V1–V7 机器校验不过就回退抽取式（`FINKB_LLM_SYNTH=1` 开启）。
+- **接口**：统一 CLI（`finkb ask/search/graph/eval/status`）+ MCP stdio（13 个工具：问答 5 + 本地库管理 6 + 合成 2）。
 
 ## 环境要求
 

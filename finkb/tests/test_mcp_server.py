@@ -55,6 +55,8 @@ def test_tools_list():
         "search_documents",
         "describe_ontology",
         "traverse_relations",
+        "evidence",
+        "verify",
     ]
 
 
@@ -119,3 +121,23 @@ def test_library_tools_dispatch():
     payload, is_error = _call("add_document", {"company": "bad", "period": "2025", "report_type": "年报"})
     assert is_error
     assert "error" in payload
+
+
+def test_evidence_tool_returns_pack():
+    payload, is_error = _call("evidence", {"question": "比亚迪 2025 年报里，公司如何描述海外市场的区域布局？"})
+    assert not is_error
+    assert payload["tier"] == "document"
+    evidence = payload["evidence"]
+    assert evidence["passages"] and evidence["citations"]
+
+
+def test_verify_tool_accepts_host_answer():
+    question = "比亚迪 2025 年报里，公司如何描述海外市场的区域布局？"
+    pack_payload, _ = _call("evidence", {"question": question})
+    ref = pack_payload["evidence"]["citations"][0]
+    answer = {"answer": f"公司持续推进海外布局，海外业务覆盖多个国家。{ref}", "used_ids": [],
+              "refused": False, "missing": [], "notes": []}
+    payload, is_error = _call("verify", {"question": question, "answer": answer})
+    assert not is_error
+    assert payload["ok"] is True
+    assert payload["checks"]["V5"] is True

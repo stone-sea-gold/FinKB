@@ -13,7 +13,10 @@ import duckdb
 
 from finkb.fact_engine.selector import FINKB_ROOT
 from finkb import library
+from finkb.qa import evidence as evidence_mod
 from finkb.qa.pipeline import ask as ask_pipeline
+from finkb.qa.synth import normalize_response
+from finkb.qa.synth_verify import verify_synthesis
 from finkb.search import hybrid
 
 PROTOCOL_VERSION = "2024-11-05"
@@ -141,6 +144,42 @@ TOOLS = [
             "required": ["entity"],
         },
     },
+    {
+        "name": "evidence",
+        "description": "取回答所需的证据包（事实/推理/原文块/引用），供宿主自己写答案（模式 B）。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "question": {"type": "string", "description": "自然语言问题"},
+                "tier": {"type": "string", "enum": ["auto", "metric", "ontology", "document"]},
+            },
+            "required": ["question"],
+        },
+    },
+    {
+        "name": "verify",
+        "description": "校验宿主写好的答案（数字占位符、数字绑定、引用页码、句级引用、白名单、拒答 missing）。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "question": {"type": "string", "description": "自然语言问题（用于重建证据包）"},
+                "tier": {"type": "string", "enum": ["auto", "metric", "ontology", "document"]},
+                "answer": {
+                    "type": "object",
+                    "description": "宿主生成的答案对象",
+                    "properties": {
+                        "answer": {"type": "string"},
+                        "used_ids": {"type": "array", "items": {"type": "string"}},
+                        "refused": {"type": "boolean"},
+                        "missing": {"type": "array", "items": {"type": "string"}},
+                        "notes": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": ["answer"],
+                },
+            },
+            "required": ["question", "answer"],
+        },
+    },
 ]
 
 
@@ -231,6 +270,17 @@ def call_tool(name: str, args: dict) -> dict:
             return {"counts": counts, "layers": layers, "defined_classes": classes}
         finally:
             con.close()
+    if name in ("evidence", "verify"):
+        envelope = ask_pipeline(str(args["question"]), tier=args.get("tier", "auto"), synthesize=False)
+        pack = evidence_mod.build_pack(str(args["question"]), envelope)
+        if name == "evidence":
+            return {
+                "tier": envelope.get("tier"),
+                "refused": envelope.get("refused", False),
+                "evidence": pack.to_dict(),
+            }
+        result = normalize_response(dict(args["answer"]), pack)
+        return verify_synthesis(result, pack).to_dict()
     if name == "traverse_relations":
         con = _connect()
         try:

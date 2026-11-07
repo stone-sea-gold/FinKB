@@ -19,8 +19,10 @@ from pathlib import Path
 import duckdb
 
 from finkb.fact_engine.selector import FINKB_ROOT
-from finkb.qa import fact_lane, understanding
+from finkb.qa import evidence as evidence_mod
+from finkb.qa import fact_lane, synth as synth_mod, understanding
 from finkb.qa.router import route as router_route
+from finkb.qa.synth_verify import compose_verified
 
 FACT_DB = FINKB_ROOT / "data" / "facts.duckdb"
 CHUNKS_DB = FINKB_ROOT / "data" / "_search" / "chunks.db"
@@ -83,6 +85,64 @@ def _refusal(question: str, tier: str, text: str, trace: list[dict], *, reason: 
     return _envelope(question, tier, {"refused": True, "text": text}, trace, confidence=0.0)
 
 
+def _backend_for(synthesize: bool | object | None):
+    """解析合成开关：None=按环境变量，False=关闭，True=按环境变量，其它=注入后端。"""
+    if synthesize is False:
+        return None
+    if isinstance(synthesize, bool) or synthesize is None:
+        return synth_mod.backend_from_env()
+    return synthesize
+
+
+def _synthesize(question: str, tier: str, payload: dict, backend, trace: list[dict]) -> dict:
+    """模式 A：项目内受约束生成；失败/无后端时原样返回抽取式答案并留痕。"""
+    if payload.get("refused"):
+        return payload
+    if backend is None:
+        payload = dict(payload)
+        payload["synthesis"] = {"used": False, "reason": "no_backend"}
+        return payload
+    envelope = {**payload, "tier": tier, "route": ROUTE_BY_TIER[tier]}
+    pack = evidence_mod.build_pack(question, envelope)
+    result, verification = compose_verified(question, pack, backend)
+    if result is None:
+        trace.append({"step": "synthesis", "status": "fallback", "errors": verification.errors[:3]})
+        payload = dict(payload)
+        payload["synthesis"] = {
+            "used": False,
+            "reason": "verify_failed",
+            "attempts": verification.attempts,
+            "errors": verification.errors[:5],
+        }
+        return payload
+    if result.refused:
+        trace.append({"step": "synthesis", "status": "refused", "missing": result.missing})
+        return {
+            "refused": True,
+            "text": "证据不足：" + ("；".join(result.missing) or "现有证据不足以回答这个问题。"),
+            "ledger": payload.get("ledger", []),
+            "citations": payload.get("citations", []),
+            "synthesis": {"used": True, "backend": result.backend, "checks": verification.checks},
+        }
+    rendered, _used = synth_mod.render_synthesis(result, payload.get("ledger", []))
+    citations: list[str] = []
+    for ref in re.findall(r"\[Ref: [^\]]+#P\d+\]", rendered):
+        if ref not in citations:
+            citations.append(ref)
+    body = dict(payload)
+    body["text"] = rendered
+    body["citations"] = citations
+    body["synthesis"] = {
+        "used": True,
+        "backend": result.backend,
+        "attempts": verification.attempts,
+        "checks": verification.checks,
+        "notes": result.notes,
+    }
+    trace.append({"step": "synthesis", "status": "used", "backend": result.backend, "attempts": verification.attempts})
+    return body
+
+
 def _plan(question: str, order: list[str], caps: dict[str, bool], trace: list[dict]) -> list[str]:
     """根据能力/路由提示/残差门裁剪档位顺序，并把原因写进 trace。"""
     hint = router_route(question).name
@@ -119,8 +179,14 @@ def ask(
     tier: str = "auto",
     explain: bool = False,
     capabilities_override: dict[str, bool] | None = None,
+    synthesize: bool | object | None = None,
 ) -> dict:
-    """按三档契约回答；``tier`` 可强制指定某一档（不可用时拒答）。"""
+    """按三档契约回答；``tier`` 可强制指定某一档（不可用时拒答）。
+
+    ``synthesize``：None=按 ``FINKB_LLM_SYNTH`` 环境变量；False=抽取式；
+    True=尝试项目后端；也可直接注入实现了 ``chat_json`` 的后端（测试/宿主用）。
+    metric 档始终走确定性模板，不调 LLM（设计 §10）。
+    """
     if tier != "auto" and tier not in TIERS:
         raise ValueError(f"tier 只能是 auto/{'/'.join(TIERS)}")
     caps = capabilities_override if capabilities_override is not None else capabilities()
@@ -164,9 +230,11 @@ def ask(
                 trace.append({"step": "attempt", "tier": "ontology", "status": "miss"})
                 continue
             trace.append({"step": "attempt", "tier": "ontology", "status": "hit"})
+            payload = _synthesize(question, "ontology", payload, _backend_for(synthesize), trace)
             return _envelope(question, "ontology", payload, trace)
         payload = answer_mod.answer_text(question)
         trace.append({"step": "attempt", "tier": "document", "status": "hit" if not payload.get("refused") else "refused"})
+        payload = _synthesize(question, "document", payload, _backend_for(synthesize), trace)
         return _envelope(question, "document", payload, trace, confidence=0.4 if payload.get("refused") else None)
 
     return _refusal(question, planned[-1], "没有找到能回答这个问题的证据。", trace, reason="all-miss")
