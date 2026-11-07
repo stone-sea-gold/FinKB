@@ -791,3 +791,110 @@ def test_dash_placeholder_counts_as_zero(_make_table=None) -> None:
     )
     assert audit._amount_in_column(table, "筹资活动现金流入小计", 2) == 0.0
     assert audit._amount_in_column(table, "偿还债务支付的现金", 2) == -95019.0
+
+
+# --------------------------------------------------------------------------- #
+# 扫描页（OCR）判定：无文字层的页不能把 OCR 数字误报成「查不到」
+# --------------------------------------------------------------------------- #
+def test_verify_cells_marks_scanned_page_tables_as_ocr(monkeypatch, tmp_path) -> None:
+    table = make_table(
+        [["货币资金", "411,670,207", "424,425,658"]],
+        header=["项目", "2025年12月31日", "2024年12月31日"],
+        page=146,
+    )
+    monkeypatch.setattr(audit, "_analyze", lambda parsed: ("d", [], [], [table]))
+    monkeypatch.setattr(audit, "_pdf_page_texts", lambda pdf: [""] * 146)
+    monkeypatch.setattr(audit, "_scanned_pages", lambda pdf: {146})
+
+    results, _, _ = audit.verify_cells(tmp_path, tmp_path / "d.pdf")
+
+    assert results[0]["ocr"] is True
+    assert results[0]["ocr_pages"] == [146]
+    assert results[0]["checked"] == 0
+    assert results[0]["missing"] == []
+
+
+def test_verify_cells_still_checks_tables_with_text_layer(monkeypatch, tmp_path) -> None:
+    table = make_table(
+        [["营业收入", "123,456,789"]],
+        header=["项目", "2025年"],
+        page=10,
+    )
+    monkeypatch.setattr(audit, "_analyze", lambda parsed: ("d", [], [], [table]))
+    monkeypatch.setattr(audit, "_pdf_page_texts", lambda pdf: [""] * 9 + ["营业收入123456789"])
+    monkeypatch.setattr(audit, "_scanned_pages", lambda pdf: set())
+
+    results, _, _ = audit.verify_cells(tmp_path, tmp_path / "d.pdf")
+
+    assert results[0]["ocr"] is False
+    assert results[0]["checked"] == 1
+    assert results[0]["missing"] == []
+
+
+def test_verify_cells_report_marks_ocr_and_advises_review(monkeypatch, capsys) -> None:
+    import argparse
+
+    ocr = {
+        "logical_id": "d#P146_T96#S01",
+        "kind": "data",
+        "page_start": 146,
+        "page_end": 146,
+        "checked": 0,
+        "missing": [],
+        "ocr": True,
+        "ocr_pages": [146],
+    }
+    bad = {
+        "logical_id": "d#P10_T01#S01",
+        "kind": "data",
+        "page_start": 10,
+        "page_end": 10,
+        "checked": 12,
+        "missing": ["123456"],
+        "ocr": False,
+        "ocr_pages": [],
+    }
+    monkeypatch.setattr(
+        audit, "verify_cells", lambda doc, pdf: ([ocr, bad], 0, {-1: [1, 1], 0: [12, 12], 1: [1, 1]})
+    )
+
+    code = audit._cmd_verify_cells(argparse.Namespace(doc="d", pdf="d.pdf", out=None))
+
+    out = capsys.readouterr().out
+    assert code == 4
+    assert "扫描页（OCR，建议人工审查）" in out
+    assert "建议人工审查" in out
+    assert "`P146_T96#S01`" in out
+
+
+def test_corpus_report_marks_ocr_documents(monkeypatch, capsys) -> None:
+    import argparse
+
+    rows = [
+        {
+            "doc": "601668_2025_年报",
+            "verify_checked": 0,
+            "verify_missing": 0,
+            "verify_shift": 0,
+            "ocr_tables": 12,
+            "ocr_pages": 17,
+            "pages": 366,
+            "logical": 395,
+            "header": 377,
+            "bare": 18,
+            "invariants": 13,
+            "total_invariants": 13,
+            "numbers": 0,
+            "failures": [],
+        }
+    ]
+    monkeypatch.setattr(audit, "collect_corpus", lambda root, pdf_root=None: rows)
+
+    code = audit._cmd_corpus(
+        argparse.Namespace(root="data/parsed", pdf_root="../raw", baseline=None, out=None)
+    )
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "扫描页（OCR，建议自行审查）" in out
+    assert "12 张表、17 个扫描页" in out

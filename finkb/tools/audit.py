@@ -1460,6 +1460,40 @@ def _pdf_page_texts(pdf_path: Path) -> list[str] | None:
     return [_normalize(page.extract_text() or "") for page in reader.pages]
 
 
+def _scanned_pages(pdf_path: Path) -> set[int]:
+    """返回「整页是扫描图片、没有文字层」的页码（1 基）。
+
+    这类页面的数字只能靠 OCR 识别，无法用 PDF 文字层回查；调用方应把它们
+    标成 OCR 并提示人工审查，而不是当成「查不到」。
+    """
+    try:
+        import pymupdf
+    except ImportError:
+        pymupdf = None
+    if pymupdf is not None:
+        with pymupdf.open(str(pdf_path)) as document:
+            return {
+                number
+                for number, page in enumerate(document, 1)
+                if not page.get_text().strip() and page.get_images()
+            }
+    try:
+        from pypdf import PdfReader
+    except ImportError:  # pragma: no cover - 依赖缺失时不做 OCR 判定
+        return set()
+    reader = PdfReader(str(pdf_path))
+    scanned: set[int] = set()
+    for number, page in enumerate(reader.pages, 1):
+        resources = page.get("/Resources") or {}
+        xobjects = resources.get("/XObject") or {}
+        has_image = any(
+            ref.get_object().get("/Subtype") == "/Image" for ref in xobjects.values()
+        )
+        if has_image and not (page.extract_text() or "").strip():
+            scanned.add(number)
+    return scanned
+
+
 MIN_VERIFY_DIGITS = 6
 
 
@@ -1484,16 +1518,38 @@ def verify_cells(
 
     这是唯一能从**外部**证明「单元格没被解析错、页码区间没错」的检查：
     数字必须在它声称的那几页里出现。查不到就是真问题——页码错了，或者值被改了。
+
+    扫描页（整页图片、无文字层）上的表无法用文字层回查：这类表不抽数字，
+    结果里 ``ocr=True``、``ocr_pages`` 给出扫描页，由报告提示「数字来自 OCR，
+    建议人工审查」。
     """
     _, _, _, logical = _analyze(parsed_dir)
     pages = _pdf_page_texts(pdf_path)
     if pages is None:
         raise RuntimeError("需要 pypdf 才能回查 PDF 文本")
+    scanned = _scanned_pages(pdf_path)
 
     results: list[dict] = []
     offsets = {shift: [0, 0] for shift in (-1, 0, 1)}
     for table in logical:
-        span = pages[table.page_start - 1 : table.page_end]
+        span_pages = list(range(table.page_start, table.page_end + 1))
+        ocr_pages = [page for page in span_pages if page in scanned]
+        verifiable = [page for page in span_pages if page not in scanned]
+        if not verifiable:
+            results.append(
+                {
+                    "logical_id": table.logical_id,
+                    "kind": table.kind,
+                    "page_start": table.page_start,
+                    "page_end": table.page_end,
+                    "checked": 0,
+                    "missing": [],
+                    "ocr": True,
+                    "ocr_pages": ocr_pages,
+                }
+            )
+            continue
+        span = [pages[page - 1] for page in verifiable]
         haystack = "".join(re.sub(r"\D", "", text) for text in span)
         signatures = []
         for row in table.rows:
@@ -1525,6 +1581,8 @@ def verify_cells(
                 "page_end": table.page_end,
                 "checked": len(sample),
                 "missing": missing,
+                "ocr": False,
+                "ocr_pages": ocr_pages,
             }
         )
     best_shift = max(offsets, key=lambda shift: offsets[shift][1] / max(offsets[shift][0], 1))
@@ -1649,14 +1707,23 @@ def render_page_span_report(parsed_dir: Path, pdf_path: Path | None = None) -> s
 def _cmd_verify_cells(args: argparse.Namespace) -> int:
     """把每个逻辑表的抽样数值回查到 PDF 文本。"""
     results, best_shift, offsets = verify_cells(Path(args.doc), Path(args.pdf))
-    total = sum(item["checked"] for item in results)
-    miss = sum(len(item["missing"]) for item in results)
+    verifiable = [item for item in results if not item["ocr"]]
+    ocr_tables = [item for item in results if item["ocr"]]
+    total = sum(item["checked"] for item in verifiable)
+    miss = sum(len(item["missing"]) for item in verifiable)
     lines = [
         f"# 数值回查：{Path(args.doc).name}",
         "",
-        f"- 参与核对的表：**{len(results)}** 张",
+        f"- 参与核对的表：**{len(verifiable)}** 张",
         f"- 抽样数值：**{total}** 个，查不到 **{miss}** 个"
         f"（命中率 **{(total - miss) * 100 // max(total, 1)}%**）",
+    ]
+    if ocr_tables:
+        lines.append(
+            f"- 扫描页上的表（无文字层，数字来自 OCR）：**{len(ocr_tables)}** 张，"
+            "未计入回查，**建议人工审查**（见文末）"
+        )
+    lines += [
         "",
         "**页码偏移自检**（把每张表的检索窗口整体平移 ±1 页再查一遍）："
         + "、".join(
@@ -1675,13 +1742,15 @@ def _cmd_verify_cells(args: argparse.Namespace) -> int:
         "| 表号 | 类型 | 页码 | 抽检 | 缺失 | 缺失的数字 |",
         "| --- | --- | --- | --- | --- | --- |",
     ]
-    for item in sorted(results, key=lambda r: -len(r["missing"])):
+    for item in sorted(verifiable, key=lambda r: -len(r["missing"])):
         if not item["missing"]:
             continue
         short = item["logical_id"].split("#", 1)[1]
         pages = f"{item['page_start']}"
         if item["page_end"] != item["page_start"]:
             pages = f"{item['page_start']}-{item['page_end']}"
+        if item["ocr_pages"]:
+            pages += "（含扫描页）"
         shown = "、".join(item["missing"][:4])
         lines.append(
             f"| `{short}` | {item['kind']} | {pages} | {item['checked']} | "
@@ -1689,6 +1758,23 @@ def _cmd_verify_cells(args: argparse.Namespace) -> int:
         )
     if miss == 0:
         lines.append("| —— | —— | —— | —— | 0 | 全部命中 |")
+    if ocr_tables:
+        lines += [
+            "",
+            "## 扫描页（OCR，建议人工审查）",
+            "",
+            "> 以下页面的 PDF 只有图片、没有文字层，表格数字是 **OCR 识别**出来的，"
+            "无法用 PDF 文字层核对。**请对照原文图片自行审查这些数字。**",
+            "",
+            "| 表号 | 类型 | 页码 | 抽检数字 |",
+            "| --- | --- | --- | --- |",
+        ]
+        for item in ocr_tables:
+            short = item["logical_id"].split("#", 1)[1]
+            pages = f"{item['page_start']}"
+            if item["page_end"] != item["page_start"]:
+                pages = f"{item['page_start']}-{item['page_end']}"
+            lines.append(f"| `{short}` | {item['kind']} | {pages} | 0（OCR 页） |")
     text = "\n".join(lines) + "\n"
     if args.out:
         Path(args.out).write_text(text, encoding="utf-8")
@@ -1961,18 +2047,30 @@ def collect_corpus(root: Path, pdf_root: Path | None = None) -> list[dict]:
         with_header = sum(1 for table in logical if table.header)
         checked = missing = 0
         shift = 0
+        ocr_tables = ocr_pages = 0
         if pdf_root is not None:
             pdf = pdf_root / f"{doc.name}.pdf"
             if pdf.exists():
                 results, shift, _ = verify_cells(doc, pdf)
                 checked = sum(item["checked"] for item in results)
                 missing = sum(len(item["missing"]) for item in results)
+                ocr_tables = sum(1 for item in results if item["ocr"])
+                ocr_pages = len(
+                    {
+                        page
+                        for item in results
+                        if item["ocr"]
+                        for page in item["ocr_pages"]
+                    }
+                )
         rows.append(
             {
                 "doc": doc.name,
                 "verify_checked": checked,
                 "verify_missing": missing,
                 "verify_shift": shift,
+                "ocr_tables": ocr_tables,
+                "ocr_pages": ocr_pages,
                 "pages": len(pages),
                 "logical": len(logical),
                 "header": with_header,
@@ -2072,13 +2170,14 @@ def _cmd_corpus(args: argparse.Namespace) -> int:
             else "# 语料体检\n\n（没有找到已解析的文档）"
         ),
         "",
-        "| 文档 | 页 | 逻辑表 | 有表头 | 裸表 | 守恒律 | 数字异常 |",
-        "| --- | --- | --- | --- | --- | --- | --- |",
+        "| 文档 | 页 | 逻辑表 | 有表头 | 裸表 | 守恒律 | 数字异常 | 扫描页表(OCR) |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for row in rows:
         lines.append(
             f"| `{row['doc']}` | {row['pages']} | {row['logical']} | {row['header']} | "
-            f"{row['bare']} | {row['invariants']}/{row['total_invariants']} | {row['numbers']} |"
+            f"{row['bare']} | {row['invariants']}/{row['total_invariants']} | {row['numbers']} | "
+            f"{row.get('ocr_tables', 0)} |"
         )
     broken = [row for row in rows if row["failures"]]
     if broken:
@@ -2086,6 +2185,20 @@ def _cmd_corpus(args: argparse.Namespace) -> int:
         for row in broken:
             for failure in row["failures"]:
                 lines.append(f"- `{row['doc']}` — {failure}")
+    ocr_docs = [row for row in rows if row.get("ocr_tables")]
+    if ocr_docs:
+        lines += [
+            "",
+            "## 扫描页（OCR，建议自行审查）",
+            "",
+            "> 以下文档的部分表格页在 PDF 里只有图片、没有文字层，表格数字由 **OCR 识别**，"
+            "无法用 PDF 文字层回查，**未计入数值回查**。建议对照原文图片人工审查。",
+            "",
+        ]
+        for row in ocr_docs:
+            lines.append(
+                f"- `{row['doc']}` — {row['ocr_tables']} 张表、{row['ocr_pages']} 个扫描页"
+            )
     if problems:
         lines += ["", "## 相对基线退步", ""] + [f"- {item}" for item in problems]
     text = "\n".join(lines) + "\n"
