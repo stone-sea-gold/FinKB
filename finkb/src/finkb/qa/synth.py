@@ -111,13 +111,15 @@ def render_evidence(pack: EvidencePack) -> str:
     return "\n".join(lines) if lines else "（没有可用证据）"
 
 
-def build_prompt(question: str, pack: EvidencePack) -> tuple[str, str]:
-    """返回 (system, user) 提示词。"""
+def build_prompt(question: str, pack: EvidencePack, retry_note: str = "") -> tuple[str, str]:
+    """返回 (system, user) 提示词；``retry_note`` 用于校验失败后的带错重试。"""
     user = (
         f"问题：{question}\n\n"
         f"证据：\n{render_evidence(pack)}\n\n"
         f"请按 JSON 输出：{OUTPUT_SCHEMA}"
     )
+    if retry_note:
+        user += f"\n\n上一次输出未通过校验：{retry_note}\n请修正后重新输出 JSON。"
     return SYSTEM_PROMPT, user
 
 
@@ -206,6 +208,11 @@ class FakeBackend:
             "missing": [],
             "notes": ["fake-backend"],
         }
+
+
+def normalize_response(response: dict[str, Any], pack: EvidencePack) -> SynthesisResult:
+    """把后端返回的 JSON 规范化成 :class:`SynthesisResult`（供校验层复用）。"""
+    return _normalize(response, pack)
 
 
 def _normalize(response: dict[str, Any], pack: EvidencePack) -> SynthesisResult:

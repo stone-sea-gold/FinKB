@@ -50,6 +50,7 @@ class EvidenceFact:
     raw_value: float | None = None
     raw_unit: str = ""
     report_date: str | None = None
+    format: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -68,6 +69,7 @@ class EvidenceFact:
             "raw_value": self.raw_value,
             "raw_unit": self.raw_unit,
             "report_date": self.report_date,
+            "format": self.format,
         }
 
 
@@ -157,6 +159,7 @@ class EvidencePack:
     passages: list[EvidencePassage] = field(default_factory=list)
     conflicts: list[EvidenceConflict] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    citations: list[str] = field(default_factory=list)
     budget: dict[str, int] = field(default_factory=dict)
 
     def ids(self) -> set[str]:
@@ -186,6 +189,7 @@ class EvidencePack:
             "passages": [item.to_dict() for item in self.passages],
             "conflicts": [item.to_dict() for item in self.conflicts],
             "notes": list(self.notes),
+            "citations": list(self.citations),
             "budget": dict(self.budget),
         }
 
@@ -222,6 +226,7 @@ def _facts_from_ledger(ledger: list[dict[str, Any]]) -> list[EvidenceFact]:
                 raw_value=entry.get("raw_value"),
                 raw_unit=str(entry.get("raw_unit") or ""),
                 report_date=entry.get("report_date"),
+                format=str(entry.get("format") or ""),
             )
         )
     return out
@@ -336,6 +341,7 @@ def from_envelope(question: str, envelope: dict[str, Any]) -> EvidencePack:
         passages=_passages_from_payload(envelope),
         conflicts=_conflicts_from_facts(facts),
         notes=notes,
+        citations=[str(c) for c in (envelope.get("citations") or [])],
     )
 
 
