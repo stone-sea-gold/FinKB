@@ -1,4 +1,4 @@
-"""合成子系统（P1：契约骨架 + FakeBackend，不接真模型、不改现有行为）。
+"""合成子系统（P2：真实后端适配 + 渲染 + 重试；暂不接入主链路）。
 
 设计见 ``docs/合成子系统设计.md``。合成器的输入是
 :class:`finkb.qa.evidence.EvidencePack`，输出是受约束的
@@ -7,17 +7,27 @@
 - 数字只能写 ``{{cN}}`` 占位符，由 :func:`finkb.qa.synthesizer.render` 填值；
 - 每句事实性陈述必须带 ``[Ref: doc#P页码]``；
 - 证据不足必须 ``refused=true``；
-- 合成失败由调用方回退到抽取式回答（P1 尚未接入 pipeline）。
+- 合成失败由调用方回退到抽取式回答。
 
-P1 只做接口与离线 FakeBackend；真实 LLM 后端、校验、重试在 P2/P3 接入。
+P2 只做三件事：真实 LLM 后端（``OpenAICompatBackend``）、占位符渲染
+（``render_synthesis``）、失败重试；不接入 pipeline、不做校验（P3）、
+不做会话/流式/UI（归宿主）。宿主适配留出两个口子：
+
+1. ``compose(..., backend=...)`` 接受任意实现了 ``chat_json`` 的对象；
+2. ``EvidencePack.to_dict()`` 是稳定 JSON，宿主可自行消费。
+
+宿主若想自己写答案（模式 B），调用方直接拿证据包、不调 ``compose`` 即可。
 """
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from finkb.fact_engine.extractor import LLMClient, LLMConfig
 from finkb.qa.evidence import EvidencePack
+from finkb.qa.synthesizer import PLACEHOLDER_RE, render
 
 SYSTEM_PROMPT = """你是 FinKB 的财报问答写手。你只能使用下面给出的证据，不得使用外部知识。
 规则：
@@ -111,6 +121,66 @@ def build_prompt(question: str, pack: EvidencePack) -> tuple[str, str]:
     return SYSTEM_PROMPT, user
 
 
+class OpenAICompatBackend:
+    """项目自带的 OpenAI 兼容后端（复用抽取阶段同一个 ``LLMClient``）。
+
+    宿主有自己的模型时，可传 ``config`` 覆盖；也可以完全绕过本类，
+    直接给 ``compose`` 传任意实现 ``chat_json`` 的对象。
+    """
+
+    name = "openai-compat"
+
+    def __init__(self, config: LLMConfig | None = None, *, timeout: float = 120.0) -> None:
+        self._config = config
+        self._timeout = timeout
+        self._client: LLMClient | None = None
+
+    @property
+    def config(self) -> LLMConfig:
+        if self._config is None:
+            self._config = LLMConfig.from_env()
+        return self._config
+
+    def chat_json(self, system: str, user: str) -> dict[str, Any]:
+        if self._client is None:
+            self._client = LLMClient(self.config, timeout=self._timeout)
+        return self._client.chat_json(system, user)
+
+    def close(self) -> None:
+        if self._client is not None:
+            self._client.close()
+            self._client = None
+
+
+def backend_from_env(env: dict[str, str] | None = None) -> OpenAICompatBackend | None:
+    """按环境变量构造默认后端；关闭或缺少 key 时返回 None（调用方走抽取式）。
+
+    开关：``FINKB_LLM_SYNTH=1``；可选覆盖：``FINKB_LLM_SYNTH_API_KEY`` /
+    ``FINKB_LLM_SYNTH_BASE_URL`` / ``FINKB_LLM_SYNTH_MODEL``。
+    """
+    values = {**os.environ, **(env or {})}
+    flag = str(values.get("FINKB_LLM_SYNTH", "off")).strip().lower()
+    if flag in {"", "0", "off", "false", "no"}:
+        return None
+    overrides: dict[str, str] = {}
+    if values.get("FINKB_LLM_SYNTH_API_KEY"):
+        overrides["LLM_API_KEY"] = values["FINKB_LLM_SYNTH_API_KEY"]
+    if values.get("FINKB_LLM_SYNTH_BASE_URL"):
+        overrides["LLM_BASE_URL"] = values["FINKB_LLM_SYNTH_BASE_URL"]
+    if values.get("FINKB_LLM_SYNTH_MODEL"):
+        overrides["LLM_MODEL"] = values["FINKB_LLM_SYNTH_MODEL"]
+    try:
+        config = LLMConfig.from_env(overrides or None)
+    except RuntimeError:
+        return None
+    return OpenAICompatBackend(config)
+
+
+def render_synthesis(result: SynthesisResult, ledger: list[dict[str, Any]]) -> tuple[str, list[str]]:
+    """把合成结果里的 ``{{cN}}`` 填成账本数字，返回 (正文, 用到的 id)。"""
+    return render(result.answer, ledger)
+
+
 class FakeBackend:
     """离线测试用后端：按预设返回 JSON，不联网。"""
 
@@ -168,9 +238,12 @@ def compose(
     pack: EvidencePack,
     backend: LLMBackend | None,
     *,
-    max_retries: int = 0,
+    max_retries: int = 1,
 ) -> SynthesisResult | None:
-    """调用后端生成受约束答案；无后端或全部失败时返回 None（调用方回退）。"""
+    """调用后端生成受约束答案；无后端或全部失败时返回 None（调用方回退）。
+
+    默认重试 1 次（P2）；重试仍失败时不抛异常，交给调用方用抽取式回答。
+    """
     if backend is None:
         return None
     system, user = build_prompt(question, pack)
@@ -188,6 +261,16 @@ def compose(
     return None
 
 
-def synthesize(question: str, pack: EvidencePack, backend: LLMBackend | None = None) -> SynthesisResult | None:
-    """便捷入口：P2 起由 pipeline 调用；P1 不接入。"""
-    return compose(question, pack, backend)
+def synthesize(
+    question: str,
+    pack: EvidencePack,
+    backend: LLMBackend | None = None,
+    *,
+    max_retries: int = 1,
+) -> SynthesisResult | None:
+    """便捷入口：P4 起由 pipeline 调用；P2 暂不接入。
+
+    模式 A：传 ``backend_from_env()`` 或自定义 backend，项目内写答案；
+    模式 B：不调本函数，直接消费 ``pack.to_dict()``，由宿主自己写。
+    """
+    return compose(question, pack, backend, max_retries=max_retries)

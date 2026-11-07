@@ -104,3 +104,76 @@ def test_result_to_dict():
     assert data["backend"] == "fake"
     assert data["answer"] == "答"
     assert isinstance(data["used_ids"], list)
+
+
+def test_backend_from_env_off_by_default(monkeypatch):
+    from finkb.qa.synth import backend_from_env
+
+    monkeypatch.setenv("FINKB_LLM_SYNTH", "off")
+    assert backend_from_env() is None
+
+
+def test_backend_from_env_with_overrides(monkeypatch):
+    from finkb.qa.synth import backend_from_env
+
+    monkeypatch.setenv("FINKB_LLM_SYNTH", "1")
+    monkeypatch.setenv("FINKB_LLM_SYNTH_API_KEY", "test-key")
+    monkeypatch.setenv("FINKB_LLM_SYNTH_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("FINKB_LLM_SYNTH_MODEL", "test-model")
+    backend = backend_from_env()
+    assert backend is not None
+    assert backend.name == "openai-compat"
+    assert backend.config.api_key == "test-key"
+    assert backend.config.base_url == "https://example.test/v1"
+    assert backend.config.model == "test-model"
+
+
+def test_openai_compat_backend_uses_client(monkeypatch):
+    import finkb.qa.synth as synth
+
+    calls: list[tuple] = []
+
+    class FakeClient:
+        def __init__(self, config, timeout=120.0):
+            self.config = config
+            self.timeout = timeout
+
+        def chat_json(self, system, user):
+            calls.append((system, user))
+            return {"answer": "ok", "used_ids": []}
+
+        def close(self):
+            calls.append(("close",))
+
+    monkeypatch.setattr(synth, "LLMClient", FakeClient)
+    config = synth.LLMConfig(api_key="k", base_url="https://x", model="m", session_id="s")
+    backend = synth.OpenAICompatBackend(config)
+    assert backend.chat_json("sys", "usr")["answer"] == "ok"
+    assert calls[0] == ("sys", "usr")
+    backend.close()
+    assert calls[-1] == ("close",)
+
+
+def test_render_synthesis_fills_placeholders():
+    from finkb.qa.synth import SynthesisResult, render_synthesis
+
+    result = SynthesisResult(answer="营业收入为 {{c1}} 亿元。[Ref: 000002_2025_年报#P11]")
+    text, used = render_synthesis(result, [{"id": "c1", "value": 2334.33, "unit": "亿元"}])
+    assert "2334.33" in text
+    assert "{{c1}}" not in text
+    assert used == ["c1"]
+
+
+def test_compose_retries_once_by_default():
+    pack = _pack()
+    backend = FakeBackend([{"bad": True}, {"answer": "第二次成功", "used_ids": []}])
+    result = compose("问题", pack, backend)
+    assert result is not None and result.answer == "第二次成功"
+    assert len(backend.calls) == 2
+
+
+def test_compose_returns_none_after_two_failures():
+    pack = _pack()
+    backend = FakeBackend([{"bad": True}, {"bad": True}])
+    assert compose("问题", pack, backend) is None
+    assert len(backend.calls) == 2
