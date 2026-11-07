@@ -10,6 +10,15 @@
       "verify_checked": 2021,
       "verify_missing": 0
     },
+    "000333_2025_年报": {
+      "pages": 276,
+      "logical": 271,
+      "header": 246,
+      "invariants": 13,
+      "total_invariants": 13,
+      "verify_checked": 1568,
+      "verify_missing": 0
+    },
     "000625_2025_一季报": {
       "pages": 12,
       "logical": 16,
@@ -136,6 +145,33 @@
       "verify_checked": 1583,
       "verify_missing": 0
     },
+    "600276_2025_年报": {
+      "pages": 236,
+      "logical": 283,
+      "header": 260,
+      "invariants": 13,
+      "total_invariants": 13,
+      "verify_checked": 1552,
+      "verify_missing": 1
+    },
+    "600519_2025_年报": {
+      "pages": 143,
+      "logical": 304,
+      "header": 281,
+      "invariants": 13,
+      "total_invariants": 13,
+      "verify_checked": 1619,
+      "verify_missing": 0
+    },
+    "600900_2025_年报": {
+      "pages": 259,
+      "logical": 290,
+      "header": 259,
+      "invariants": 13,
+      "total_invariants": 13,
+      "verify_checked": 1679,
+      "verify_missing": 1
+    },
     "601088_2025_年报": {
       "pages": 310,
       "logical": 358,
@@ -226,40 +262,31 @@
       "verify_checked": 2614,
       "verify_missing": 2
     },
-    "600519_2025_年报": {
-      "pages": 143,
-      "logical": 304,
-      "header": 281,
+    "601668_2025_年报": {
+      "pages": 366,
+      "logical": 395,
+      "header": 377,
       "invariants": 13,
       "total_invariants": 13,
-      "verify_checked": 1619,
-      "verify_missing": 0
+      "verify_checked": 2787,
+      "verify_missing": 256
     },
-    "000333_2025_年报": {
-      "pages": 276,
-      "logical": 271,
-      "header": 246,
+    "601899_2025_年报": {
+      "pages": 352,
+      "logical": 466,
+      "header": 408,
       "invariants": 13,
       "total_invariants": 13,
-      "verify_checked": 1568,
-      "verify_missing": 0
+      "verify_checked": 3096,
+      "verify_missing": 261
     },
-    "600276_2025_年报": {
-      "pages": 236,
-      "logical": 283,
-      "header": 260,
-      "invariants": 13,
-      "total_invariants": 13,
-      "verify_checked": 1552,
-      "verify_missing": 1
-    },
-    "600900_2025_年报": {
-      "pages": 259,
-      "logical": 290,
-      "header": 259,
-      "invariants": 13,
-      "total_invariants": 13,
-      "verify_checked": 1679,
+    "688235_2025_年报": {
+      "pages": 270,
+      "logical": 249,
+      "header": 232,
+      "invariants": 10,
+      "total_invariants": 10,
+      "verify_checked": 1012,
       "verify_missing": 1
     }
   }

@@ -982,3 +982,50 @@ def test_persistent_timeout_fails_with_a_clear_message(monkeypatch) -> None:
 
     with pytest.raises(mc.MineruError, match="连续 3 次超时或断连"):
         client.submit_url("https://example.com/a.pdf")
+
+
+# --------------------------------------------------------------------------- #
+# MinerU 漏页：PDF 文字层兜底
+# --------------------------------------------------------------------------- #
+class _FakePdfPage:
+    def __init__(self, text: str) -> None:
+        self._text = text
+
+    def extract_text(self) -> str:
+        return self._text
+
+
+class _FakePdfReader:
+    def __init__(self, _path: str) -> None:
+        self.pages = [_FakePdfPage("第一页完整正文" * 20), _FakePdfPage("第二页正文" * 5)]
+
+
+def test_recovery_fills_page_whose_table_body_is_empty(monkeypatch) -> None:
+    import pypdf
+
+    monkeypatch.setattr(pypdf, "PdfReader", _FakePdfReader)
+    content_list = [
+        {"type": "table", "table_body": "", "page_idx": 0},
+        {"type": "header", "text": "页眉", "page_idx": 0},
+        {"type": "text", "text": "第二页正文", "page_idx": 1},
+    ]
+    pages = content_list_to_pages(content_list, DOC, pdf_path="fake.pdf")
+    page1 = next(p for p in pages if p.number == 1)
+    assert any("第一页完整正文" in block.text for block in page1.blocks if not block.is_noise)
+
+
+def test_recovery_skips_partial_content_list(monkeypatch) -> None:
+    import pypdf
+
+    class _TenPageReader:
+        def __init__(self, _path: str) -> None:
+            self.pages = [_FakePdfPage("正文" * 100) for _ in range(10)]
+
+    monkeypatch.setattr(pypdf, "PdfReader", _TenPageReader)
+    content_list = [
+        {"type": "table", "table_body": "", "page_idx": 0},
+        {"type": "text", "text": "只有第一页", "page_idx": 0},
+    ]
+    pages = content_list_to_pages(content_list, DOC, pdf_path="fake.pdf")
+    assert len(pages) == 1
+    assert all("正文正文" not in block.text for block in pages[0].blocks)

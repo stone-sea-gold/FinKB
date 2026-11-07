@@ -196,6 +196,9 @@ def _run_parse(pdf: Path, doc_id: str, mode: str, warnings: list[str]) -> None:
         str(paths.data_dir() / "mineru_work"),
         "--split-sections",
     ]
+    if mode == "mineru":
+        # MinerU 单次上限 200 页；不传 --auto-split 时 >200 页的年报会直接失败。
+        command.extend(["--auto-split", "--max-pages", "200"])
     if mode in ("auto", "offline"):
         command.append("--offline")
         if mode == "auto":
@@ -314,19 +317,24 @@ def add_document(
         src = Path(parsed_dir).expanduser().resolve()
         if not (src / "report.json").exists():
             raise FileNotFoundError(f"解析目录缺少 report.json：{src}")
-        if target.exists():
-            shutil.rmtree(target)
-        shutil.copytree(src, target)
+        # 允许直接把库内目录当 --parsed 传：src == target 时先删后拷会把源删掉。
+        if src != target.resolve():
+            if target.exists():
+                shutil.rmtree(target)
+            shutil.copytree(src, target)
         if pdf_path:
+            src_pdf = Path(pdf_path).expanduser().resolve()
             raw_pdf = paths.raw_dir() / f"{doc_id}.pdf"
-            shutil.copy2(Path(pdf_path).expanduser().resolve(), raw_pdf)
+            if src_pdf != raw_pdf:
+                shutil.copy2(src_pdf, raw_pdf)
     else:
         if pdf_path:
             src_pdf = Path(pdf_path).expanduser().resolve()
             if not src_pdf.exists():
                 raise FileNotFoundError(f"PDF 不存在：{src_pdf}")
             raw_pdf = paths.raw_dir() / f"{doc_id}.pdf"
-            shutil.copy2(src_pdf, raw_pdf)
+            if src_pdf != raw_pdf:
+                shutil.copy2(src_pdf, raw_pdf)
         if not target.exists():
             if raw_pdf is None:
                 raise FileNotFoundError("需要提供 pdf_path（导入 PDF）或 parsed_dir（导入已解析产物）")

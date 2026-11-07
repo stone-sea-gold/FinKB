@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -110,6 +111,23 @@ def test_add_and_remove_document_from_parsed(home):
     assert not (home / "data" / "parsed" / doc_id).exists()
     assert library.list_documents() == []
     assert library._read_registry()["documents"] == {}
+
+
+def test_add_document_accepts_parsed_dir_inside_library(home):
+    """--parsed 直接指向库内目录时不能先删后拷（会把源删掉）。"""
+    source = Path(__file__).resolve().parents[1] / "data" / "parsed" / "601127_2025_一季报"
+    if not (source / "report.json").exists():
+        pytest.skip("缺少已解析样例")
+    target = home / "data" / "parsed" / "601127_2025_一季报"
+    shutil.copytree(source, target)
+    result = library.add_document(
+        company="601127", period="2025Q1", report_type="一季报",
+        parsed_dir=target, company_name="赛力斯", skip_facts=True, skip_wiki=True,
+    )
+    assert result["ok"] is True
+    assert (target / "report.json").exists()
+    assert result["chunks"]["chunks"] > 0
+    library.remove_document("601127_2025_一季报")
 
 
 def test_status_reports_home(home):

@@ -116,7 +116,14 @@ def _cited_passage_text(pack: EvidencePack, refs: list[tuple[str, int]]) -> str:
 
 def _check_v1(result: SynthesisResult, pack: EvidencePack, checks: dict[str, bool], errors: list[str]) -> None:
     known = {fact.id for fact in pack.facts}
-    unknown = sorted({f"c{match.group(1)}" for match in PLACEHOLDER_RE.finditer(result.answer)} - known)
+    # 只允许 cN（结构化事实）；模型偶尔会把检索片段写成 {{e1}}，必须拦下。
+    unknown = sorted(
+        {
+            match.group(1).strip()
+            for match in re.finditer(r"\{\{\s*([^}]+?)\s*\}\}", result.answer)
+        }
+        - known
+    )
     checks["V1"] = not unknown
     if unknown:
         errors.append("占位符不在账本中：" + ", ".join(unknown))

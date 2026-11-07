@@ -24,7 +24,7 @@ DEFAULT_BUDGET: dict[str, int] = {
     "max_facts": 8,
     "max_inferences": 4,
     "max_passages": 5,
-    "max_chars": 4000,
+    "max_chars": 8000,
 }
 
 _ROUTE_TO_TIER = {"fact": "metric", "ontology": "ontology", "text": "document"}
@@ -239,22 +239,44 @@ def _inferences_from_payload(payload: dict[str, Any]) -> list[EvidenceInference]
         return []
     if data.get("class_id"):
         members = data.get("members") or []
+        names: list[str] = []
+        for member in members[:8]:
+            company = str(member.get("company") or "")
+            period = str(member.get("period") or "")
+            pages = sorted(
+                {
+                    (str(fact.get("doc") or ""), int(fact.get("page") or 0))
+                    for fact in (member.get("facts") or [])
+                    if fact.get("doc") and fact.get("page")
+                }
+            )
+            refs = "、".join(f"{doc} P{page}" for doc, page in pages[:2])
+            item = f"{company}（{period}）"
+            if refs:
+                item += f" 来源 {refs}"
+            names.append(item)
+        detail = "；".join(names)
         return [
             EvidenceInference(
                 id="i1",
                 kind="class",
                 rule_id=str(data["class_id"]),
-                text=f"定义类 {data['class_id']} 命中 {len(members)} 家公司。",
+                text=f"定义类 {data['class_id']} 命中 {len(members)} 家公司：{detail}。" if detail else f"定义类 {data['class_id']} 命中 {len(members)} 家公司。",
             )
         ]
     if data.get("rel_type"):
         edges = data.get("edges") or []
+        detail = "；".join(
+            f"{edge.get('dst')}（{edge.get('doc')} P{edge.get('page')}）"
+            for edge in edges[:10]
+            if edge.get("dst")
+        )
         return [
             EvidenceInference(
                 id="i1",
                 kind="relation",
                 rule_id=str(data["rel_type"]),
-                text=f"{data['rel_type']} 关系 {len(edges)} 条。",
+                text=f"{data['rel_type']} 关系 {len(edges)} 条" + (f"：{detail}。" if detail else "。"),
             )
         ]
     if data.get("metric_id"):
@@ -280,14 +302,15 @@ def _passages_from_payload(payload: dict[str, Any]) -> list[EvidencePassage]:
     out: list[EvidencePassage] = []
     for index, item in enumerate(evidence, start=1):
         snippet = str(item.get("snippet") or "")
+        body = str(item.get("text") or snippet)
         out.append(
             EvidencePassage(
                 id=f"e{index}",
                 doc=str(item.get("doc_id") or ""),
                 page=int(item.get("page_num") or 0),
                 section=str(item.get("section") or ""),
-                block_type=str(item.get("block_type") or ("table" if _is_table_snippet(snippet) else "text")),
-                text=snippet,
+                block_type=str(item.get("block_type") or ("table" if _is_table_snippet(body) else "text")),
+                text=body,
                 chunk_id=str(item.get("chunk_id") or ""),
             )
         )

@@ -181,6 +181,9 @@ def write_relations(store, doc_dir: Path, manifest: dict) -> int:
             continue
         kind, spec = matched
         for edge in parse_table(table, kind, spec, company):
+            # 兜底：表头词/泛称（如「姓名」「合计」）即使漏过解析也不能写成实体边。
+            if entity_gate.gate_reason(str(edge["dst_id"])) is not None:
+                continue
             attrs_json = json.dumps(edge["attrs"], ensure_ascii=False, sort_keys=True)
             key = (
                 edge["src_id"],

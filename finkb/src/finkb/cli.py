@@ -145,7 +145,7 @@ def run_parse(args: argparse.Namespace) -> int:
             content_list = shift_page_idx(content_list, offset)
         document = ParsedDocument(
             doc_id=doc_id,
-            pages=content_list_to_pages(content_list, doc_id),
+            pages=content_list_to_pages(content_list, doc_id, pdf_path=pdf_path),
             markdown="",
             content_list=content_list,
             source="mineru-reuse",

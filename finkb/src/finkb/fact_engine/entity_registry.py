@@ -73,25 +73,32 @@ def rebuild(store, scope_path: str | Path | None = None) -> dict:
     rows = store.conn.execute(
         "SELECT DISTINCT src_type, src_id, dst_type, dst_id FROM relations"
     ).fetchall()
-    for src_type, src_id, dst_type, dst_id in rows:
-        if src_type == "company" and str(src_id) in {e.split(":")[1] for e in entities if e.startswith("co:")}:
-            add(f"co:{src_id}", str(src_id), "listed_company", [str(src_id)], "relations")
-        raw = str(dst_id or "")
+    listed = {e.split(":")[1] for e in entities if e.startswith("co:")}
+
+    def resolve(raw: str, value_type: str) -> None:
+        """把关系边一端（源或目标）登记成实体。源也可能是非上市子公司/自然人。"""
+        raw = str(raw or "")
         if entity_gate.gate_reason(raw) is not None:
-            continue
+            return
         keys = entity_gate.match_keys(raw)
         if not keys:
-            continue
+            return
         matched = next((company_alias[key] for key in keys if key in company_alias), None)
         if matched:
             add(matched, entities[matched]["canonical_name"], "listed_company", keys, "relations")
-            continue
-        etype = "person" if dst_type == "person" else "organization"
+            return
+        etype = "person" if value_type == "person" else "organization"
         prefix = "person" if etype == "person" else "org"
         # 用「去后缀后的最短写法」做稳定主键：XX有限公司 与 XX 会并到同一实体。
         canonical = keys[-1]
-        entity_id = _hash_id(prefix, canonical)
-        add(entity_id, canonical, etype, keys, "relations")
+        add(_hash_id(prefix, canonical), canonical, etype, keys, "relations")
+
+    for src_type, src_id, dst_type, dst_id in rows:
+        if src_type == "company" and str(src_id) in listed:
+            add(f"co:{src_id}", str(src_id), "listed_company", [str(src_id)], "relations")
+        else:
+            resolve(str(src_id), src_type)
+        resolve(str(dst_id), dst_type)
 
     store.conn.execute("BEGIN")
     store.conn.execute("DELETE FROM entities_master")
@@ -147,6 +154,10 @@ def annotate(store) -> dict:
     updates = []
     for src_id, dst_id, source_doc, page_num, rel_type in rows:
         src_entity = f"co:{src_id}" if str(src_id) in company_ids else None
+        if src_entity is None:
+            src_entity = next(
+                (alias_map[key] for key in entity_gate.match_keys(src_id) if key in alias_map), None
+            )
         keys = entity_gate.match_keys(dst_id)
         dst_entity = next((alias_map[key] for key in keys if key in alias_map), None)
         if dst_entity:

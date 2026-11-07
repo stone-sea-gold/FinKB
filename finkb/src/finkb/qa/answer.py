@@ -146,7 +146,7 @@ def answer_ontology(question: str, *, understanding: Understanding | None = None
     return None
 
 
-def _snippet(text: str, question: str, width: int = 260) -> str:
+def _snippet(text: str, question: str, width: int = 600) -> str:
     """按命中词扩到句子边界，避免从半句开始截断。"""
     from finkb.search.hybrid import tokenize
 
@@ -196,9 +196,32 @@ def _report_type(question: str, periods: list[str]) -> str | None:
     return None
 
 
+_REPORT_TYPE_WORDS = ("年报", "半年报", "一季报", "三季报", "季度报告")
+
+
+def _content_query(query: str, slot: Understanding) -> str:
+    """去掉公司/期间/报告类型后再检索。
+
+    这些词已经被 filters 限定在目标文档里，留在查询里只会在该文档内到处命中
+    （公司名、年份、年报字样满篇都是），把「煤炭产销」这类真信号压下去。
+    """
+    import re
+
+    text = query
+    for name in [*slot.company_names, *slot.companies]:
+        if name:
+            text = text.replace(name, " ")
+    for period in slot.periods:
+        text = text.replace(period, " ")
+    for word in _REPORT_TYPE_WORDS:
+        text = text.replace(word, " ")
+    text = re.sub(r"\s+", " ", text).strip()
+    return text or query
+
+
 def answer_text(
     question: str,
-    limit: int = 5,
+    limit: int = 10,
     *,
     understanding: Understanding | None = None,
     query: str | None = None,
@@ -209,6 +232,7 @@ def answer_text(
     # 多轮追问：检索用补全后的完整问题，而不是“那 2024 年呢”这种缺主语的片段。
     if query is None:
         query = understanding_mod.resolved_question(question, slot) if slot.inherited else question
+    search_query = _content_query(query, slot)
     base: dict = {}
     if slot.companies:
         base["company"] = slot.companies[0]
@@ -222,26 +246,38 @@ def answer_text(
     attempts.append({})
     results: list[dict] = []
     for filters in attempts:
-        results = hybrid.search(query, limit=limit, filters=filters or None)
+        results = hybrid.search(search_query, limit=limit, filters=filters or None)
         if results:
             break
     ledger: list[dict] = []
     citations: list[str] = []
-    evidence = []
-    seen: set[tuple[str, int]] = set()
+    # 同一页可能被切成多块（~300 字/块）；按页合并，否则合成时只看到半句话。
+    page_order: list[tuple[str, int]] = []
+    page_items: dict[tuple[str, int], dict] = {}
+    page_text: dict[tuple[str, int], list[str]] = {}
     for item in results:
         key = (item["doc_id"], int(item["page_num"]))
-        if key in seen:
-            continue
-        seen.add(key)
+        if key not in page_items:
+            page_items[key] = item
+            page_order.append(key)
+            page_text[key] = []
+        if sum(len(part) for part in page_text[key]) < 1500:
+            page_text[key].append(str(item.get("text") or ""))
+    evidence = []
+    for key in page_order:
+        if len(evidence) >= 3:
+            break
+        item = page_items[key]
+        body = "\n".join(page_text[key])[:1500]
+        is_table = item.get("block_type") == "table"
         evidence.append({
             "chunk_id": item["chunk_id"], "doc_id": item["doc_id"], "page_num": int(item["page_num"]),
             "section": item.get("section", ""),
-            "snippet": _table_snippet(item["text"]) if item.get("block_type") == "table" else _snippet(item["text"], query),
+            "snippet": _table_snippet(body) if is_table else _snippet(body, query),
+            # 合成/证据包需要完整页文本（snippet 只够抽取式答案展示）。
+            "text": body,
         })
         citations.append(f"[Ref: {item['doc_id']}#P{item['page_num']}]")
-        if len(evidence) >= 3:
-            break
     if not evidence:
         return {"route": "text", "question": question, "refused": True, "text": "语料中没有检索到相关原文。", "data": {"evidence": []}, "ledger": [], "citations": []}
     parts = [f"{e['doc_id']} 第 {e['page_num']} 页（{e['section']}）：{e['snippet']}" for e in evidence]

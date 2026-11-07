@@ -50,7 +50,7 @@ def test_synthesizer_render():
     assert used == ["c1", "c2"]
 
 
-def test_verifier_ok_and_bad(tmp_path, monkeypatch):
+def test_verifier_ok_and_bad(tmp_path, monkeypatch, request):
     parsed = tmp_path / "parsed"
     doc = parsed / "000001_2025_年报"
     doc.mkdir(parents=True)
@@ -61,6 +61,8 @@ def test_verifier_ok_and_bad(tmp_path, monkeypatch):
     monkeypatch.setattr(verifier, "PARSED_DIR", parsed)
     verifier._page_texts.cache_clear()
     verifier._report_pages.cache_clear()
+    request.addfinalizer(verifier._page_texts.cache_clear)
+    request.addfinalizer(verifier._report_pages.cache_clear)
     payload = {
         "route": "fact",
         "text": "营业收入 {{c1}} 亿元。",
@@ -146,3 +148,17 @@ def test_fact_lane_prefers_same_year_report_if_db_exists():
     result = fact_lane.answer("赛力斯2025年第一季度营业收入是多少")
     assert result and result["refused"] is False
     assert result["ledger"][0]["doc"] == "601127_2025_一季报"
+
+
+def test_content_query_drops_company_period_report_type() -> None:
+    """检索前剔除公司/期间/报告类型，避免这些词在目标文档内淹没内容词。"""
+    from finkb.qa.answer import _content_query
+    from finkb.qa.understanding import understand
+
+    question = "中国神华 2025 年报里，公司如何描述煤炭产销情况？"
+    slot = understand(question)
+    cleaned = _content_query(question, slot)
+    assert "中国神华" not in cleaned
+    assert "2025" not in cleaned
+    assert "年报" not in cleaned
+    assert "煤炭" in cleaned and "产销" in cleaned

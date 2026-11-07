@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import re
 import shutil
 import time
@@ -393,7 +394,10 @@ class MineruClient:
 
         pages = (
             content_list_to_pages(
-                content_list, doc_id, use_page_number_map=page_ranges is not None
+                content_list,
+                doc_id,
+                use_page_number_map=page_ranges is not None,
+                pdf_path=pdf_path,
             )
             if content_list
             else parse_page_anchored_markdown(markdown, default_doc=doc_id)
@@ -454,7 +458,7 @@ class MineruClient:
             merged = shift_page_idx(merged, offset)
         return ParsedDocument(
             doc_id=doc_id,
-            pages=content_list_to_pages(merged, doc_id),
+            pages=content_list_to_pages(merged, doc_id, pdf_path=pdf_path),
             markdown="",
             content_list=merged,
             page_offset=offset,
@@ -727,6 +731,7 @@ def content_list_to_pages(
     doc_id: str,
     page_offset: int = 0,
     use_page_number_map: bool = False,
+    pdf_path: str | Path | None = None,
 ) -> list[Page]:
     """把 MinerU 的 ``content_list.json`` 转成按页组织的 ``Page``。
 
@@ -819,7 +824,84 @@ def content_list_to_pages(
             )
         )
 
+    if pdf_path is not None:
+        total_pages = pdf_page_count(Path(pdf_path))
+        covered = {
+            int(item.get("page_idx", 0)) + 1 + page_offset
+            for item in content_list
+            if isinstance(item, dict)
+        }
+        # content_list 只覆盖部分页时（例如误把分批解析的中间产物当全量复用），
+        # 逐页补文字会把整份 PDF 重复灌进去；宁可不补。
+        if total_pages and len(covered) < total_pages * 0.9:
+            print(
+                f"[恢复] 跳过：content_list 只覆盖 {len(covered)}/{total_pages} 页",
+                file=sys.stderr,
+            )
+        else:
+            recovered = _recover_pages_from_pdf(pages, pdf_path, doc_id)
+            if recovered:
+                print(
+                    f"[恢复] PDF 文字层补回 {recovered} 页正文（MinerU 空表/图表页）",
+                    file=sys.stderr,
+                )
+
     return [pages[key] for key in sorted(pages)]
+
+
+def _recover_pages_from_pdf(
+    pages: dict[int, Page],
+    pdf_path: str | Path,
+    doc_id: str,
+    min_chars: int = 80,
+) -> int:
+    """MinerU 漏掉正文的页，用 PDF 文字层补回。
+
+    MinerU vlm 对部分宽表返回空 ``table_body``、对 chart 块不返回文字，
+    这些页在 ``content_list`` 里只剩页眉/页脚，正文会整页丢失（实测百济神州
+    23 页、中国建筑 12 页）。这里只对「非噪音正文 < ``min_chars`` 字符」的页
+    抽 PDF 文字补成 text 块；只补文字，不还原表格结构——数值抽取仍以
+    MinerU 表格为准，补回的文本只用于检索与人工核对。
+    """
+    try:
+        from pypdf import PdfReader
+    except ImportError:  # pragma: no cover - pypdf 是可选依赖
+        return 0
+    try:
+        reader = PdfReader(str(pdf_path))
+    except Exception:  # pragma: no cover - 损坏文件不该让解析崩掉
+        return 0
+
+    recovered = 0
+    for index, pdf_page in enumerate(reader.pages, start=1):
+        page = pages.get(index)
+        usable = sum(
+            len(block.text)
+            for block in (page.blocks if page is not None else [])
+            if not block.is_noise
+        )
+        if usable >= min_chars:
+            continue
+        try:
+            text = (pdf_page.extract_text() or "").strip()
+        except Exception:  # pragma: no cover - 单页失败不影响其他页
+            continue
+        if len(text) < min_chars:
+            continue
+        if page is None:
+            page = Page(number=index)
+            pages[index] = page
+        page.blocks.append(
+            Block(
+                meta=DocMeta(doc_id=doc_id, page=index),
+                kind="text",
+                lines=text.splitlines(),
+                block_index=len(page.blocks),
+                is_noise=False,
+            )
+        )
+        recovered += 1
+    return recovered
 
 
 def _is_box_line(text: str) -> bool:
