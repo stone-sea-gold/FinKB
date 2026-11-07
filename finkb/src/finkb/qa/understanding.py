@@ -89,6 +89,11 @@ class Understanding:
     source: str = "rules"
     source_doc: str | None = None
     document_period: str | None = None
+    # 多轮上下文：这些槽位来自宿主传入的上一轮 resolved_slots（P5）。
+    inherited: list[str] = field(default_factory=list)
+    overridden: list[str] = field(default_factory=list)
+    context_used: bool = False
+    context_question: str = ""
 
 
 @lru_cache(maxsize=1)
@@ -381,8 +386,12 @@ def _merge_llm(u: Understanding, extra: dict) -> None:
     u.source = "rules+llm"
 
 
-def understand(question: str, *, use_llm: bool | None = None) -> Understanding:
-    """规则解析 + 可选 LLM 补槽位 + 时间覆盖守卫。"""
+def understand(question: str, *, use_llm: bool | None = None, context: dict | None = None) -> Understanding:
+    """规则解析 + 可选 LLM 补槽位 + 时间覆盖守卫 + 多轮槽位继承。
+
+    ``context`` 只接收结构化槽位（``previous_slots``），不接收整段历史；
+    当前问题里显式写出的值优先于继承值（P5 契约）。
+    """
     u = copy.deepcopy(_rules(question))
     if use_llm is None:
         use_llm = _llm_enabled()
@@ -391,6 +400,8 @@ def understand(question: str, *, use_llm: bool | None = None) -> Understanding:
         if extra:
             _merge_llm(u, extra)
     u.unresolved = list(dict.fromkeys(u.unresolved + _coverage(question, u)))
+    if context:
+        apply_context(u, context, question=question)
     return u
 
 
@@ -411,3 +422,206 @@ def residual_qualifiers(question: str) -> list[str]:
     for filler in FILLER:
         text = text.replace(filler, "")
     return [token for token in QUALIFIER_TOKENS if token in text]
+
+
+# ---------------------------------------------------------------------------
+# 多轮上下文契约（P5）：宿主只传结构化槽位，项目做确定性继承。
+# ---------------------------------------------------------------------------
+
+_AGGREGATE_RE = re.compile(r"哪些|哪个|所有|全部|各公司|各家|排名|最高|最低|超过|低于|大于|小于|几家")
+_FOLLOWUP_PREFIX = re.compile(r"^(?:那|那么|还有|然后|它|他|她|这个|那个|这些|那些)+")
+
+
+def _metric_by_id(metric_id: str) -> Metric | None:
+    for metric in load_metric_dict():
+        if metric.metric_id == metric_id:
+            return metric
+    return None
+
+
+def _context_slots(context: dict | None) -> dict:
+    """取出上一轮槽位；只有 previous_question 时用它兜底解析。"""
+    if not isinstance(context, dict):
+        return {}
+    slots = context.get("previous_slots")
+    if isinstance(slots, dict) and slots:
+        return slots
+    previous_question = context.get("previous_question")
+    if isinstance(previous_question, str) and previous_question.strip():
+        prev = _rules(previous_question.strip())
+        return {
+            "companies": prev.companies,
+            "company_names": prev.company_names,
+            "periods": prev.periods,
+            "metric": prev.metric.metric_id if prev.metric else None,
+            "qualifiers": prev.qualifiers,
+        }
+    return {}
+
+
+@lru_cache(maxsize=1)
+def _query_metric_aliases() -> tuple[str, ...]:
+    """``metrics.yaml`` 里 kind=query 的指标名/别名（SQL 计算指标，不在事实字典里）。"""
+    path = FINKB_ROOT / "config" / "metrics.yaml"
+    try:
+        raw = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return ()
+    names: set[str] = set()
+    for spec in (raw.get("metrics") or {}).values():
+        if not isinstance(spec, dict) or spec.get("kind") != "query":
+            continue
+        for candidate in (spec.get("name"), *(spec.get("aliases") or [])):
+            text = str(candidate or "").replace(" ", "")
+            if text:
+                names.add(text)
+    return tuple(sorted(names, key=len, reverse=True))
+
+
+def _query_metric_hit(text: str) -> str | None:
+    """当前问题是否点名了一个 SQL 计算指标（如毛利率）。"""
+    for name in _query_metric_aliases():
+        if name in text:
+            return name
+    return None
+
+
+def _merge_followup(question: str, u: Understanding) -> str:
+    """裸追问（“那 2024 年呢？”）没有可继承槽位时，用上一轮问题补全意图。
+
+    只替换上一轮问题里的第一个期间写法；替换不到就原样返回，不猜。
+    """
+    if not u.context_question or not u.periods or not _FOLLOWUP_PREFIX.match(question):
+        return question
+    label = _period_label(u.periods[0])
+    merged = re.sub(
+        r"20\d{2}\s*年(?:度)?(?:上半年|一季度|前三季度|三季度)?|20\d{2}(?:H1|Q[1-3])",
+        label,
+        u.context_question,
+        count=1,
+    )
+    return merged if merged != u.context_question else question
+
+
+def apply_context(u: Understanding, context: dict | None, *, question: str = "") -> Understanding:
+    """把上一轮槽位合并进本轮理解结果：缺则继承、新值覆盖、来源留痕。
+
+    继承公司/期间/指标/限定词；**不继承** ``source_doc``（“点名哪份报告”随追问
+    通常会变，继承会把 2025 年报错配到 2024 年的追问上）。
+    """
+    u.context_question = str((context or {}).get("previous_question") or "")
+    slots = _context_slots(context)
+    if not slots:
+        return u
+    u.context_used = True
+
+    prev_companies = [str(item) for item in (slots.get("companies") or []) if item]
+    prev_names = [str(item) for item in (slots.get("company_names") or []) if item]
+    if prev_companies:
+        if not u.companies:
+            u.companies = list(prev_companies)
+            u.company_names = list(prev_names) or list(prev_companies)
+            u.inherited.append("company")
+        elif u.companies != prev_companies:
+            u.overridden.append("company")
+
+    prev_periods = [str(item) for item in (slots.get("periods") or []) if item]
+    if prev_periods:
+        if not u.periods:
+            u.periods = list(prev_periods)
+            u.period_spans = []
+            u.inherited.append("period")
+        elif u.periods != prev_periods:
+            u.overridden.append("period")
+
+    prev_metric_id = slots.get("metric")
+    if prev_metric_id and not _query_metric_hit(question or u.context_question):
+        prev_metric = _metric_by_id(str(prev_metric_id))
+        if prev_metric is not None:
+            if u.metric is None:
+                u.metric = prev_metric
+                u.inherited.append("metric")
+            elif u.metric.metric_id != prev_metric.metric_id:
+                u.overridden.append("metric")
+
+    prev_qualifiers = [str(item) for item in (slots.get("qualifiers") or []) if item]
+    if prev_qualifiers:
+        if not u.qualifiers:
+            u.qualifiers = list(prev_qualifiers)
+            u.inherited.append("qualifier")
+        elif u.qualifiers != prev_qualifiers:
+            u.overridden.append("qualifier")
+
+    if u.inherited:
+        u.notes.append("继承上一轮槽位：" + "、".join(u.inherited))
+    return u
+
+
+def resolved_question(question: str, u: Understanding) -> str:
+    """把继承来的槽位还原成一句完整问题；没有继承时原样返回。"""
+    if not u.inherited:
+        return _merge_followup(question, u)
+    company = "、".join(u.company_names or u.companies)
+    period = "、".join(_period_label(item) for item in u.periods)
+    head = " ".join(part for part in (company, period) if part)
+    if "附注" in question and u.metric is not None:
+        return f"{head}{u.metric.metric_name}的附注页是哪一页？".strip()
+    for word in ("子公司", "股东", "担保", "关联方"):
+        if word in question:
+            return f"{head}的{word}有哪些？".strip()
+    if u.metric is not None:
+        suffix = {
+            "single": "是多少？",
+            "yoy": "同比增速是多少？",
+            "sum": "合计是多少？",
+            "diff_add": "增加了多少？",
+            "diff_sub": "减少了多少？",
+            "range": "最高值比最低值相差多少？",
+        }.get(u.operation, "是多少？")
+        qualifier = (" " + "、".join(u.qualifiers)) if u.qualifiers else ""
+        body = f"{qualifier} {u.metric.metric_name}{suffix}".strip()
+        return f"{head}{body}".strip()
+    rest = _FOLLOWUP_PREFIX.sub("", question).strip()
+    return f"{head} {rest}".strip() if head and rest else (head or question)
+
+
+def _clarify_message(missing: list[str]) -> str:
+    if "company" in missing and "period" in missing:
+        return "请补充公司名称和期间（例如：比亚迪 2025 年营业收入）。"
+    if "company" in missing:
+        return "请补充公司名称（例如：比亚迪、美的集团）。"
+    return "请补充期间（例如：2025 年、2025 年半年度、2025 年第一季度）。"
+
+
+def context_meta(question: str, u: Understanding) -> dict:
+    """给宿主的结构化多轮信息；``clarify`` 非空表示项目不猜、请宿主追问。"""
+    aggregate = bool(_AGGREGATE_RE.search(question))
+    missing: list[str] = []
+    if u.metric is not None and not aggregate:
+        if not u.companies:
+            missing.append("company")
+        if not u.periods:
+            missing.append("period")
+    clarify = None
+    if missing:
+        candidates: dict[str, list[str]] = {}
+        if "company" in missing:
+            candidates["company"] = [name for name, _ in scope_companies()]
+        clarify = {"missing": missing, "candidates": candidates, "message": _clarify_message(missing)}
+    return {
+        "resolved_question": resolved_question(question, u),
+        "resolved_slots": {
+            "companies": list(u.companies),
+            "company_names": list(u.company_names),
+            "periods": list(u.periods),
+            "metric": u.metric.metric_id if u.metric is not None else None,
+            "qualifiers": list(u.qualifiers),
+            "source_doc": u.source_doc,
+            "operation": u.operation,
+        },
+        "inherited": list(u.inherited),
+        "overridden": list(u.overridden),
+        "missing": missing,
+        "clarify": clarify,
+        "context_used": bool(u.context_used),
+    }

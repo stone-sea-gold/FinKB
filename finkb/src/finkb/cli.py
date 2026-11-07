@@ -322,6 +322,17 @@ def run_ask(args: argparse.Namespace) -> int:
     """``finkb ask``：三档问答；不给问题时进入交互循环。"""
     from finkb.qa.console import run as run_question
 
+    context = None
+    if args.context:
+        try:
+            context = json.loads(args.context)
+        except json.JSONDecodeError as error:
+            print(f"错误：--context 不是合法 JSON：{error}", file=sys.stderr)
+            return 2
+        if not isinstance(context, dict):
+            print("错误：--context 必须是 JSON 对象。", file=sys.stderr)
+            return 2
+
     def answer(question: str) -> None:
         text, _ = run_question(
             question,
@@ -330,6 +341,7 @@ def run_ask(args: argparse.Namespace) -> int:
             as_json=args.json,
             audit=args.audit_log,
             synthesize=args.synthesize,
+            context=context,
         )
         print(text)
 
@@ -621,6 +633,10 @@ def build_parser() -> argparse.ArgumentParser:
     ask_cmd.add_argument("--explain", action="store_true", help="打印档位选择与剪枝过程")
     ask_cmd.add_argument("--json", action="store_true", help="输出 JSON")
     ask_cmd.add_argument("--audit-log", action="store_true", help="写入 data/qa_audit.jsonl")
+    ask_cmd.add_argument(
+        "--context",
+        help="上一轮结构化槽位（JSON 字符串），用于多轮追问；只传槽位，不传整段历史",
+    )
     synth = ask_cmd.add_mutually_exclusive_group()
     synth.add_argument("--synth", dest="synthesize", action="store_true", help="启用 LLM 合成（需配置后端）")
     synth.add_argument("--no-synth", dest="synthesize", action="store_false", help="只用抽取式回答")

@@ -153,3 +153,20 @@
 - 负例（3 题）要求：拒答且不调用模型；
 - 退出码：0=15/15，1=有失败，2=未配置模型（跳过）；明细写 `finkb/data/_eval/synth_results.json`；
 - 该脚本**不进** `scripts/check.sh` 的离线门禁（需要网络与模型 key），只用于人工评测与抽检。
+
+## 多轮上下文验收（12 组宿主模拟，离线）
+
+`eval/context_qa.json` + `eval/check_context.py` 验收 P5 的“会话归宿主、语义归项目”契约：
+每轮把上一轮的 `resolved_slots`（或只有 `previous_question`）传回 `pipeline.ask`，
+检查槽位继承/覆盖、补全问题、澄清输出，以及不带 context 时行为不变。
+
+```bash
+.venv/bin/python eval/check_context.py            # 12 组 24 轮
+.venv/bin/python eval/check_context.py --case C09 # 只跑一组
+```
+
+- 覆盖：换期间/换公司/换指标、三连追问、换话题、澄清后补槽位、文档追问、
+  本体定义类追问、附注追问、关系边追问、`previous_question` 兜底、无 context 兼容；
+- 判定：`tier`、`refused`、`inherited`/`overridden`、`resolved_question` 关键词、
+  `resolved_slots`、`clarify.missing`；
+- 离线、确定性，已加入 `scripts/check.sh` 门禁；退出码 0=全部通过，1=有失败。

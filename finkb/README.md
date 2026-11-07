@@ -137,16 +137,37 @@ python -m finkb.qa "比亚迪 2025 年报里如何描述海外布局？" --tier 
 FINKB_LLM_UNDERSTAND=1 finkb ask "赛力斯 2025 年第一季度营业收入是多少亿元？"
 ```
 
-Agent 接入与审计（ADR-061 / ADR-063；MCP stdio，11 个工具）：
+Agent 接入与审计（ADR-061 / ADR-063；MCP stdio，13 个工具）：
 
 ```bash
 finkb-mcp                                        # 默认知识库（源码树或 ~/.finkb）
 finkb-mcp --home ~/finkb-data                    # 指定用户本地库（也可用 FINKB_HOME）
 # 问答/检索/图谱 5 个工具：ask / query_metric / search_documents / describe_ontology / traverse_relations
+# 合成 2 个工具：evidence（取证据包）/ verify（校验宿主答案）
 # 本地库 6 个工具：init_library / library_status / list_documents / add_document / remove_document / rebuild_index
 python -m finkb.qa "比亚迪 2025 年营业收入是多少亿元？" --audit-log
 # 审计日志默认 data/qa_audit.jsonl（已 gitignore），可用 FINKB_QA_AUDIT 改路径
 ```
+
+
+多轮追问（P5；会话归宿主，语义归项目）：
+
+- `ask` 可选 `context`，只传结构化槽位，不传整段历史：
+  `{"previous_question": "上一轮问题", "previous_slots": <上一轮 resolved_slots>}`。
+- 项目返回 `resolved_question`（补全后的完整问题）、`resolved_slots`、`inherited` /
+  `overridden`（哪些槽位来自上一轮、哪些被本轮显式覆盖）、`missing` / `clarify`
+  （补不全时给缺什么和候选，不静默猜）。
+- 继承规则：公司/期间/指标/限定词缺则继承；`source_doc` 不继承；当前显式值优先。
+- 不带 `context` 时行为与原来完全一致（只增字段，不改旧字段）。
+
+```bash
+# 第一轮
+finkb ask "比亚迪 2025 年营业收入是多少？" --json
+# 第二轮：把上一轮的 resolved_slots 放进 --context（宿主负责保存历史）
+finkb ask "那 2024 年呢？" --context '{"previous_question":"比亚迪 2025 年营业收入是多少？","previous_slots":{"companies":["002594"],"periods":["2025"],"metric":"revenue"}}'
+```
+
+多轮验收（离线，12 组宿主模拟）：`python ../eval/check_context.py`。
 
 ## 本地知识库（用户自建，v1）
 
@@ -185,6 +206,7 @@ python tools/metric_check.py --db data/facts.duckdb          # 指标定义 + SQ
 python -m finkb.ontology.quality --db data/facts.duckdb      # 本体结构质量（9 项）
 python -m finkb.fact_engine.data_check --db data/facts.duckdb # 约束求值/实体回填/附注覆盖
 cd .. && .venv/bin/python eval/recall.py --no-dense --min-recall 0.9  # 离线召回 + MRR
+cd .. && .venv/bin/python eval/check_context.py                       # 多轮上下文 12 组
 ```
 
 批量编译器在 `finkb/.tmp/batch_compile.py`（读 `config/wiki_scope.yaml`，逐份编译并写

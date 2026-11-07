@@ -141,3 +141,18 @@ def test_verify_tool_accepts_host_answer():
     assert not is_error
     assert payload["ok"] is True
     assert payload["checks"]["V5"] is True
+
+
+def test_ask_accepts_context():
+    first, _ = _call("ask", {"question": "比亚迪 2025 年的营业收入是多少？", "tier": "metric"})
+    payload, is_error = _call(
+        "ask",
+        {
+            "question": "那 2024 年呢？",
+            "tier": "metric",
+            "context": {"previous_slots": first["resolved_slots"]},
+        },
+    )
+    assert not is_error
+    assert payload["resolved_question"].startswith("比亚迪 2024 年")
+    assert "company" in payload["inherited"] and "metric" in payload["inherited"]

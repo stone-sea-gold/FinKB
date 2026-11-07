@@ -70,6 +70,14 @@ else
 fi
 
 echo
+echo "== 多轮上下文（12 组宿主模拟）=="
+if [ -f data/facts.duckdb ] && [ -f data/_search/chunks.db ]; then
+  "$PYTHON" ../eval/check_context.py
+else
+  echo "跳过：data/facts.duckdb 或 data/_search/chunks.db 不存在"
+fi
+
+echo
 echo "== 金标事实集 =="
 if [ -f data/facts.duckdb ]; then
   "$PYTHON" tools/gold_check.py --db data/facts.duckdb --gold config/gold_facts.yaml

@@ -14,7 +14,8 @@ import duckdb
 
 from finkb.fact_engine.selector import FINKB_ROOT
 from finkb.ontology.operators import note_drill_down
-from finkb.qa import fact_lane
+from finkb.qa import fact_lane, understanding as understanding_mod
+from finkb.qa.understanding import Understanding
 
 FACT_DB = FINKB_ROOT / "data" / "facts.duckdb"
 SCOPE_PATH = FINKB_ROOT / "config" / "wiki_scope.yaml"
@@ -42,11 +43,6 @@ def _load_companies() -> dict[str, str]:
 
     raw = yaml.safe_load(Path(SCOPE_PATH).read_text(encoding="utf-8"))
     return {str(item["company"]): str(item["company_name"]) for item in raw.get("docs", [])}
-
-
-def _periods(question: str) -> list[str]:
-    slot = fact_lane.extract(question)
-    return slot.periods
 
 
 def _class_hits(class_id: str, periods: list[str]) -> list[dict]:
@@ -80,8 +76,9 @@ def _class_hits(class_id: str, periods: list[str]) -> list[dict]:
         con.close()
 
 
-def answer_ontology(question: str) -> dict | None:
-    periods = _periods(question)
+def answer_ontology(question: str, *, understanding: Understanding | None = None) -> dict | None:
+    u = understanding or fact_lane.extract(question)
+    periods = u.periods
     companies = _load_companies()
     # 1) 数值定义类
     for class_id, aliases in CLASS_ALIASES.items():
@@ -98,7 +95,7 @@ def answer_ontology(question: str) -> dict | None:
     for keyword, rel_type in REL_KEYWORDS.items():
         if keyword not in question:
             continue
-        slot = fact_lane.extract(question)
+        slot = u
         if not slot.companies:
             return None
         company = slot.companies[0]
@@ -129,7 +126,7 @@ def answer_ontology(question: str) -> dict | None:
         return {"route": "ontology", "question": question, "text": text, "data": {"rel_type": rel_type, "edges": [{"dst": n, "doc": d, "page": int(p)} for n, d, p in rows]}, "ledger": ledger, "citations": citations}
     # 3) 附注穿透
     if "附注" in question:
-        slot = fact_lane.extract(question)
+        slot = u
         if slot.metric and slot.companies and slot.periods:
             con = duckdb.connect(str(FACT_DB), read_only=True)
             try:
@@ -199,10 +196,19 @@ def _report_type(question: str, periods: list[str]) -> str | None:
     return None
 
 
-def answer_text(question: str, limit: int = 5) -> dict:
+def answer_text(
+    question: str,
+    limit: int = 5,
+    *,
+    understanding: Understanding | None = None,
+    query: str | None = None,
+) -> dict:
     from finkb.search import hybrid
 
-    slot = fact_lane.extract(question)
+    slot = understanding or fact_lane.extract(question)
+    # 多轮追问：检索用补全后的完整问题，而不是“那 2024 年呢”这种缺主语的片段。
+    if query is None:
+        query = understanding_mod.resolved_question(question, slot) if slot.inherited else question
     base: dict = {}
     if slot.companies:
         base["company"] = slot.companies[0]
@@ -216,7 +222,7 @@ def answer_text(question: str, limit: int = 5) -> dict:
     attempts.append({})
     results: list[dict] = []
     for filters in attempts:
-        results = hybrid.search(question, limit=limit, filters=filters or None)
+        results = hybrid.search(query, limit=limit, filters=filters or None)
         if results:
             break
     ledger: list[dict] = []
@@ -231,7 +237,7 @@ def answer_text(question: str, limit: int = 5) -> dict:
         evidence.append({
             "chunk_id": item["chunk_id"], "doc_id": item["doc_id"], "page_num": int(item["page_num"]),
             "section": item.get("section", ""),
-            "snippet": _table_snippet(item["text"]) if item.get("block_type") == "table" else _snippet(item["text"], question),
+            "snippet": _table_snippet(item["text"]) if item.get("block_type") == "table" else _snippet(item["text"], query),
         })
         citations.append(f"[Ref: {item['doc_id']}#P{item['page_num']}]")
         if len(evidence) >= 3:
@@ -251,9 +257,9 @@ def _refuse(question: str, reason: str) -> dict:
     return {"route": "fact", "question": question, "refused": True, "text": reason, "data": {}, "ledger": [], "citations": []}
 
 
-def precheck(question: str) -> dict | None:
+def precheck(question: str, *, understanding: Understanding | None = None) -> dict | None:
     """进入三档前的确定性拒答；返回 None 表示交给 pipeline。"""
-    slot = fact_lane.extract(question)
+    slot = understanding or fact_lane.extract(question)
     if any(token in question for token in OUT_OF_SCOPE_TOKENS):
         return _refuse(question, "问题涉及的指标不在本项目语料范围内。")
     aggregate = any(word in question for word in ("哪些", "所有", "各公司", "全部"))

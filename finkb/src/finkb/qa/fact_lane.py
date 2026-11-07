@@ -152,9 +152,12 @@ def _refusal(question: str, text: str, data: dict | None = None) -> dict:
     }
 
 
-def answer(question: str) -> dict | None:
-    """回答事实类问题；抽不出槽位或查不到数据时返回 None（交给其它通道）。"""
-    slot = extract(question)
+def answer(question: str, *, understanding: Understanding | None = None) -> dict | None:
+    """回答事实类问题；抽不出槽位或查不到数据时返回 None（交给其它通道）。
+
+    ``understanding`` 由 pipeline 传入（可能已合并上一轮槽位），避免重复解析。
+    """
+    slot = understanding or extract(question)
     if slot.unresolved:
         words = "、".join(slot.unresolved)
         return _refusal(

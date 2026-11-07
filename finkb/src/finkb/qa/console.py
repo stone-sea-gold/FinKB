@@ -21,9 +21,10 @@ def run(
     as_json: bool = False,
     audit: bool = False,
     synthesize: bool | None = None,
+    context: dict | None = None,
 ) -> tuple[str, int]:
     """回答一个问题并返回（要打印的文本, 退出码）。"""
-    payload = ask(question, tier=tier, synthesize=synthesize)
+    payload = ask(question, tier=tier, synthesize=synthesize, context=context)
     if audit:
         audit_log({**payload, "question": question})
     rendered, used = render(payload.get("text", ""), payload.get("ledger", []))
@@ -41,6 +42,14 @@ def run(
     )
     if explain:
         lines.extend("  " + json.dumps(step, ensure_ascii=False) for step in payload.get("trace", []))
+    resolved = payload.get("resolved_question")
+    if resolved and resolved != question:
+        inherited = payload.get("inherited") or []
+        suffix = f"（继承：{'、'.join(inherited)}）" if inherited else ""
+        lines.append(f"理解：{resolved}{suffix}")
+    clarify = payload.get("clarify") or {}
+    if clarify:
+        lines.append(f"需要补充：{clarify.get('message', '')}")
     lines.append(f"答案：{rendered}")
     if payload.get("ledger"):
         lines.append("账本：")

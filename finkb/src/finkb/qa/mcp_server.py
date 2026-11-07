@@ -81,12 +81,16 @@ TOOLS = [
     },
     {
         "name": "ask",
-        "description": "三档问答（metric 指标 / ontology 本体 / document 文档），返回答案、档位、置信度与引用。",
+        "description": "三档问答（metric 指标 / ontology 本体 / document 文档），返回答案、档位、置信度与引用。可传上一轮 context 做多轮追问。",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "question": {"type": "string", "description": "自然语言问题"},
                 "tier": {"type": "string", "enum": ["auto", "metric", "ontology", "document"]},
+                "context": {
+                    "type": "object",
+                    "description": "上一轮结构化槽位：{previous_question?, previous_slots?: {companies, company_names, periods, metric, qualifiers}}；项目只做确定性继承，不保存会话。",
+                },
             },
             "required": ["question"],
         },
@@ -214,7 +218,11 @@ def call_tool(name: str, args: dict) -> dict:
     if name == "rebuild_index":
         return library.rebuild_indexes(bool(args.get("embed")))
     if name == "ask":
-        return ask_pipeline(str(args["question"]), tier=args.get("tier", "auto"))
+        return ask_pipeline(
+            str(args["question"]),
+            tier=args.get("tier", "auto"),
+            context=args.get("context"),
+        )
     if name == "query_metric":
         con = _connect()
         try:

@@ -59,14 +59,22 @@ def residual_qualifiers(question: str) -> list[str]:
     return understanding.residual_qualifiers(question)
 
 
-def precheck(question: str) -> dict | None:
+def precheck(question: str, *, understanding: understanding.Understanding | None = None) -> dict | None:
     """进入档位前的确定性拒答；返回 None 表示放行。"""
     from finkb.qa import answer as answer_mod
 
-    return answer_mod.precheck(question)
+    return answer_mod.precheck(question, understanding=understanding)
 
 
-def _envelope(question: str, tier: str, payload: dict, trace: list[dict], *, confidence: float | None = None) -> dict:
+def _envelope(
+    question: str,
+    tier: str,
+    payload: dict,
+    trace: list[dict],
+    *,
+    confidence: float | None = None,
+    meta: dict | None = None,
+) -> dict:
     body = dict(payload)
     body.setdefault("data", {})
     body.setdefault("ledger", [])
@@ -77,12 +85,23 @@ def _envelope(question: str, tier: str, payload: dict, trace: list[dict], *, con
     body["route"] = ROUTE_BY_TIER[tier]
     body["confidence"] = 0.0 if refused else (confidence if confidence is not None else CONFIDENCE[tier])
     body["trace"] = trace
+    if meta:
+        # 只增不改：多轮上下文元数据（resolved_question/resolved_slots/inherited/clarify）。
+        body.update(meta)
     return body
 
 
-def _refusal(question: str, tier: str, text: str, trace: list[dict], *, reason: str) -> dict:
+def _refusal(
+    question: str,
+    tier: str,
+    text: str,
+    trace: list[dict],
+    *,
+    reason: str,
+    meta: dict | None = None,
+) -> dict:
     trace.append({"step": "refuse", "tier": tier, "reason": reason, "detail": text})
-    return _envelope(question, tier, {"refused": True, "text": text}, trace, confidence=0.0)
+    return _envelope(question, tier, {"refused": True, "text": text}, trace, confidence=0.0, meta=meta)
 
 
 def _backend_for(synthesize: bool | object | None):
@@ -143,9 +162,20 @@ def _synthesize(question: str, tier: str, payload: dict, backend, trace: list[di
     return body
 
 
-def _plan(question: str, order: list[str], caps: dict[str, bool], trace: list[dict]) -> list[str]:
-    """根据能力/路由提示/残差门裁剪档位顺序，并把原因写进 trace。"""
-    hint = router_route(question).name
+def _plan(
+    question: str,
+    query: str,
+    order: list[str],
+    caps: dict[str, bool],
+    trace: list[dict],
+    u: understanding.Understanding,
+) -> list[str]:
+    """根据能力/路由提示/残差门裁剪档位顺序，并把原因写进 trace。
+
+    ``query`` 是补全后的完整问题（多轮追问时含继承槽位），用于路由与残差判断；
+    ``question`` 保留原始追问里的意图词（附注/子公司等），避免补全后丢失。
+    """
+    hint = router_route(query).name
     trace.append({"step": "router_hint", "hint": hint})
 
     planned = list(order)
@@ -163,10 +193,11 @@ def _plan(question: str, order: list[str], caps: dict[str, bool], trace: list[di
     if hint == "ontology":
         planned = [tier for tier in planned if tier != "metric"]
         trace.append({"step": "hint", "effect": "skip-metric", "tiers": planned})
-    if "附注" in question and fact_lane.extract(question).metric is not None:
+    intent_text = question + " " + query
+    if "附注" in intent_text and u.metric is not None:
         planned = [tier for tier in planned if tier != "metric"]
         trace.append({"step": "hint", "effect": "note-drill", "tiers": planned})
-    residual = residual_qualifiers(question)
+    residual = residual_qualifiers(query)
     if residual and "metric" in planned:
         planned.remove("metric")
         trace.append({"step": "residual_gate", "status": "downgrade", "qualifiers": residual})
@@ -180,38 +211,63 @@ def ask(
     explain: bool = False,
     capabilities_override: dict[str, bool] | None = None,
     synthesize: bool | object | None = None,
+    context: dict | None = None,
 ) -> dict:
     """按三档契约回答；``tier`` 可强制指定某一档（不可用时拒答）。
 
     ``synthesize``：None=按 ``FINKB_LLM_SYNTH`` 环境变量；False=抽取式；
     True=尝试项目后端；也可直接注入实现了 ``chat_json`` 的后端（测试/宿主用）。
     metric 档始终走确定性模板，不调 LLM（设计 §10）。
+
+    ``context``：宿主传入的上一轮结构化槽位（``previous_slots``，可选
+    ``previous_question`` 兜底）。项目只做确定性继承，不保存会话；补不全时
+    返回 ``clarify``，由宿主决定怎么追问（P5 契约）。
     """
     if tier != "auto" and tier not in TIERS:
         raise ValueError(f"tier 只能是 auto/{'/'.join(TIERS)}")
     caps = capabilities_override if capabilities_override is not None else capabilities()
     trace: list[dict] = [{"step": "capability", "available": caps}]
 
-    refused = precheck(question)
+    u = understanding.understand(question, context=context)
+    meta = understanding.context_meta(question, u)
+    query = meta["resolved_question"]
+    if context:
+        trace.append(
+            {
+                "step": "context",
+                "used": u.context_used,
+                "inherited": u.inherited,
+                "overridden": u.overridden,
+                "missing": meta["missing"],
+            }
+        )
+
+    refused = precheck(question, understanding=u)
     if refused is not None:
-        return _envelope(question, "metric", refused, trace, confidence=0.0)
+        return _envelope(question, "metric", refused, trace, confidence=0.0, meta=meta)
 
     if tier != "auto":
         if not caps.get(tier):
-            return _refusal(question, tier, f"{TIER_LABELS[tier]}不可用（数据或索引缺失）。", trace, reason="tier-unavailable")
+            return _refusal(
+                question, tier, f"{TIER_LABELS[tier]}不可用（数据或索引缺失）。", trace,
+                reason="tier-unavailable", meta=meta,
+            )
         order = [tier]
     else:
         order = list(TIERS)
 
-    planned = _plan(question, order, caps, trace)
+    planned = _plan(question, query, order, caps, trace, u)
     if not planned:
-        return _refusal(question, "document", "三个通道都不可用：缺少事实库/本体推断/检索索引。", trace, reason="no-capability")
+        return _refusal(
+            question, "document", "三个通道都不可用：缺少事实库/本体推断/检索索引。", trace,
+            reason="no-capability", meta=meta,
+        )
 
     from finkb.qa import answer as answer_mod
 
     for attempt in planned:
         if attempt == "metric":
-            payload = fact_lane.answer(question)
+            payload = fact_lane.answer(question, understanding=u)
             if payload is None:
                 trace.append({"step": "attempt", "tier": "metric", "status": "miss"})
                 # 数值题命中指标但查不到数据：明确拒答，不降级去答别的问题。
@@ -219,22 +275,25 @@ def ask(
                     return _refusal(
                         question, "metric",
                         "没有找到对应的事实数据（可能指标、公司或期间不在语料内）。",
-                        trace, reason="metric-no-data",
+                        trace, reason="metric-no-data", meta=meta,
                     )
                 continue
             trace.append({"step": "attempt", "tier": "metric", "status": "hit"})
-            return _envelope(question, "metric", payload, trace)
+            return _envelope(question, "metric", payload, trace, meta=meta)
         if attempt == "ontology":
-            payload = answer_mod.answer_ontology(question)
+            payload = answer_mod.answer_ontology(query, understanding=u)
             if payload is None:
                 trace.append({"step": "attempt", "tier": "ontology", "status": "miss"})
                 continue
             trace.append({"step": "attempt", "tier": "ontology", "status": "hit"})
-            payload = _synthesize(question, "ontology", payload, _backend_for(synthesize), trace)
-            return _envelope(question, "ontology", payload, trace)
-        payload = answer_mod.answer_text(question)
+            payload = _synthesize(query, "ontology", payload, _backend_for(synthesize), trace)
+            return _envelope(question, "ontology", payload, trace, meta=meta)
+        payload = answer_mod.answer_text(question, understanding=u, query=query)
         trace.append({"step": "attempt", "tier": "document", "status": "hit" if not payload.get("refused") else "refused"})
-        payload = _synthesize(question, "document", payload, _backend_for(synthesize), trace)
-        return _envelope(question, "document", payload, trace, confidence=0.4 if payload.get("refused") else None)
+        payload = _synthesize(query, "document", payload, _backend_for(synthesize), trace)
+        return _envelope(
+            question, "document", payload, trace,
+            confidence=0.4 if payload.get("refused") else None, meta=meta,
+        )
 
-    return _refusal(question, planned[-1], "没有找到能回答这个问题的证据。", trace, reason="all-miss")
+    return _refusal(question, planned[-1], "没有找到能回答这个问题的证据。", trace, reason="all-miss", meta=meta)

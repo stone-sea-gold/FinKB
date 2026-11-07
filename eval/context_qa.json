@@ -1,0 +1,102 @@
+{
+  "version": 1,
+  "description": "多轮上下文验收（宿主模拟）：每轮把上一轮的 resolved_slots 传回 pipeline.ask，检查槽位继承/覆盖与补全问题。",
+  "cases": [
+    {
+      "id": "C01",
+      "topic": "换期间：继承公司与指标",
+      "turns": [
+        {"question": "比亚迪 2025 年营业收入是多少？", "expect": {"tier": "metric", "refused": false}},
+        {"question": "那 2024 年呢？", "expect": {"tier": "metric", "refused": false, "inherited": ["company", "metric"], "overridden": ["period"], "resolved_contains": ["2024"], "slots": {"periods": ["2024"], "metric": "revenue"}}}
+      ]
+    },
+    {
+      "id": "C02",
+      "topic": "换公司：继承期间与指标",
+      "turns": [
+        {"question": "比亚迪 2025 年营业收入是多少？", "expect": {"tier": "metric", "refused": false}},
+        {"question": "美的集团呢？", "expect": {"tier": "metric", "refused": false, "inherited": ["period", "metric"], "overridden": ["company"], "resolved_contains": ["美的集团"], "slots": {"companies": ["000333"], "metric": "revenue"}}}
+      ]
+    },
+    {
+      "id": "C03",
+      "topic": "换指标：继承公司与期间",
+      "turns": [
+        {"question": "比亚迪 2025 年营业收入是多少？", "expect": {"tier": "metric", "refused": false}},
+        {"question": "那归母净利润呢？", "expect": {"tier": "metric", "refused": false, "inherited": ["company", "period"], "overridden": ["metric"], "resolved_contains": ["净利润"], "slots": {"metric": "net_profit"}}}
+      ]
+    },
+    {
+      "id": "C04",
+      "topic": "三连追问：期间→指标，SQL 计算指标不静默继承",
+      "turns": [
+        {"question": "比亚迪 2025 年营业收入是多少？", "expect": {"tier": "metric", "refused": false}},
+        {"question": "那 2024 年呢？", "expect": {"tier": "metric", "refused": false, "inherited": ["company", "metric"], "overridden": ["period"]}},
+        {"question": "那毛利率呢？", "expect": {"inherited": ["company", "period"], "resolved_contains": ["毛利率"], "slots": {"metric": null}}}
+      ]
+    },
+    {
+      "id": "C05",
+      "topic": "换话题：公司/期间/指标全部显式覆盖",
+      "turns": [
+        {"question": "比亚迪 2025 年营业收入是多少？", "expect": {"tier": "metric", "refused": false}},
+        {"question": "美的集团 2024 年营业收入是多少？", "expect": {"tier": "metric", "refused": false, "inherited": [], "overridden": ["company", "period"]}}
+      ]
+    },
+    {
+      "id": "C06",
+      "topic": "澄清后补槽位",
+      "turns": [
+        {"question": "营业收入是多少？", "expect": {"refused": true, "clarify_missing": ["company", "period"]}},
+        {"question": "比亚迪 2025 年", "expect": {"tier": "metric", "refused": false, "inherited": ["metric"], "resolved_contains": ["比亚迪", "2025", "营业总收入"]}}
+      ]
+    },
+    {
+      "id": "C07",
+      "topic": "无 context 时不补全、不改变原有行为",
+      "turns": [
+        {"question": "比亚迪 2025 年营业收入是多少？", "expect": {"tier": "metric", "refused": false, "inherited": [], "overridden": [], "context_used": false, "resolved_equals_question": true}}
+      ]
+    },
+    {
+      "id": "C08",
+      "topic": "文档追问：继承公司与期间",
+      "turns": [
+        {"question": "比亚迪 2025 年报海外布局如何？", "expect": {"tier": "document"}},
+        {"question": "那海外市场呢？", "expect": {"tier": "document", "inherited": ["company", "period"], "resolved_contains": ["比亚迪", "2025", "海外"]}}
+      ]
+    },
+    {
+      "id": "C09",
+      "topic": "本体定义类追问：期间覆盖后用上一轮意图补全",
+      "turns": [
+        {"question": "哪些公司 2025 年资产负债率超过 70%？", "expect": {"tier": "ontology"}},
+        {"question": "那 2024 年呢？", "expect": {"tier": "ontology", "overridden": ["period"], "resolved_contains": ["资产负债率", "2024"], "slots": {"periods": ["2024"]}}}
+      ]
+    },
+    {
+      "id": "C10",
+      "topic": "附注追问：保留附注意图",
+      "turns": [
+        {"question": "比亚迪 2025 年存货是多少？", "expect": {"tier": "metric", "refused": false}},
+        {"question": "附注呢？", "expect": {"tier": "ontology", "inherited": ["company", "period", "metric"], "resolved_contains": ["附注"], "text_contains": ["附注页"]}}
+      ]
+    },
+    {
+      "id": "C11",
+      "topic": "关系边追问：继承公司与期间",
+      "turns": [
+        {"question": "比亚迪 2025 年报有哪些子公司？", "expect": {"tier": "ontology"}},
+        {"question": "那关联方呢？", "expect": {"tier": "ontology", "inherited": ["company", "period"], "resolved_contains": ["关联方"]}}
+      ]
+    },
+    {
+      "id": "C12",
+      "topic": "previous_question 兜底：宿主只传上一轮问题",
+      "turns": [
+        {"question": "美的集团 2025 年营业收入是多少？", "expect": {"tier": "metric", "refused": false, "context_mode": "previous_question"}},
+        {"question": "那 2024 年呢？", "expect": {"tier": "metric", "refused": false, "inherited": ["company", "metric"], "overridden": ["period"], "resolved_contains": ["美的", "2024"], "context_mode": "previous_question"}}
+      ]
+    }
+  ]
+}
