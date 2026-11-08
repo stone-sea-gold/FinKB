@@ -11,8 +11,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
+import shutil
 import re
 import sqlite3
 from functools import lru_cache
@@ -85,14 +87,78 @@ def _embed_resumable(chunks: list[dict], embedder: Embedder, parts_dir: Path) ->
     return np.vstack(vectors)
 
 
+def _text_hash(text: str) -> str:
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()
+
+
+def _embed_incremental(
+    chunks: list[dict], embedder: Embedder, target: Path, manifest_path: Path
+) -> tuple[np.ndarray, dict, int] | None:
+    """只对新增/变化的块算向量，其余按 chunk_id + 文本哈希复用旧向量。
+
+    返回 None 表示没有可用的旧索引（需要全量重算）。
+    """
+    if not (target.exists() and manifest_path.exists()):
+        return None
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    ids = manifest.get("ids") or []
+    hashes = manifest.get("hashes") or []
+    dims = int(manifest.get("dims") or 0)
+    if len(ids) != len(hashes) or dims != int(getattr(embedder, "dims", 0) or 0):
+        return None
+    model = getattr(embedder, "model", None)
+    if model and manifest.get("model") and manifest["model"] != model:
+        return None
+    old = np.load(target, mmap_mode="r")
+    if old.shape[0] != len(ids) or old.shape[1] != dims:
+        return None
+    index = {chunk_id: position for position, chunk_id in enumerate(ids)}
+    rows = np.empty((len(chunks), dims), dtype=np.float32)
+    missing: list[int] = []
+    new_hashes: list[str] = []
+    for position, chunk in enumerate(chunks):
+        text_hash = _text_hash(chunk["text"])
+        new_hashes.append(text_hash)
+        previous = index.get(chunk["chunk_id"])
+        if previous is not None and hashes[previous] == text_hash:
+            rows[position] = old[previous]
+        else:
+            missing.append(position)
+    if missing:
+        texts = [chunks[position]["text"] for position in missing]
+        batch = int(getattr(embedder, "batch_size", 64) or 64)
+        done = 0
+        reused = len(chunks) - len(missing)
+        for start in range(0, len(texts), batch):
+            block = np.asarray(embedder.embed(texts[start : start + batch]), dtype=np.float32)
+            for offset, vector in enumerate(block):
+                rows[missing[start + offset]] = vector
+            done += len(block)
+            if (start // batch) % 20 == 0:
+                print(f"embedded {done}/{len(texts)}（复用 {reused} 块）", flush=True)
+    return (
+        rows,
+        {"ids": [chunk["chunk_id"] for chunk in chunks], "hashes": new_hashes, "dims": dims, "model": model or ""},
+        len(chunks) - len(missing),
+    )
+
+
 def build_index(
     chunks_path: str | Path | None = None,
     db_path: str | Path | None = None,
     vectors_path: str | Path | None = None,
     embedder: Embedder | None = None,
     limit: int | None = None,
+    incremental: bool = True,
 ) -> dict:
-    """建 FTS5 索引；给了 embedder 就同时算稠密向量。"""
+    """建 FTS5 索引；给了 embedder 就同时算稠密向量。
+
+    ``incremental=True`` 时，和旧 ``vectors.npy`` + 清单比对，只算新增/改文本的块；
+    旧清单缺失、维度/模型不一致时自动退回全量。
+    """
     chunks = load_chunks(chunks_path)
     if limit:
         chunks = chunks[:limit]
@@ -147,9 +213,35 @@ def build_index(
     if embedder is not None:
         target = Path(vectors_path or VECTORS_PATH)
         target.parent.mkdir(parents=True, exist_ok=True)
-        vectors = _embed_resumable(chunks, embedder, target.parent / "vectors_parts")
+        manifest_path = target.parent / "vectors_manifest.json"
+        reused = 0
+        if incremental:
+            built = _embed_incremental(chunks, embedder, target, manifest_path)
+            if built is not None:
+                vectors, manifest, reused = built
+            else:
+                # 有旧 vectors 却没有清单：分片可能对应旧 chunks 顺序，不能复用
+                if target.exists():
+                    shutil.rmtree(target.parent / "vectors_parts", ignore_errors=True)
+                vectors = _embed_resumable(chunks, embedder, target.parent / "vectors_parts")
+                manifest = {
+                    "ids": [chunk["chunk_id"] for chunk in chunks],
+                    "hashes": [_text_hash(chunk["text"]) for chunk in chunks],
+                    "dims": int(vectors.shape[1]) if vectors.size else 0,
+                    "model": getattr(embedder, "model", "") or "",
+                }
+        else:
+            shutil.rmtree(target.parent / "vectors_parts", ignore_errors=True)
+            vectors = _embed_resumable(chunks, embedder, target.parent / "vectors_parts")
+            manifest = {
+                "ids": [chunk["chunk_id"] for chunk in chunks],
+                "hashes": [_text_hash(chunk["text"]) for chunk in chunks],
+                "dims": int(vectors.shape[1]) if vectors.size else 0,
+                "model": getattr(embedder, "model", "") or "",
+            }
         np.save(target, vectors)
-        stats.update({"vectors": str(target), "dims": int(vectors.shape[1])})
+        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+        stats.update({"vectors": str(target), "dims": int(vectors.shape[1]), "reused": reused})
     return stats
 
 

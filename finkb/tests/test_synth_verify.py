@@ -173,3 +173,46 @@ def test_compose_verified_without_backend():
     result, verification = compose_verified("问题", _metric_pack(), None)
     assert result is None
     assert not verification.ok
+
+
+def _paragraph_pack():
+    return build_pack(
+        "中国神华 2025 年报里，公司如何描述煤炭产销情况？",
+        {
+            "tier": "document",
+            "route": "text",
+            "data": {
+                "evidence": [
+                    {
+                        "chunk_id": "601088_2025_年报:p17:1",
+                        "doc_id": "601088_2025_年报",
+                        "page_num": 17,
+                        "section": "煤炭业务",
+                        "snippet": "本集团生产及销售的煤炭产品主要为动力煤，本集团拥有独立运营的铁路集疏运通道。2025 年商品煤产量保持稳定。",
+                    }
+                ]
+            },
+            "citations": ["[Ref: 601088_2025_年报#P17]"],
+        },
+    )
+
+
+def test_v4_allows_paragraph_citation_inheritance_when_text_matches():
+    result = SynthesisResult(
+        answer="本集团生产及销售的煤炭产品主要为动力煤。2025 年商品煤产量保持稳定。[Ref: 601088_2025_年报#P17]",
+        used_ids=[],
+    )
+    verification = verify_synthesis(result, _paragraph_pack(), check_pages=False)
+    assert verification.ok, verification.errors
+    assert verification.checks["V4"] is True
+    assert any("段落引用继承" in warning for warning in verification.warnings)
+
+
+def test_v4_rejects_inherited_sentence_not_in_source():
+    result = SynthesisResult(
+        answer="公司未来将大幅扩大海外投资并进入更多新的国家市场。本集团生产及销售的煤炭产品主要为动力煤。[Ref: 601088_2025_年报#P17]",
+        used_ids=[],
+    )
+    verification = verify_synthesis(result, _paragraph_pack(), check_pages=False)
+    assert not verification.ok
+    assert verification.checks["V4"] is False

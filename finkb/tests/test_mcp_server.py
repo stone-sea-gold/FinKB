@@ -76,6 +76,9 @@ def test_ask_metric_tier():
     assert payload["tier"] == "metric"
     assert payload["refused"] is False
     assert payload["ledger"]
+    # 宿主直接展示 text，占位符必须在 MCP 层渲染掉
+    assert "{{" not in payload["text"]
+    assert "8039.65" in payload["text"]
 
 
 def test_query_metric_returns_exact_value():

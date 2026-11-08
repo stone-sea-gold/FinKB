@@ -71,7 +71,7 @@ finkb/
 ├── scripts/check.sh                # 一条命令验收（测试 + 语料基线 + 金标）
 ├── config/corpus-baseline.json     # 29 文档 × 5 个数字的退步基线
 ├── config/metric_dict.yaml        # L1 指标字典 v3（36 个指标 / 80 个别名）
-├── config/wiki_scope.yaml         # L2 编译范围（29 份全登记）
+├── config/wiki_scope.yaml         # L2 编译范围（32 份全登记）
 ├── config/wiki_queries.yaml       # L2 命名 SQL（同比 / 资产负债率 / 三项利润率）
 └── data/parsed/                    # 解析产物（不进 git）
 ```
@@ -79,13 +79,13 @@ finkb/
 ## 一条命令验收
 
 ```bash
-scripts/check.sh            # 单元测试 + 29 份产物的守恒律
+scripts/check.sh            # 单元测试 + 32 份产物的守恒律
 ```
 
 想单独看某一项：
 
 ```bash
-python tools/audit.py corpus                       # 29 份的体检表（有表头率/裸表/守恒律/数字异常）
+python tools/audit.py corpus                       # 32 份的体检表（有表头率/裸表/守恒律/数字异常/解析质量）
 python tools/audit.py invariants --doc data/parsed/002594_2025_年报   # 单份 16 条守恒律
 python tools/audit.py verify-cells --doc ... --pdf ...               # 数字是否都能在 PDF 原文找到
 python tools/audit.py recall --doc ... --pdf ...                     # 原文的数字是否都进了表
@@ -146,6 +146,7 @@ finkb-mcp --home ~/finkb-data                    # 指定用户本地库（也�
 # 合成 2 个工具：evidence（取证据包）/ verify（校验宿主答案）
 # 对比 1 个工具：compare（同一指标多期间并排）
 # 本地库 6 个工具：init_library / library_status / list_documents / add_document / remove_document / rebuild_index
+# ask 返回的 text 已在 MCP 层按账本渲染（宿主可直接展示）；ledger 仍保留供审计
 python -m finkb.qa "比亚迪 2025 年营业收入是多少亿元？" --audit-log
 # 审计日志默认 data/qa_audit.jsonl（已 gitignore），可用 FINKB_QA_AUDIT 改路径
 ```
@@ -195,7 +196,7 @@ finkb ask "那 2024 年呢？" --context '{"previous_question":"比亚迪 2025 �
 
 ## 本地知识库（用户自建，v1）
 
-项目自带的 29 份年报及其 facts / 向量 / wiki **不随分发提供**；用户用自己的年报建库。
+项目自带的 32 份年报及其 facts / 向量 / wiki **不随分发提供**；用户用自己的年报建库。
 所有用户数据放在 `FINKB_HOME`（默认：源码树 `finkb/`；pip 安装后 `~/.finkb`）：
 
 ```bash
@@ -231,10 +232,12 @@ python -m finkb.ontology.quality --db data/facts.duckdb      # 本体结构质�
 python -m finkb.fact_engine.data_check --db data/facts.duckdb # 约束求值/实体回填/附注覆盖
 cd .. && .venv/bin/python eval/recall.py --no-dense --min-recall 0.9  # 离线召回 + MRR
 cd .. && .venv/bin/python eval/check_context.py                       # 多轮上下文 12 组
+python scripts/mcp_protocol_check.py                                # MCP stdio 协议 7 链路
+python tools/audit.py corpus --baseline config/corpus-baseline.json --pdf-root ../raw  # 含解析质量列
 ```
 
 批量编译器在 `finkb/.tmp/batch_compile.py`（读 `config/wiki_scope.yaml`，逐份编译并写
-`.tmp/batch_compile.log`；29 份约 22 分钟）。`wiki init/compile` 需要 `LLM_API_KEY`；
+`.tmp/batch_compile.log`；32 份约 25 分钟）。`wiki init/compile` 需要 `LLM_API_KEY`；
 `lint` 与 `search` 全离线。
 
 `verify-cells` / `recall` 需要 PDF 与 `PyMuPDF`（已装）；其余全离线。
@@ -438,21 +441,22 @@ result.stitch.records           # 审计记录（页码序列 + 缝合理由）
 - 页码是长块里的一行 → 只在文本块头/尾 `scan_*_lines` 范围内生效；
 - 页码是**独立块**（MinerU 常见）→ 整块只有一个非空行时单独立判定。
 
-## 已验证（29 份 / 14 家公司）
+## 已验证（32 份 / 17 家公司）
 
 | 项 | 结果 |
 |---|---|
-| 测试 | **547 项通过**，离线 |
-| 语料 | 29 份 / 14 家公司 / 4791 页 / 10 类版式 |
-| 逻辑表 | 6130 张；有表头 **5729（93.5%）** |
-| 守恒律 | **359/359**（年报 16 条 / 半年报 13 条 / 季报 10 条） |
-| 数值回查 | 36026 个抽样中 6 个查不到（99.98%，均为 MinerU 粘格） |
-| 跨页缝合 | 28 张；列数不一致拒绝 21 条，逐条带原因 |
+| 测试 | **659 项通过**，离线 |
+| 语料 | 32 份 / 17 家公司 / 5,779 页 / 10 类版式 |
+| 逻辑表 | **7,240 张**；有表头 **6,746（93.2%）** |
+| 守恒律 | 32 份全部通过；`config/corpus-baseline.json` 0 退步 |
+| 数值回查 | 文字层页全部命中；扫描页（无文字层）单列 OCR 表并提示人工审查 |
+| 解析质量 | 新增 `report.json["quality"]`：空表/图表页/纯图片页/未覆盖页可查（ADR-071） |
 | 原文召回 | 18 份实测 100%：PDF 里的数字没有整表丢失 |
-| L1 事实层 | **29 份唯一库 1,830 条**（0 未匹配、0 列缺口，42 组资产负债权益全平）；金标事实集 72/72 |
-| L2 知识层 | **153 页 active**（29 摘要 + 107 探针 + 14 实体 + 3 概念）、lint 0 错 0 警；claims 1,578 条；`segment_facts` 255 条、`relations` 4,437 条、`conflicts` 1 组 |
+| L1 事实层 | **32 份唯一库 2,019 条**（0 未匹配）；关系 5,226 条、实体 1,825；金标事实集 72/72 |
+| L2 知识层 | **202 页**（32 摘要 + 121 探针 + 14 实体 + 3 概念 + 30 报告页等）、lint 0 错 0 警；claims 1,578 条 |
 | L0.5 本体 | 62 概念 / 71 关系 / 10 约束；定义类 96 命中、关系边推出 378、OWL RL 2,999 三元组；audit 七跳 0 断点 |
-| 检索与问答 | 块级索引 15,764 块；20 题文字 Recall@5 1.00（带过滤）；`eval/check.py` 15/15；`eval/check_qa.py` 50/50 |
+| 检索与问答 | 块级索引 **19,334 块**；20 题文字 Recall@5 1.00（带过滤）；`eval/check.py` 15/15；`eval/check_qa.py` 50/50 |
+| 合成 | 真实 LLM 15 题 **15/15**（`eval/check_synth.py`，默认关闭） |
 
 以上数字由 `python tools/audit.py corpus` 复现；退步由 `config/corpus-baseline.json` 判定。
 
@@ -465,7 +469,17 @@ result.stitch.records           # 审计记录（页码序列 + 缝合理由）
 | 事实层 | **2,019 条**（+189：601668 64 / 688235 66 / 601899 59）、0 未匹配；关系 5,227 条；实体 1,825 |
 | 检索层 | 块 **19,334**（text 11,573 / table 7,761）；`vectors.npy` 75.4MB；wiki **202 页** |
 | 解析兜底 | MinerU 空 `table_body` 页用 PDF 文字层补回（601668 +12 / 688235 +22 / 601899 +4 页）；新问题见 `PDF解析细节.md` §11 |
-| 验证 | 三家公司 metric/文本问答通过；全套 **639 项测试**；`check.sh` 全绿 |
+| 验证 | 三家公司 metric/文本问答通过；合成真实 LLM **15/15**；全套 **659 项测试**；`check.sh` 全绿 |
+
+## 2026-11-08 稳定性改进（遗留问题 ①③⑦⑧）
+
+| 项 | 结果 |
+|---|---|
+| 合成评测 ① | V4 允许“段落引用继承”（句子能在所引原文里找到即算有引用），prompt 明确“facts 为空时用片段作答、不得以缺 cN 拒答”；真实 LLM 15 题连续两轮 **15/15** |
+| 解析质量 ③ | `report.json` 新增 `quality`（空表/图表页/纯图片页/未覆盖页），CLI 打印告警，`audit corpus` 新增三列与专节；检测**不阻断**解析（ADR-071） |
+| MCP 联调 ⑦ | `scripts/mcp_protocol_check.py` 走 stdio JSON-RPC 7 条链路（ask/context/clarify/evidence/verify/compare/未知工具），`tests/test_mcp_protocol.py` 8 项；`check.sh` 已加门禁；MCP `ask` 返回前渲染占位符 |
+| 增量索引 ⑧ | `build_index(incremental=True)` 用 `vectors_manifest.json`（chunk_id+文本哈希）复用旧向量，只 embed 新增块；换模型/维度自动全量（ADR-072） |
+| 事实层口径 ⑨ | 用户决定**暂不解决**：加指标需改字典 + 升版本 + 重灌 32 份，留待需要时再做 |
 
 ## 按 MinerU 实测规范做的三处修正
 
@@ -494,13 +508,13 @@ result.stitch.records           # 审计记录（页码序列 + 缝合理由）
   只补了 6 个，字典外的行会缺；同一页并列合并表与母公司表时，仍可能选错。
 - **L2 做了 5 个探针**：01 核心财务 / 02 分产品结构 / 03 研发投入 / 04 海外收入 /
   05 现金流与资本结构；方案里的 06/07/08 只有编号没有定义（v3 §4 只定义 01–05），按「二期」处理。
-- **L2 结构覆盖 13/29 份**：分产品/分行业/分地区表只存在于 13 份文档；银行、保险、季报
+- **L2 结构覆盖 13/29 份（旧语料统计；新增 3 份未逐一核对）**：分产品/分行业/分地区表只存在于 13 份文档；银行、保险、季报
   本身不披露三列表（已逐份核对，不是漏抽）。
 - **两套检索并存**：旧 153 页知识索引仍用 trigram；块级通道用 jieba + bge-m3 向量 + RRF（ADR-058），
   暂未合并；稠密检索依赖 SiliconFlow API，无 key 时自动降级 FTS-only。
 - **本地库 v1 的边界**：只支持 A 股年报/半年报/一季报/三季报四类；`auto` 解析走离线兜底
   （表格结构弱于 MinerU）；向量索引需要 `SILICONFLOW_API_KEY`，wiki 编译需要 `LLM_API_KEY`；
-  `finkb eval` 的 50 题只针对项目自带的 29 份语料，不适用于用户库。
+  `finkb eval` 的 50 题只针对项目自带的 32 份语料，不适用于用户库。
 - **本地库数据位置**：`FINKB_HOME` 下的 `data/`、`raw/`、`wiki_vault/`、`config/` 都是用户数据，
   不进 git、不随代码分发；`finkb-mcp --home` 与 `FINKB_HOME` 等价，必须在进程启动前确定。
 - **L2 编译不幂等**：重编会重写 claims、LLM 正文每次不同；token 成本未量化。

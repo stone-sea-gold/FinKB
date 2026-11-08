@@ -2042,6 +2042,25 @@ def collect_corpus(root: Path, pdf_root: Path | None = None) -> list[dict]:
         if not (doc / "content_list.json").exists():
             continue
         snapshot, pages, _, logical = _analyze(doc)
+        quality: dict = {}
+        # 优先用解析时写进 report.json 的 quality（快）；老产物没有该字段时现场统计。
+        report_path = doc / "report.json"
+        if report_path.exists():
+            try:
+                quality = json.loads(report_path.read_text(encoding="utf-8")).get("quality") or {}
+            except Exception:
+                quality = {}
+        if not quality:
+            content_list_path = doc / "content_list.json"
+            if content_list_path.exists():
+                try:
+                    from finkb.parser.quality import analyze_quality
+
+                    quality = analyze_quality(
+                        json.loads(content_list_path.read_text(encoding="utf-8"))
+                    )
+                except Exception:  # 质量体检失败不影响主检查
+                    quality = {}
         checks = check_invariants(doc)
         failed = [check for check in checks if not check.ok]
         with_header = sum(1 for table in logical if table.header)
@@ -2078,6 +2097,9 @@ def collect_corpus(root: Path, pdf_root: Path | None = None) -> list[dict]:
                 "invariants": len(checks) - len(failed),
                 "total_invariants": len(checks),
                 "numbers": len(find_malformed_numbers(logical)),
+                "empty_tables": int(quality.get("empty_table_count") or 0),
+                "chart_pages": len(quality.get("chart_pages") or []),
+                "image_only_pages": len(quality.get("image_only_pages") or []),
                 "failures": [f"{check.name}：{check.detail}" for check in failed],
             }
         )
@@ -2170,14 +2192,15 @@ def _cmd_corpus(args: argparse.Namespace) -> int:
             else "# 语料体检\n\n（没有找到已解析的文档）"
         ),
         "",
-        "| 文档 | 页 | 逻辑表 | 有表头 | 裸表 | 守恒律 | 数字异常 | 扫描页表(OCR) |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| 文档 | 页 | 逻辑表 | 有表头 | 裸表 | 守恒律 | 数字异常 | 扫描页表(OCR) | 空表 | 图表页 | 纯图片页 |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for row in rows:
         lines.append(
             f"| `{row['doc']}` | {row['pages']} | {row['logical']} | {row['header']} | "
             f"{row['bare']} | {row['invariants']}/{row['total_invariants']} | {row['numbers']} | "
-            f"{row.get('ocr_tables', 0)} |"
+            f"{row.get('ocr_tables', 0)} | {row.get('empty_tables', 0)} | "
+            f"{row.get('chart_pages', 0)} | {row.get('image_only_pages', 0)} |"
         )
     broken = [row for row in rows if row["failures"]]
     if broken:
@@ -2198,6 +2221,25 @@ def _cmd_corpus(args: argparse.Namespace) -> int:
         for row in ocr_docs:
             lines.append(
                 f"- `{row['doc']}` — {row['ocr_tables']} 张表、{row['ocr_pages']} 个扫描页"
+            )
+    quality_rows = [
+        row
+        for row in rows
+        if row.get("empty_tables") or row.get("chart_pages") or row.get("image_only_pages")
+    ]
+    if quality_rows:
+        lines += [
+            "",
+            "## 解析质量（缺表/缺图/缺页，建议人工核对）",
+            "",
+            "> 空表 = MinerU 返回了 table 块但没有表体；图表页 = chart 块无文字；"
+            "纯图片页 = 整页只有图片。这些内容没有进入知识库，详见各文档 `report.json` 的 `quality` 字段。",
+            "",
+        ]
+        for row in quality_rows:
+            lines.append(
+                f"- `{row['doc']}` — 空表 {row.get('empty_tables', 0)} 张、"
+                f"图表页 {row.get('chart_pages', 0)} 页、纯图片页 {row.get('image_only_pages', 0)} 页"
             )
     if problems:
         lines += ["", "## 相对基线退步", ""] + [f"- {item}" for item in problems]

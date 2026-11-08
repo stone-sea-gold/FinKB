@@ -88,3 +88,69 @@ def test_missing_db_still_searches(tmp_path):
     chunks = _chunks(tmp_path)
     results = hybrid.search("存货", db_path=tmp_path / "nope.db", chunks_path=chunks, embedder=None)
     assert results and results[0]["chunk_id"] == "d1:p1:0"
+
+
+class _CountingEmbedder(FakeEmbedder):
+    """记录每次实际送进模型的文本，用来证明增量没有重复算。"""
+
+    def __init__(self, dims: int = 32) -> None:
+        super().__init__(dims)
+        self.texts: list[str] = []
+
+    def embed(self, texts):
+        self.texts.extend(texts)
+        return super().embed(texts)
+
+
+def test_incremental_reuses_vectors_for_unchanged_chunks(tmp_path):
+    chunks = _chunks(tmp_path)
+    db = tmp_path / "chunks.db"
+    vectors = tmp_path / "vectors.npy"
+    first = _CountingEmbedder()
+    hybrid.build_index(chunks, db, vectors, first)
+    assert len(first.texts) == 3
+
+    second = _CountingEmbedder()
+    stats = hybrid.build_index(chunks, db, vectors, second)
+    assert second.texts == []
+    assert stats["reused"] == 3
+
+
+def test_incremental_embeds_only_new_chunk(tmp_path):
+    chunks = _chunks(tmp_path)
+    db = tmp_path / "chunks.db"
+    vectors = tmp_path / "vectors.npy"
+    hybrid.build_index(chunks, db, vectors, _CountingEmbedder())
+
+    rows = [json.loads(line) for line in chunks.read_text(encoding="utf-8").splitlines() if line.strip()]
+    new_text = "公司新增一条海外业务说明。"
+    rows.append(
+        {"chunk_id": "d3:p1:0", "doc_id": "d3", "company": "000003", "period": "2025",
+         "page_num": 1, "section": "海外业务", "block_type": "text",
+         "text": new_text, "table_header": None}
+    )
+    chunks.write_text("\n".join(json.dumps(row, ensure_ascii=False) for row in rows), encoding="utf-8")
+
+    second = _CountingEmbedder()
+    stats = hybrid.build_index(chunks, db, vectors, second)
+    assert second.texts == [new_text]
+    assert stats["reused"] == 3
+    assert stats["chunks"] == 4
+    saved = np.load(vectors)
+    assert saved.shape[0] == 4
+    assert np.allclose(saved[3], np.asarray(second.embed([new_text])[0], dtype=np.float32))
+
+
+def test_incremental_falls_back_to_full_embed_without_manifest(tmp_path):
+    chunks = _chunks(tmp_path)
+    db = tmp_path / "chunks.db"
+    vectors = tmp_path / "vectors.npy"
+    hybrid.build_index(chunks, db, vectors, _CountingEmbedder())
+    (tmp_path / "vectors_manifest.json").unlink()
+    import shutil
+
+    shutil.rmtree(tmp_path / "vectors_parts")
+
+    second = _CountingEmbedder()
+    hybrid.build_index(chunks, db, vectors, second)
+    assert len(second.texts) == 3

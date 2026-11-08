@@ -234,11 +234,19 @@ def call_tool(name: str, args: dict) -> dict:
     if name == "rebuild_index":
         return library.rebuild_indexes(bool(args.get("embed")))
     if name == "ask":
-        return ask_pipeline(
+        result = ask_pipeline(
             str(args["question"]),
             tier=args.get("tier", "auto"),
             context=args.get("context"),
         )
+        # MCP 是宿主直接展示的通道，占位符必须在这里渲染掉；CLI 已有同样的渲染。
+        ledger = result.get("ledger") or []
+        text = result.get("text")
+        if text and ledger and "{{" in str(text):
+            from finkb.qa.synthesizer import render
+
+            result["text"] = render(str(text), ledger)[0]
+        return result
     if name == "compare":
         from finkb.qa.compare import compare as compare_qa
 

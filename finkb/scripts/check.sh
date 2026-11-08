@@ -78,6 +78,14 @@ else
 fi
 
 echo
+echo "== MCP 协议联调（stdio JSON-RPC，7 条链路）=="
+if [ -f data/facts.duckdb ] && [ -f data/_search/chunks.db ]; then
+  "$PYTHON" scripts/mcp_protocol_check.py
+else
+  echo "跳过：data/facts.duckdb 或 data/_search/chunks.db 不存在"
+fi
+
+echo
 echo "== 跨期对比（6 道离线验收）=="
 if [ -f data/facts.duckdb ]; then
   "$PYTHON" ../eval/check_compare.py

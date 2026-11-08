@@ -10,6 +10,7 @@ P3 不接入 pipeline；``compose_verified`` 供 P4 调用。
 
 from __future__ import annotations
 
+import difflib
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -114,6 +115,43 @@ def _cited_passage_text(pack: EvidencePack, refs: list[tuple[str, int]]) -> str:
     return "\n".join(parts)
 
 
+_MATCH_STRIP = re.compile(r"[\s，。！？；：、“”‘’（）()《》〈〉…—\-·,.;:!?\"'\[\]{}<>/\\|]+")
+
+
+def _match_key(text: str) -> str:
+    """去掉标点/空白/引用噪音后的匹配键，用于判断句子是否来自所引原文。"""
+    return _MATCH_STRIP.sub("", _strip_noise(text))
+
+
+def _paragraph_passage_keys(pack: EvidencePack, refs: list[tuple[str, int]]) -> list[str]:
+    ref_set = set(refs)
+    keys: list[str] = []
+    for passage in pack.passages:
+        if (passage.doc, passage.page) in ref_set and passage.text:
+            key = _match_key(passage.text)
+            if key:
+                keys.append(key)
+    return keys
+
+
+def _supported_by_passage(sentence: str, keys: list[str]) -> bool:
+    """句子是否能在同一段所引用的原文里找到（允许极少量改写）。"""
+    key = _match_key(sentence)
+    if len(key) < 8:
+        return False
+    for passage_key in keys:
+        if key in passage_key:
+            return True
+        if len(key) < 10:
+            continue
+        match = difflib.SequenceMatcher(None, key, passage_key).find_longest_match(
+            0, len(key), 0, len(passage_key)
+        )
+        if match.size >= max(10, int(len(key) * 0.9)):
+            return True
+    return False
+
+
 def _check_v1(result: SynthesisResult, pack: EvidencePack, checks: dict[str, bool], errors: list[str]) -> None:
     known = {fact.id for fact in pack.facts}
     # 只允许 cN（结构化事实）；模型偶尔会把检索片段写成 {{e1}}，必须拦下。
@@ -181,7 +219,14 @@ def _check_v3(
     errors.extend(issues)
 
 
-def _check_v4(result: SynthesisResult, pack: EvidencePack, rendered: str, checks: dict[str, bool], errors: list[str]) -> None:
+def _check_v4(
+    result: SynthesisResult,
+    pack: EvidencePack,
+    rendered: str,
+    checks: dict[str, bool],
+    errors: list[str],
+    warnings: list[str],
+) -> None:
     if result.refused:
         checks["V4"] = True
         return
@@ -190,20 +235,36 @@ def _check_v4(result: SynthesisResult, pack: EvidencePack, rendered: str, checks
         checks["V4"] = False
         errors.append("答案缺少引用。")
         return
-    if pack.tier == "document":
-        issues: list[str] = []
-        # 引用常写在句号之后（“句子。[Ref: …]”），先挪到句号前再按句检查。
-        normalized = re.sub(r"([。！？；\n])((?:\[Ref:[^\]]+\])+)", r"\2\1", rendered)
-        for sentence in _SENTENCE_SPLIT.split(normalized):
+    if pack.tier != "document":
+        checks["V4"] = True
+        return
+    issues: list[str] = []
+    inherited = 0
+    # 引用常写在句号之后（“句子。[Ref: …]”），先挪到句号前再按句检查。
+    normalized = re.sub(r"([。！？；\n])((?:\[Ref:[^\]]+\])+)", r"\2\1", rendered)
+    for paragraph in re.split(r"\n\s*\n", normalized):
+        paragraph = paragraph.strip()
+        if not paragraph:
+            continue
+        # 段落级引用继承：同一段里只要有一句带引用，其他句子若能逐字
+        # （或极少量改写）在所引原文里找到，就视为“引用可回溯”，不要求每句重复
+        # 写同一个 [Ref:]。这解决模型“段落末尾一个引用”的稳定习惯，同时保留
+        # 确定性核验——找不到原文的句子仍然判失败。
+        keys = _paragraph_passage_keys(pack, _refs(paragraph))
+        for sentence in _SENTENCE_SPLIT.split(paragraph):
             sentence = sentence.strip()
             if not sentence or verifier.REF_RE.search(sentence):
                 continue
-            if _numbers(sentence) or len(sentence) >= _CONCLUSION_MIN_CHARS:
-                issues.append("句子缺少引用：" + sentence[:24])
-        checks["V4"] = not issues
-        errors.extend(issues)
-        return
-    checks["V4"] = True
+            if not (_numbers(sentence) or len(sentence) >= _CONCLUSION_MIN_CHARS):
+                continue
+            if _supported_by_passage(sentence, keys):
+                inherited += 1
+                continue
+            issues.append("句子缺少引用：" + sentence[:24])
+    checks["V4"] = not issues
+    errors.extend(issues)
+    if inherited:
+        warnings.append(f"段落引用继承：{inherited} 句未单独标注引用，但均可在所引原文中找到。")
 
 
 def _check_v5(rendered: str, pack: EvidencePack, checks: dict[str, bool], errors: list[str]) -> None:
@@ -252,7 +313,7 @@ def verify_synthesis(
     _check_v1(result, pack, checks, errors)
     _check_v2(result, pack, rendered, checks, errors)
     _check_v3(rendered, checks, errors, warnings, check_pages=check_pages)
-    _check_v4(result, pack, rendered, checks, errors)
+    _check_v4(result, pack, rendered, checks, errors, warnings)
     _check_v5(rendered, pack, checks, errors)
     _check_v6(result, checks, errors)
     _check_v7(rendered, pack, checks, warnings)

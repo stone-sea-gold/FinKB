@@ -44,6 +44,7 @@ from finkb.parser.mineru_client import (
     render_page_anchored_markdown,
 )
 from finkb.parser.noise_filter import strip_running_noise
+from finkb.parser.quality import analyze_quality, quality_warnings
 from finkb.parser.section_splitter import SplitOptions, split_all
 from finkb.parser.table_stitcher import stitch_tables
 
@@ -186,6 +187,10 @@ def run_parse(args: argparse.Namespace) -> int:
             return 4
 
     print(f"解析结果 : {len(document.pages)} 页")
+    quality = analyze_quality(
+        document.content_list or [],
+        pdf_pages=pdf_page_count(pdf_path) if document.content_list else None,
+    )
 
     # ── 2. 清洗 + 缝合 ─────────────────────────────────────────
     noise = strip_running_noise(document.pages)
@@ -269,12 +274,19 @@ def run_parse(args: argparse.Namespace) -> int:
             {"pages": record.pages, "ncols": record.ncols, "reason": record.reason}
             for record in stitch.rejections
         ],
+        "quality": quality,
     }
     (output_dir / "report.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
     print(f"\n已写入 {output_dir}")
+
+    warnings = quality_warnings(quality)
+    if warnings:
+        print("\n⚠️ 解析质量告警（详见 report.json 的 quality 字段）：")
+        for message in warnings:
+            print(f"   - {message}")
 
     # ── 4. 缝合结果摘要 ────────────────────────────────────────
     if stitch.records:

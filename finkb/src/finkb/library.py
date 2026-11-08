@@ -233,9 +233,13 @@ def _rebuild_indexes(embed: bool) -> dict:
         db_path=paths.chunks_db(),
         vectors_path=paths.vectors_path(),
         embedder=embedder,
+        incremental=True,
     )
     if not embed and paths.vectors_path().exists():
         paths.vectors_path().unlink()
+        manifest_path = paths.vectors_path().parent / "vectors_manifest.json"
+        if manifest_path.exists():
+            manifest_path.unlink()
         warnings.append("切块已变化，已删除旧向量索引；需要向量检索请用 rebuild --embed")
     return {"chunks": chunk_stats, "index": index_stats, "warnings": warnings}
 
