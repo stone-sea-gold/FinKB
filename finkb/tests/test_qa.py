@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 
@@ -162,3 +163,40 @@ def test_content_query_drops_company_period_report_type() -> None:
     assert "2025" not in cleaned
     assert "年报" not in cleaned
     assert "煤炭" in cleaned and "产销" in cleaned
+
+def test_page_texts_cache_invalidates_after_import(tmp_path, monkeypatch, request):
+    parsed = tmp_path / "parsed"
+    doc = parsed / "000001_2025_年报"
+    doc.mkdir(parents=True)
+    (doc / "report.json").write_text(json.dumps({"pages": 2}), encoding="utf-8")
+    page_md = doc / "page_anchored.md"
+    page_md.write_text(
+        '<!-- META: {"doc": "000001_2025_年报", "page": 1} -->\n营业收入 100 亿元\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(verifier, "PARSED_DIR", parsed)
+    verifier._last_parsed_signature = None
+    verifier._last_report_signature = None
+    verifier._page_texts.cache_clear()
+    verifier._report_pages.cache_clear()
+    request.addfinalizer(verifier._page_texts.cache_clear)
+    request.addfinalizer(verifier._report_pages.cache_clear)
+    request.addfinalizer(lambda: setattr(verifier, "_last_parsed_signature", None))
+    request.addfinalizer(lambda: setattr(verifier, "_last_report_signature", None))
+    assert ("000001_2025_年报", 1) in verifier._page_texts()
+
+    # 模拟导入新文档：追加第 2 页并更新 mtime（长驻 MCP 进程的缓存应自动失效）
+    page_md.write_text(
+        '<!-- META: {"doc": "000001_2025_年报", "page": 1} -->\n营业收入 100 亿元\n\n'
+        '<!-- META: {"doc": "000001_2025_年报", "page": 2} -->\n营业收入 200 亿元\n',
+        encoding="utf-8",
+    )
+    os.utime(page_md, ns=(page_md.stat().st_atime_ns, page_md.stat().st_mtime_ns + 1_000_000))
+    payload = {
+        "route": "fact",
+        "text": "营业收入 {{c1}} 亿元。",
+        "ledger": [{"id": "c1", "value": 200.0}],
+        "citations": ["[Ref: 000001_2025_年报#P2]"],
+    }
+    payload["text"] = synthesizer.render(payload["text"], payload["ledger"])[0]
+    assert verifier.verify(payload)["ok"] is True

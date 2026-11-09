@@ -9,6 +9,21 @@
 
 本包**不含**任何业务逻辑、年报 PDF、事实库或向量索引。所有数据在本地 `FINKB_HOME` 里，由使用者自己建库。
 
+## 导入自己的年报
+
+插件**不通过页面上传文件**，PDF 留在本机，导入时复制到 `$FINKB_HOME/raw/` 再解析入库。三种方式任选：
+
+1. **设置页卡片**：设置 → FinKB → 最下方「导入年报」，填本机 PDF 绝对路径、公司代码、期间、报告类型，点「开始导入」。页面可看实时日志；单份年报通常 10–30 分钟。
+2. **对 Agent 说**：把 `/绝对路径/xxx.pdf` 导入知识库，公司 600519，2025 年报」——Agent 会调用 `add_document`。
+3. **命令行**：
+
+```bash
+export FINKB_HOME=/你的/知识库
+python -m finkb.library add --pdf /绝对路径/xxx.pdf --company 600519 --period 2025 --type 年报 --embed
+```
+
+导入完成后即可提问；如果向量索引没更新，用 `python -m finkb.library rebuild --embed`。
+
 ## 前置条件
 
 1. **DSH**：`>= 0.2.2-rc.1 < 0.3.0`（本包只在 0.2.2-rc.1 上验证过），Node `>= 20`。
@@ -28,7 +43,7 @@
    ```bash
    export FINKB_HOME="$HOME/.finkb"     # 不设置时 pip 安装默认 ~/.finkb
    python -m finkb.library init
-   # 编辑 $FINKB_HOME/config/.env，至少填 LLM_API_KEY
+   # 编辑 $FINKB_HOME/config/.env：LLM_API_KEY 必填；SILICONFLOW_API_KEY / MINERU_API_TOKEN 建议填写（影响检索与解析质量）
    ```
 
 4. 确认服务能启动：
@@ -111,8 +126,8 @@ dsh plugin --profile web add github:<owner>/<repo>#v0.2.0
 | LLM API Key | `LLM_API_KEY` | 必填；事实抽取、合成、视觉解读 |
 | LLM Base URL | `LLM_BASE_URL` | 留空用默认值 |
 | LLM 模型 | `LLM_MODEL` | 留空用默认 `deepseek-v4.1-flash` |
-| SiliconFlow API Key | `SILICONFLOW_API_KEY` | 可选，bge-m3 向量检索 |
-| MinerU Token | `MINERU_API_TOKEN` | 可选，导入新 PDF 时的高质量解析 |
+| SiliconFlow API Key | `SILICONFLOW_API_KEY` | **建议填写**；不填则检索退化为纯关键词，同义问法与语义召回明显变差（免费额度即可） |
+| MinerU Token | `MINERU_API_TOKEN` | **建议填写**；不填改用离线解析，表格结构与扫描页质量明显下降 |
 
 - **热加载**：保存后不需要重启 DSH 或 MCP 进程。FinKB 每次调用都会重新读取 `$FINKB_HOME/config/.env`，下一次工具调用就生效。
 - **知识库目录不在这里改**：目录由部署环境变量 `FINKB_HOME` 决定（MCP 子进程启动时固定），运行期修改需要重启 DSH。卡片上只显示当前目录，避免“保存成功却没生效”的错位。

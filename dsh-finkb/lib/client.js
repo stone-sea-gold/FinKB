@@ -28,15 +28,16 @@ window.__ModuleLoader__.load({
       label2: 'var(--dsw-alias-label-secondary)',
       ok: 'var(--dsw-alias-state-success-primary)',
       err: 'var(--dsw-alias-state-error-primary)',
+      warn: 'var(--dsw-alias-state-warning-primary, #b45309)',
       accent: 'var(--dsw-alias-brand-primary, var(--dsw-alias-label-primary))',
     };
 
     const FIELDS = [
       {
         key: 'llmApiKey',
-        label: 'LLM API Key',
+        label: 'LLM API Key（必填）',
         secret: true,
-        hint: '事实抽取、合成、视觉解读都用它。OpenCode / OpenAI 兼容服务均可。',
+        hint: '事实抽取、合成、视觉解读都依赖它；不填则指标/本体/合成不可用。OpenCode / OpenAI 兼容服务均可。',
       },
       {
         key: 'llmBaseUrl',
@@ -50,15 +51,15 @@ window.__ModuleLoader__.load({
       },
       {
         key: 'siliconflowApiKey',
-        label: 'SiliconFlow API Key（可选）',
+        label: 'SiliconFlow API Key（建议填写）',
         secret: true,
-        hint: '只用于向量检索 bge-m3；不填则检索退化为关键词通道。',
+        hint: '用于 bge-m3 向量检索；不填则检索退化为纯关键词，同义问法与语义召回会明显变差（免费额度即可）。',
       },
       {
         key: 'mineruToken',
-        label: 'MinerU Token（可选）',
+        label: 'MinerU Token（建议填写）',
         secret: true,
-        hint: '只用于导入新 PDF 时的高质量表格解析；不填则用离线解析。',
+        hint: '用于导入年报时的高质量表格解析（扫描页、多层表头、跨页表）；不填改用离线解析，表格结构与扫描页质量会明显下降。',
       },
     ];
 
@@ -120,6 +121,15 @@ window.__ModuleLoader__.load({
       const [secrets, setSecrets] = React.useState({});
       const [busy, setBusy] = React.useState(false);
       const [message, setMessage] = React.useState('');
+      const [importForm, setImportForm] = React.useState({
+        pdfPath: '',
+        company: '',
+        period: '2025',
+        reportType: '年报',
+      });
+      const [importJob, setImportJob] = React.useState(null);
+      const [importBusy, setImportBusy] = React.useState(false);
+      const [importMessage, setImportMessage] = React.useState('');
 
       React.useEffect(() => {
         let alive = true;
@@ -136,6 +146,44 @@ window.__ModuleLoader__.load({
           alive = false;
         };
       }, []);
+
+      React.useEffect(() => {
+        if (!importJob || importJob.state !== 'running') return undefined;
+        const timer = setInterval(async () => {
+          try {
+            const data = await call({ action: 'importStatus', jobId: importJob.jobId });
+            setImportJob(data);
+            if (data.state !== 'running') {
+              setImportMessage(
+                data.state === 'done'
+                  ? '导入完成：新文档已入库，刷新页面后即可检索。'
+                  : '导入失败，请看下方日志。',
+              );
+            }
+          } catch (error) {
+            setImportMessage('查询导入进度失败：' + error.message);
+          }
+        }, 2500);
+        return () => clearInterval(timer);
+      }, [importJob?.jobId, importJob?.state]);
+
+      const updateImport = (key, value) => {
+        setImportForm((previous) => ({ ...previous, [key]: value }));
+      };
+
+      const startImport = async () => {
+        setImportBusy(true);
+        setImportMessage('');
+        try {
+          const data = await call({ action: 'import', ...importForm });
+          setImportJob({ jobId: data.jobId, state: data.state, lines: [] });
+          setImportMessage('已开始导入。年报解析 + 事实抽取通常需要 10–30 分钟，可以留在这个页面看进度。');
+        } catch (error) {
+          setImportMessage('导入失败：' + error.message);
+        } finally {
+          setImportBusy(false);
+        }
+      };
 
       const update = (key, value) => {
         if (FIELDS.find((field) => field.key === key)?.secret) {
@@ -232,6 +280,27 @@ window.__ModuleLoader__.load({
                 ],
               )
             : null,
+          status && (!configured.siliconflowApiKey || !configured.mineruToken)
+            ? h(
+                'div',
+                {
+                  key: 'warn',
+                  style: {
+                    padding: '10px 12px',
+                    borderRadius: '10px',
+                    border: '0.5px solid ' + T.warn,
+                    color: T.warn,
+                    fontSize: '12px',
+                    lineHeight: 1.7,
+                  },
+                },
+                [
+                  '建议补充：',
+                  configured.siliconflowApiKey ? null : '未填 SiliconFlow Key → 检索会退化为纯关键词，语义召回明显变差；',
+                  configured.mineruToken ? null : '未填 MinerU Token → 新导入年报的表格/扫描页解析质量明显下降。',
+                ],
+              )
+            : null,
           ...FIELDS.map((field) =>
             Field({
               field,
@@ -283,6 +352,104 @@ window.__ModuleLoader__.load({
                 : null,
             ],
           ),
+          h('div', { key: 'ih', style: { fontSize: '14px', fontWeight: 700, marginTop: '6px' } }, '导入年报'),
+          h(
+            'p',
+            { key: 'id', style: { margin: 0, color: T.label2, fontSize: '13px', lineHeight: 1.6 } },
+            '这里不发文件上传：PDF 留在本机，导入时会复制到知识库的 raw/ 目录，再解析入库。支持 A 股年报/半年报/一季报/三季报 PDF。',
+          ),
+          status?.rawDir
+            ? h(
+                'p',
+                { key: 'ir', style: { margin: 0, color: T.label2, fontSize: '12px', lineHeight: 1.6, wordBreak: 'break-all' } },
+                'PDF 副本存放：' + status.rawDir,
+              )
+            : null,
+          h('div', { key: 'ip', style: { display: 'flex', flexDirection: 'column', gap: '8px' } }, [
+            Field({
+              field: { key: 'pdfPath', label: '本机 PDF 绝对路径', hint: '例如 /home/你/下载/600519_2025_年报.pdf' },
+              value: importForm.pdfPath,
+              placeholder: '/绝对路径/xxx.pdf',
+              onChange: (key, value) => updateImport('pdfPath', value),
+            }),
+            h('div', { key: 'row', style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } }, [
+              Field({
+                field: { key: 'company', label: '公司代码', hint: '6 位数字' },
+                value: importForm.company,
+                placeholder: '600519',
+                onChange: (key, value) => updateImport('company', value),
+              }),
+              Field({
+                field: { key: 'period', label: '期间', hint: '2025 / 2025H1 / 2025Q1 / 2025Q3' },
+                value: importForm.period,
+                placeholder: '2025',
+                onChange: (key, value) => updateImport('period', value),
+              }),
+              Field({
+                field: { key: 'reportType', label: '报告类型', hint: '年报 / 半年报 / 一季报 / 三季报' },
+                value: importForm.reportType,
+                placeholder: '年报',
+                onChange: (key, value) => updateImport('reportType', value),
+              }),
+            ]),
+          ]),
+          h(
+            'div',
+            { key: 'ia', style: { display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' } },
+            [
+              h(
+                'button',
+                {
+                  key: 'go',
+                  type: 'button',
+                  disabled: importBusy || importJob?.state === 'running',
+                  onClick: startImport,
+                  style: {
+                    height: '32px',
+                    padding: '0 16px',
+                    borderRadius: '8px',
+                    border: '0.5px solid ' + T.border,
+                    background: importBusy || importJob?.state === 'running' ? T.bgNested : T.accent,
+                    color: importBusy || importJob?.state === 'running' ? T.label2 : '#fff',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    cursor: importBusy || importJob?.state === 'running' ? 'default' : 'pointer',
+                  },
+                },
+                importJob?.state === 'running' ? '导入中…' : '开始导入',
+              ),
+              importMessage
+                ? h(
+                    'span',
+                    { key: 'im', style: { fontSize: '12px', color: T.label2, lineHeight: 1.5 } },
+                    importMessage,
+                  )
+                : null,
+            ],
+          ),
+          importJob?.lines?.length
+            ? h(
+                'pre',
+                {
+                  key: 'ilog',
+                  style: {
+                    margin: 0,
+                    padding: '10px',
+                    borderRadius: '8px',
+                    border: '0.5px solid ' + T.border,
+                    background: T.bgNested,
+                    color: T.label2,
+                    fontSize: '11px',
+                    lineHeight: 1.5,
+                    maxHeight: '180px',
+                    overflow: 'auto',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-all',
+                  },
+                },
+                importJob.lines.slice(-60).join('\n'),
+              )
+            : null,
           h(
             'p',
             { key: 'note', style: { margin: 0, color: T.label2, fontSize: '12px', lineHeight: 1.6 } },

@@ -16,6 +16,52 @@ NUMBER_RE = re.compile(r"-?\d{1,3}(?:,\d{3})+(?:\.\d+)?|-?\d+(?:\.\d+)?")
 META_RE = re.compile(r'<!--\s*META:\s*(\{.*?\})\s*-->')
 
 
+_last_parsed_signature: tuple | None = None
+_last_report_signature: tuple | None = None
+
+
+def _parsed_signature() -> tuple:
+    """解析产物指纹（doc_id + page_anchored.md mtime），用于让进程内缓存随导入失效。"""
+    if not PARSED_DIR.exists():
+        return ()
+    out = []
+    for doc_dir in PARSED_DIR.iterdir():
+        file = doc_dir / "page_anchored.md"
+        try:
+            if doc_dir.is_dir() and file.exists():
+                out.append((doc_dir.name, file.stat().st_mtime_ns))
+        except OSError:
+            continue
+    return tuple(sorted(out))
+
+
+def _report_signature() -> tuple:
+    if not PARSED_DIR.exists():
+        return ()
+    out = []
+    for doc_dir in PARSED_DIR.iterdir():
+        file = doc_dir / "report.json"
+        try:
+            if doc_dir.is_dir() and file.exists():
+                out.append((doc_dir.name, file.stat().st_mtime_ns))
+        except OSError:
+            continue
+    return tuple(sorted(out))
+
+
+def _maybe_invalidate() -> None:
+    """目录发生变化（例如导入新年报）时清掉进程内页文本/页数缓存。"""
+    global _last_parsed_signature, _last_report_signature
+    parsed = _parsed_signature()
+    if parsed != _last_parsed_signature:
+        getattr(_page_texts, "cache_clear", lambda: None)()
+        _last_parsed_signature = parsed
+    report = _report_signature()
+    if report != _last_report_signature:
+        getattr(_report_pages, "cache_clear", lambda: None)()
+        _last_report_signature = report
+
+
 @lru_cache(maxsize=1)
 def _page_texts() -> dict[tuple[str, int], str]:
     pages: dict[tuple[str, int], str] = {}
@@ -76,6 +122,7 @@ def verify(payload: dict) -> dict:
         return {"ok": True, "issues": [], "refs_checked": 0, "numbers_checked": 0}
 
     refs = REF_RE.findall(text + " " + " ".join(citations))
+    _maybe_invalidate()
     page_texts = _page_texts()
     report_pages = _report_pages()
     for doc, page in refs:

@@ -84,3 +84,10 @@ def test_skill_file_present() -> None:
 @pytest.mark.parametrize("name", ["lib/env.js", "lib/index.js", "lib/client.js", "scripts/check-env-merge.mjs"])
 def test_node_sources_present(name: str) -> None:
     assert (BUNDLE / name).is_file()
+
+
+def test_client_shows_import_and_key_advice():
+    client = (BUNDLE / "lib" / "client.js").read_text(encoding="utf-8")
+    assert "导入年报" in client
+    assert "建议填写" in client
+    assert "rawDir" in client

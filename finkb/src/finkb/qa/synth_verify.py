@@ -201,6 +201,7 @@ def _check_v3(
     if not check_pages:
         checks["V3"] = True
         return
+    verifier._maybe_invalidate()  # noqa: SLF001 - 导入新年报后让缓存失效
     report_pages = verifier._report_pages()  # noqa: SLF001 - 复用既有页数据缓存
     if not report_pages:
         checks["V3"] = True
