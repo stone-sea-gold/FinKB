@@ -15,7 +15,7 @@ description: FinKB 本地 A 股年报知识库的工具路由、回答纪律与�
 |---|---|---|
 | 一个指标、一个期间（“比亚迪 2025 年营业收入是多少”） | `ask` | 自动路由到指标 SQL 档，返回数值、单位、原文页引用 |
 | 同一指标多个期间（“美的 2023–2025 营收对比”） | `compare` | 必须两个及以上期间；返回 `data.rows` 逐期数值，缺失期显示“无数据” |
-| 直接查结构化指标 | `query_metric` | 参数：company / metric_id / period；不知道指标 id 时先 `list_metrics` |
+| 直接查结构化指标 | `query_metric` | 参数：company / metric_id / period；指标 id 见 `finkb/config/metric_dict.yaml`，或先用 `search_documents` 找到指标名 |
 | 原文里怎么说的（“海外市场怎么描述”“研发投入的说明”） | `search_documents` | 返回文档 + 页码 + 片段；引用写 `[Ref: 文档#P页码]` |
 | 概念、定义类、关系（“哪些公司高杠杆”“比亚迪的子公司”） | `describe_ontology` / `traverse_relations` | 本体推理；关系边可能带来源页 |
 | 需要自己写答案、或审查已有答案 | `evidence` / `verify` | 先取证据包，再校验占位符/数字/引用/白名单 |

@@ -1,8 +1,15 @@
 {
   "name": "finkb-dsh",
-  "version": "0.1.0",
-  "description": "把本地 FinKB A股年报知识库接入 DSH：14 个 MCP 工具 + 「财报助手」预设",
+  "version": "0.2.0",
+  "description": "把本地 FinKB A股年报知识库接入 DSH：14 个 MCP 工具 + 「财报助手」预设 + 设置页密钥卡片",
   "license": "Apache-2.0",
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
   "keywords": [
     "dsh-bundle",
     "a-share",
@@ -10,14 +17,19 @@
     "mcp"
   ],
   "files": [
+    "lib",
     "cordis.patch.yml",
     "presets",
     "skills",
+    "scripts",
     "README.md"
   ],
   "engines": {
     "node": ">=20",
     "dsh": ">=0.2.2-rc.1 <0.3.0-0"
+  },
+  "scripts": {
+    "check": "node --check lib/index.js && node --check lib/client.js && node --check lib/env.js && node scripts/check-env-merge.mjs"
   },
   "dsh": {
     "bundle": {
@@ -25,7 +37,16 @@
         "./cordis.patch.yml",
         "./presets/finkb.patch.yml"
       ]
+    },
+    "client": {
+      "platform": "web"
     }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/schemastery": "^3.18.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
   },
   "repository": {
     "type": "git",

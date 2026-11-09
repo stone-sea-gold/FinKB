@@ -1,7 +1,8 @@
 # finkb-dsh 的 bundle patch —— 安装时唯一被执行的接线层。
 #
-# 只做一件事：把一个本地 stdio MCP 服务注册给 DSH。
-# 业务逻辑全部在 Python 侧（finkb 包），这里不复制任何实现。
+# 两件事：
+#   1. 注册本地 stdio MCP 服务（业务逻辑全部在 Python 侧 finkb 包，这里不复制实现）；
+#   2. 加载本包的 Host 半插件 `finkb-settings`，它提供设置页保存密钥用的同源接口。
 #
 # 语义（与 DSH 0.2.x 一致）：
 #   - `- insert: [...]` = 插入新行（唯一合法的插入形态）
@@ -22,3 +23,8 @@
         toolCallTimeoutMs: 180000
         # 没装 FinKB 时只记录错误、不阻断 DSH 启动；工具不出现，用户可自查。
         failOnStartupError: false
+    - id: finkb-settings
+      name: 'finkb-dsh'
+      config:
+        # 可选：显式指定 FinKB 知识库目录；留空则用 FINKB_HOME 或 ~/.finkb。
+        finkbHome: ''
