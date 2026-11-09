@@ -38,7 +38,8 @@ SYSTEM_PROMPT = """你是 FinKB 的财报问答写手。你只能使用下面给
 4. 证据不足时不要猜，输出 refused=true 并说明缺少什么；但 document/ontology 档即使没有结构化数字（facts 为空），只要检索片段与问题相关，就必须用片段作答，不得以“缺少 cN 编号/结构化数字”为由拒答。
 5. 回答用中文，简洁；metric 档先给数字句，再给一句解读，解读不得引入新数字或新事实。
 6. document 档回答 2–5 句、不超过 400 字。
-7. 只输出 JSON，不要输出 Markdown 代码围栏或额外解释。"""
+7. 只输出 JSON，不要输出 Markdown 代码围栏或额外解释。
+8. 标注为“视觉解读”的证据是图片/图表页的模型解读，只能作补充说明；引用时仍写 [Ref: 文档#P页码]，其中的数字不得当作结构化事实。"""
 
 OUTPUT_SCHEMA = """{"answer": "正文（数字用 {{cN}}）", "used_ids": ["c1"],
  "refused": false, "missing": ["缺少的证据"], "notes": ["需要提醒用户的口径"]}"""
@@ -95,9 +96,10 @@ def render_evidence(pack: EvidencePack) -> str:
     if pack.passages:
         lines.append("【原文证据】")
         for item in pack.passages:
-            kind = "表格" if item.block_type == "table" else "正文"
+            kind = "视觉解读" if item.vision else ("表格" if item.block_type == "table" else "正文")
             section = f" §{item.section}" if item.section else ""
-            lines.append(f"[{item.id}] {item.doc}#P{item.page}{section}（{kind}）\n{item.text}")
+            tail = "（视觉模型解读，建议核对原文；只能作补充，数字不得当作结构化事实）" if item.vision else ""
+            lines.append(f"[{item.id}] {item.doc}#P{item.page}{section}（{kind}）{tail}\n{item.text}")
     if pack.conflicts:
         lines.append("【口径冲突】")
         for item in pack.conflicts:

@@ -219,6 +219,7 @@ python -m finkb.library remove 600519_2025_年报
 - `add` 默认「解析 → LLM 事实抽取 → wiki 编译 → 切块/索引」；缺 `LLM_API_KEY` 时只做解析+切块并给出 warning。
 - `--parse-mode auto|offline|mineru`：`auto` 用离线兜底（不消耗 MinerU 额度）；`mineru` 需要 token。
 - `--no-facts` / `--no-wiki` 可只建原文检索库；同一份文档重复导入会覆盖该文档的数据。
+- `--vision`：解析后对图片/图表页做视觉解读（默认关，结果写 `vision_pages.json`）。
 - 支持的期间：`2025`（年报）、`2025H1`（半年报）、`2025Q1`（一季报）、`2025Q3`（三季报）。
 - 通过 MCP 使用同一套能力（`init_library` / `add_document` / `remove_document` / `rebuild_index` / `list_documents` / `library_status`）。
 - **分发边界**：仓库里的 `data/`、`raw/*.pdf`、`wiki_vault/` 是开发期产物；打包/发布时不要带上，
@@ -241,6 +242,19 @@ python tools/audit.py corpus --baseline config/corpus-baseline.json --pdf-root .
 批量编译器在 `finkb/.tmp/batch_compile.py`（读 `config/wiki_scope.yaml`，逐份编译并写
 `.tmp/batch_compile.log`；32 份约 25 分钟）。`wiki init/compile` 需要 `LLM_API_KEY`；
 `lint` 与 `search` 全离线。
+
+### 视觉解读页（可选，默认关）
+
+`finkb vision` 只对图片/图表页调用视觉模型（`deepseek-v4.1-flash`），结果写
+`data/parsed/<doc>/vision_pages.json`；封面/封底/装饰/空白页跳过。接入点：
+
+- **检索**：document 档在原文检索后追加最多 2 条视觉片段（`source=vision`），
+  引用仍用 `[Ref: doc#P]`，文本标注“视觉模型解读，建议核对原文”；
+- **校验**：视觉页可被引用（`verifier` 用解读文本做页存在性校验），但不参与数字绑定；
+- **合成**：提示词把视觉片段标为补充证据，其中的数字不得当作结构化事实；
+- **解析**：`parse --vision` 或 `library add --vision`（默认关）。
+
+视觉结果不写 `page_anchored.md`、不进事实层，避免模型解读被当成原文事实。
 
 `verify-cells` / `recall` 需要 PDF 与 `PyMuPDF`（已装）；其余全离线。
 
@@ -447,13 +461,13 @@ result.stitch.records           # 审计记录（页码序列 + 缝合理由）
 
 | 项 | 结果 |
 |---|---|
-| 测试 | **675 项通过**，离线 |
+| 测试 | **683 项通过**，离线 |
 | 语料 | 32 份 / 17 家公司 / 5,779 页 / 10 类版式 |
 | 逻辑表 | **7,240 张**；有表头 **6,746（93.2%）** |
 | 守恒律 | 32 份全部通过；`config/corpus-baseline.json` 0 退步 |
 | 数值回查 | 文字层页全部命中；扫描页（无文字层）单列 OCR 表并提示人工审查 |
 | 解析质量 | `report.json["quality"]`：空表块按“续页占位/可疑空表”分类（1,080 个全部为占位、0 可疑）；图表页 31 页；纯图片页 15 页标记为无内容（ADR-071） |
-| 视觉解读（试点） | `finkb vision` 对 43 个图片/图表页做分类+抽表：24 图表、9 信息图、5 装饰、3 封底、1 封面、1 其他；34 页抽出 73 张表；0 失败。结果在 `data/parsed/<doc>/vision_pages.json`，**不进事实层** |
+| 视觉解读（可选） | `finkb vision` 对 43 个图片/图表页做分类+抽表：24 图表、9 信息图、5 装饰、3 封底、1 封面、1 其他；34 页抽出 73 张表；0 失败。已接入 document 问答（`source=vision`，最多 2 条补充证据，引用标“视觉模型解读”）；不写 `page_anchored.md`、**不进事实层** |
 | 原文召回 | 18 份实测 100%：PDF 里的数字没有整表丢失 |
 | L1 事实层 | **32 份唯一库 2,019 条**（0 未匹配）；关系 5,226 条、实体 1,825；金标事实集 72/72 |
 | L2 知识层 | **202 页**（32 摘要 + 121 探针 + 14 实体 + 3 概念 + 30 报告页等）、lint 0 错 0 警；claims 1,578 条 |

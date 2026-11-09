@@ -105,9 +105,10 @@ class EvidencePassage:
     doc: str
     page: int
     section: str = ""
-    block_type: str = "text"  # text | table
+    block_type: str = "text"  # text | table | vision
     text: str = ""
     chunk_id: str = ""
+    vision: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -118,6 +119,7 @@ class EvidencePassage:
             "block_type": self.block_type,
             "text": self.text,
             "chunk_id": self.chunk_id,
+            "vision": self.vision,
         }
 
 
@@ -312,6 +314,7 @@ def _passages_from_payload(payload: dict[str, Any]) -> list[EvidencePassage]:
                 block_type=str(item.get("block_type") or ("table" if _is_table_snippet(body) else "text")),
                 text=body,
                 chunk_id=str(item.get("chunk_id") or ""),
+                vision=bool(item.get("vision")),
             )
         )
     return out

@@ -245,10 +245,17 @@ def answer_text(
     attempts.append(base)
     attempts.append({})
     results: list[dict] = []
+    used_filters: dict | None = None
     for filters in attempts:
         results = hybrid.search(search_query, limit=limit, filters=filters or None)
         if results:
+            used_filters = filters or None
             break
+    from finkb.search import vision_index
+
+    # 视觉解读页只作补充证据（source=vision）：过滤条件与文本检索一致，
+    # 最多 2 条；没有文本结果时允许单独使用（最多 3 条）。
+    vision_notes = vision_index.search(search_query, filters=used_filters, limit=3)
     ledger: list[dict] = []
     citations: list[str] = []
     # 同一页可能被切成多块（~300 字/块）；按页合并，否则合成时只看到半句话。
@@ -278,11 +285,33 @@ def answer_text(
             "text": body,
         })
         citations.append(f"[Ref: {item['doc_id']}#P{item['page_num']}]")
+    vision_limit = 2 if evidence else 3
+    covered = {(e["doc_id"], e["page_num"]) for e in evidence}
+    for note in vision_notes:
+        if len([e for e in evidence if e.get("vision")]) >= vision_limit:
+            break
+        key = (note["doc_id"], int(note["page"]))
+        if key in covered:  # 同一页已有正文证据时不再重复加视觉片段
+            continue
+        item = vision_index.to_evidence(note)
+        evidence.append(item)
+        covered.add(key)
+        citation = f"[Ref: {item['doc_id']}#P{item['page_num']}]"
+        if citation not in citations:
+            citations.append(citation)
     if not evidence:
         return {"route": "text", "question": question, "refused": True, "text": "语料中没有检索到相关原文。", "data": {"evidence": []}, "ledger": [], "citations": []}
-    parts = [f"{e['doc_id']} 第 {e['page_num']} 页（{e['section']}）：{e['snippet']}" for e in evidence]
+    parts = []
+    for e in evidence:
+        if e.get("vision"):
+            parts.append(f"{e['doc_id']} 第 {e['page_num']} 页（视觉解读）：{e['snippet']}（视觉模型解读，建议核对原文）")
+        else:
+            parts.append(f"{e['doc_id']} 第 {e['page_num']} 页（{e['section']}）：{e['snippet']}")
     text = "；".join(parts)
-    return {"route": "text", "question": question, "text": text, "data": {"evidence": evidence}, "ledger": ledger, "citations": citations}
+    data: dict = {"evidence": evidence}
+    if any(e.get("vision") for e in evidence):
+        data["vision"] = True
+    return {"route": "text", "question": question, "text": text, "data": data, "ledger": ledger, "citations": citations}
 
 
 NUMERIC_INTENT_RE = re.compile(r"(多少|几|增速|合计|最高|最低|相比|增加|减少|占比|比例|亿元|万元|%|％)")

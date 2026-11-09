@@ -283,6 +283,26 @@ def run_parse(args: argparse.Namespace) -> int:
 
     print(f"\n已写入 {output_dir}")
 
+    if getattr(args, "vision", False):
+        # 视觉解读默认不跑；显式 --vision 时对图片/图表页做分类与抽表，
+        # 结果只写 vision_pages.json（检索层可选用，不进事实层）。
+        try:
+            from finkb.parser.vision import vision_for_document
+
+            summary = vision_for_document(output_dir, pdf_path=pdf_path)
+            pages = summary.get("pages") or []
+            errors = sum(1 for page in pages if page.get("error"))
+            done = sum(
+                1 for page in pages
+                if not page.get("error") and not page.get("skipped")
+                and page.get("kind") not in ("unprocessed", "error")
+            )
+            print(f"视觉解读 : 候选 {summary.get('candidates', 0)} 页，"
+                  f"完成 {done} 页，失败 {errors} 页")
+            print(f"           → {output_dir / 'vision_pages.json'}")
+        except Exception as exc:  # 视觉是可选增强，失败不影响解析产物
+            print(f"[警告] 视觉解读失败：{exc}", file=sys.stderr)
+
     warnings = quality_warnings(quality)
     if warnings:
         print("\n⚠️ 解析质量告警（详见 report.json 的 quality 字段）：")
@@ -689,6 +709,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--reuse-content-list",
         dest="reuse_content_list",
         help="复用已保存的 content_list.json，只重跑清洗与缝合（不消耗 MinerU 额度）",
+    )
+    parse_cmd.add_argument(
+        "--vision", action="store_true",
+        help="解析后对图片/图表页做视觉解读（写 vision_pages.json；默认关）",
     )
     parse_cmd.add_argument(
         "--env-file", default=str(DEFAULT_ENV_FILE), help="配置文件路径"

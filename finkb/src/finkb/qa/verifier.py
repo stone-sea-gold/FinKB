@@ -40,6 +40,15 @@ def _page_texts() -> dict[tuple[str, int], str]:
                 buffer.append(line)
         if page and buffer:
             pages[(doc_dir.name, page)] = "\n".join(buffer)
+    # 视觉解读页（图片/图表页通常没有文字层）：引用它们时用模型解读文本
+    # 作为“页文本”参与存在性校验；数字仍只认账本或原文（见 ADR-075）。
+    try:
+        from finkb.search.vision_index import vision_texts
+
+        for key, text in vision_texts(PARSED_DIR).items():
+            pages.setdefault(key, text)
+    except Exception:  # pragma: no cover - 检索层异常不应阻断校验
+        pass
     return pages
 
 

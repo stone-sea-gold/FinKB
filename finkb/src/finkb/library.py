@@ -181,7 +181,7 @@ def _llm_client():
     return LLMClient(LLMConfig.from_env())
 
 
-def _run_parse(pdf: Path, doc_id: str, mode: str, warnings: list[str]) -> None:
+def _run_parse(pdf: Path, doc_id: str, mode: str, warnings: list[str], vision: bool = False) -> None:
     command = [
         sys.executable,
         "-m",
@@ -199,6 +199,8 @@ def _run_parse(pdf: Path, doc_id: str, mode: str, warnings: list[str]) -> None:
     if mode == "mineru":
         # MinerU 单次上限 200 页；不传 --auto-split 时 >200 页的年报会直接失败。
         command.extend(["--auto-split", "--max-pages", "200"])
+    if vision:
+        command.append("--vision")
     if mode in ("auto", "offline"):
         command.append("--offline")
         if mode == "auto":
@@ -303,6 +305,7 @@ def add_document(
     company_name: str | None = None,
     doc_id: str | None = None,
     parse_mode: str = "auto",
+    vision: bool = False,
     skip_facts: bool = False,
     skip_wiki: bool = False,
     embed: bool = False,
@@ -342,7 +345,7 @@ def add_document(
         if not target.exists():
             if raw_pdf is None:
                 raise FileNotFoundError("需要提供 pdf_path（导入 PDF）或 parsed_dir（导入已解析产物）")
-            _run_parse(raw_pdf, doc_id, parse_mode, warnings)
+            _run_parse(raw_pdf, doc_id, parse_mode, warnings, vision=vision)
 
     manifest = _upsert_manifest(meta, company_name or meta["company"])
     company_name = company_name or meta["company"]
@@ -514,6 +517,7 @@ def main(argv: list[str] | None = None) -> int:
     add.add_argument("--type", dest="report_type", required=True, choices=list(TYPE_SUFFIX))
     add.add_argument("--name", help="公司简称")
     add.add_argument("--parse-mode", default="auto", choices=("auto", "offline", "mineru"))
+    add.add_argument("--vision", action="store_true", help="解析后对图片/图表页做视觉解读")
     add.add_argument("--no-facts", action="store_true")
     add.add_argument("--no-wiki", action="store_true")
     add.add_argument("--embed", action="store_true")
@@ -536,8 +540,8 @@ def main(argv: list[str] | None = None) -> int:
         result = add_document(
             company=args.company, period=args.period, report_type=args.report_type,
             pdf_path=args.pdf, parsed_dir=args.parsed, company_name=args.name,
-            parse_mode=args.parse_mode, skip_facts=args.no_facts, skip_wiki=args.no_wiki,
-            embed=args.embed,
+            parse_mode=args.parse_mode, vision=args.vision,
+            skip_facts=args.no_facts, skip_wiki=args.no_wiki, embed=args.embed,
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
