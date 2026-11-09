@@ -1,0 +1,35 @@
+{
+  "name": "finkb-dsh",
+  "version": "0.1.0",
+  "description": "把本地 FinKB A股年报知识库接入 DSH：14 个 MCP 工具 + 「财报助手」预设",
+  "license": "Apache-2.0",
+  "keywords": [
+    "dsh-bundle",
+    "a-share",
+    "annual-report",
+    "mcp"
+  ],
+  "files": [
+    "cordis.patch.yml",
+    "presets",
+    "skills",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20",
+    "dsh": ">=0.2.2-rc.1 <0.3.0-0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": [
+        "./cordis.patch.yml",
+        "./presets/finkb.patch.yml"
+      ]
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/stone-sea-gold/FinKB.git",
+    "directory": "dsh-finkb"
+  }
+}

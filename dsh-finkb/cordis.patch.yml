@@ -1,0 +1,24 @@
+# finkb-dsh 的 bundle patch —— 安装时唯一被执行的接线层。
+#
+# 只做一件事：把一个本地 stdio MCP 服务注册给 DSH。
+# 业务逻辑全部在 Python 侧（finkb 包），这里不复制任何实现。
+#
+# 语义（与 DSH 0.2.x 一致）：
+#   - `- insert: [...]` = 插入新行（唯一合法的插入形态）
+#   - `- id: <已有行>`  = 覆盖该行 config（本文件不用，避免触碰共享行）
+# 用户 profile 自己的 cordis.patch.yml 在本层之后生效，用户始终可以覆盖。
+- insert:
+    - id: mcp-finkb
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        # 工具名前缀：mcp__finkb__<tool>
+        serverName: finkb
+        transport: stdio
+        # 优先用环境变量指定可执行文件（开发时指向 .venv/bin/finkb-mcp），
+        # 否则使用 PATH 上的 finkb-mcp（pip / pipx 安装后的默认形态）。
+        command: !!js process.env.FINKB_MCP_BIN || 'finkb-mcp'
+        args: []
+        # 合成档（FINKB_LLM_SYNTH=1）最多两次 LLM 调用，默认 60 秒容易断。
+        toolCallTimeoutMs: 180000
+        # 没装 FinKB 时只记录错误、不阻断 DSH 启动；工具不出现，用户可自查。
+        failOnStartupError: false
