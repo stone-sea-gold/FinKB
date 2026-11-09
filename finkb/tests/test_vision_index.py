@@ -126,11 +126,13 @@ def test_verifier_accepts_vision_page_citation(tmp_path: Path, monkeypatch) -> N
     assert result["ok"] is True, result["issues"]
 
 
-def test_parse_parser_accepts_vision_flag() -> None:
+def test_parse_parser_vision_defaults_on_and_can_disable() -> None:
     from finkb.cli import build_parser
 
-    args = build_parser().parse_args(["parse", "x.pdf", "--vision"])
-    assert args.vision is True
+    parser = build_parser()
+    assert parser.parse_args(["parse", "x.pdf"]).vision is True
+    assert parser.parse_args(["parse", "x.pdf", "--no-vision"]).vision is False
+    assert parser.parse_args(["parse", "x.pdf", "--vision"]).vision is True
 
 
 def test_library_run_parse_adds_vision_flag(monkeypatch) -> None:
@@ -143,5 +145,9 @@ def test_library_run_parse_adds_vision_flag(monkeypatch) -> None:
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(library.subprocess, "run", fake_run)
-    library._run_parse(Path("x.pdf"), "601668_2025_年报", "mineru", [], vision=True)
+    library._run_parse(Path("x.pdf"), "601668_2025_年报", "mineru", [])
     assert "--vision" in captured["command"]
+
+    captured.clear()
+    library._run_parse(Path("x.pdf"), "601668_2025_年报", "mineru", [], vision=False)
+    assert "--vision" not in captured["command"]

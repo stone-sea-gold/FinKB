@@ -181,7 +181,7 @@ def _llm_client():
     return LLMClient(LLMConfig.from_env())
 
 
-def _run_parse(pdf: Path, doc_id: str, mode: str, warnings: list[str], vision: bool = False) -> None:
+def _run_parse(pdf: Path, doc_id: str, mode: str, warnings: list[str], vision: bool = True) -> None:
     command = [
         sys.executable,
         "-m",
@@ -305,7 +305,7 @@ def add_document(
     company_name: str | None = None,
     doc_id: str | None = None,
     parse_mode: str = "auto",
-    vision: bool = False,
+    vision: bool = True,
     skip_facts: bool = False,
     skip_wiki: bool = False,
     embed: bool = False,
@@ -517,7 +517,8 @@ def main(argv: list[str] | None = None) -> int:
     add.add_argument("--type", dest="report_type", required=True, choices=list(TYPE_SUFFIX))
     add.add_argument("--name", help="公司简称")
     add.add_argument("--parse-mode", default="auto", choices=("auto", "offline", "mineru"))
-    add.add_argument("--vision", action="store_true", help="解析后对图片/图表页做视觉解读")
+    add.add_argument("--vision", action=argparse.BooleanOptionalAction, default=True,
+                     help="解析后对图片/图表页做视觉解读（默认开；--no-vision 关闭）")
     add.add_argument("--no-facts", action="store_true")
     add.add_argument("--no-wiki", action="store_true")
     add.add_argument("--embed", action="store_true")

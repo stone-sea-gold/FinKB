@@ -283,7 +283,7 @@ def run_parse(args: argparse.Namespace) -> int:
 
     print(f"\n已写入 {output_dir}")
 
-    if getattr(args, "vision", False):
+    if getattr(args, "vision", True):
         # 视觉解读默认不跑；显式 --vision 时对图片/图表页做分类与抽表，
         # 结果只写 vision_pages.json（检索层可选用，不进事实层）。
         try:
@@ -711,8 +711,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="复用已保存的 content_list.json，只重跑清洗与缝合（不消耗 MinerU 额度）",
     )
     parse_cmd.add_argument(
-        "--vision", action="store_true",
-        help="解析后对图片/图表页做视觉解读（写 vision_pages.json；默认关）",
+        "--vision", action=argparse.BooleanOptionalAction, default=True,
+        help="解析后对图片/图表页做视觉解读（默认开；--no-vision 关闭）",
     )
     parse_cmd.add_argument(
         "--env-file", default=str(DEFAULT_ENV_FILE), help="配置文件路径"

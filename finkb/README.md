@@ -219,7 +219,7 @@ python -m finkb.library remove 600519_2025_年报
 - `add` 默认「解析 → LLM 事实抽取 → wiki 编译 → 切块/索引」；缺 `LLM_API_KEY` 时只做解析+切块并给出 warning。
 - `--parse-mode auto|offline|mineru`：`auto` 用离线兜底（不消耗 MinerU 额度）；`mineru` 需要 token。
 - `--no-facts` / `--no-wiki` 可只建原文检索库；同一份文档重复导入会覆盖该文档的数据。
-- `--vision`：解析后对图片/图表页做视觉解读（默认关，结果写 `vision_pages.json`）。
+- `--vision`：解析后对**检测到的图片/图表页**做视觉解读（默认开，`--no-vision` 关闭；结果写 `vision_pages.json`）。
 - 支持的期间：`2025`（年报）、`2025H1`（半年报）、`2025Q1`（一季报）、`2025Q3`（三季报）。
 - 通过 MCP 使用同一套能力（`init_library` / `add_document` / `remove_document` / `rebuild_index` / `list_documents` / `library_status`）。
 - **分发边界**：仓库里的 `data/`、`raw/*.pdf`、`wiki_vault/` 是开发期产物；打包/发布时不要带上，
@@ -243,7 +243,7 @@ python tools/audit.py corpus --baseline config/corpus-baseline.json --pdf-root .
 `.tmp/batch_compile.log`；32 份约 25 分钟）。`wiki init/compile` 需要 `LLM_API_KEY`；
 `lint` 与 `search` 全离线。
 
-### 视觉解读页（可选，默认关）
+### 视觉解读页（默认开，只扫图片/图表页）
 
 `finkb vision` 只对图片/图表页调用视觉模型（`deepseek-v4.1-flash`），结果写
 `data/parsed/<doc>/vision_pages.json`；封面/封底/装饰/空白页跳过。接入点：
@@ -252,7 +252,7 @@ python tools/audit.py corpus --baseline config/corpus-baseline.json --pdf-root .
   引用仍用 `[Ref: doc#P]`，文本标注“视觉模型解读，建议核对原文”；
 - **校验**：视觉页可被引用（`verifier` 用解读文本做页存在性校验），但不参与数字绑定；
 - **合成**：提示词把视觉片段标为补充证据，其中的数字不得当作结构化事实；
-- **解析**：`parse --vision` 或 `library add --vision`（默认关）。
+- **解析**：`parse` / `library add` 默认开启；`--no-vision` 关闭。只对结构检测出的图片/图表页调用模型，不扫描全文。
 
 视觉结果不写 `page_anchored.md`、不进事实层，避免模型解读被当成原文事实。
 
