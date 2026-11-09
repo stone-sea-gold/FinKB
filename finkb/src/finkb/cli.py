@@ -187,14 +187,15 @@ def run_parse(args: argparse.Namespace) -> int:
             return 4
 
     print(f"解析结果 : {len(document.pages)} 页")
-    quality = analyze_quality(
-        document.content_list or [],
-        pdf_pages=pdf_page_count(pdf_path) if document.content_list else None,
-    )
 
     # ── 2. 清洗 + 缝合 ─────────────────────────────────────────
     noise = strip_running_noise(document.pages)
     stitch = stitch_tables(document.pages)
+    quality = analyze_quality(
+        document.content_list or [],
+        pdf_pages=pdf_page_count(pdf_path) if document.content_list else None,
+        tables=stitch.tables,
+    )
 
     print(f"噪音清洗 : 剥离 {noise.removed_lines} 行，覆盖 {len(noise.affected_pages)} 页")
     print(f"逻辑表   : {len(stitch.tables)} 张，其中跨页缝合 {stitch.stitched_count} 张")

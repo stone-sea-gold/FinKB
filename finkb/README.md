@@ -450,7 +450,7 @@ result.stitch.records           # 审计记录（页码序列 + 缝合理由）
 | 逻辑表 | **7,240 张**；有表头 **6,746（93.2%）** |
 | 守恒律 | 32 份全部通过；`config/corpus-baseline.json` 0 退步 |
 | 数值回查 | 文字层页全部命中；扫描页（无文字层）单列 OCR 表并提示人工审查 |
-| 解析质量 | 新增 `report.json["quality"]`：空表/图表页/纯图片页/未覆盖页可查（ADR-071） |
+| 解析质量 | `report.json["quality"]`：空表块按“续页占位/可疑空表”分类（1,080 个全部为占位、0 可疑）；图表页 31 页；纯图片页 15 页标记为无内容（ADR-071） |
 | 原文召回 | 18 份实测 100%：PDF 里的数字没有整表丢失 |
 | L1 事实层 | **32 份唯一库 2,019 条**（0 未匹配）；关系 5,226 条、实体 1,825；金标事实集 72/72 |
 | L2 知识层 | **202 页**（32 摘要 + 121 探针 + 14 实体 + 3 概念 + 30 报告页等）、lint 0 错 0 警；claims 1,578 条 |
@@ -476,7 +476,7 @@ result.stitch.records           # 审计记录（页码序列 + 缝合理由）
 | 项 | 结果 |
 |---|---|
 | 合成评测 ① | V4 允许“段落引用继承”（句子能在所引原文里找到即算有引用），prompt 明确“facts 为空时用片段作答、不得以缺 cN 拒答”；真实 LLM 15 题连续两轮 **15/15** |
-| 解析质量 ③ | `report.json` 新增 `quality`（空表/图表页/纯图片页/未覆盖页），CLI 打印告警，`audit corpus` 新增三列与专节；检测**不阻断**解析（ADR-071） |
+| 解析质量 ③ | `report.json` 新增 `quality`（空表块分“续页占位/可疑空表”、图表页、纯图片页标记无内容），CLI 打印告警，`audit corpus` 新增四列与专节；检测**不阻断**解析（ADR-071，2026-11-09 修正口径） |
 | MCP 联调 ⑦ | `scripts/mcp_protocol_check.py` 走 stdio JSON-RPC 7 条链路（ask/context/clarify/evidence/verify/compare/未知工具），`tests/test_mcp_protocol.py` 8 项；`check.sh` 已加门禁；MCP `ask` 返回前渲染占位符 |
 | 增量索引 ⑧ | `build_index(incremental=True)` 用 `vectors_manifest.json`（chunk_id+文本哈希）复用旧向量，只 embed 新增块；换模型/维度自动全量（ADR-072） |
 | 事实层口径 ⑨ | 用户决定**暂不解决**：加指标需改字典 + 升版本 + 重灌 32 份，留待需要时再做 |

@@ -2056,8 +2056,17 @@ def collect_corpus(root: Path, pdf_root: Path | None = None) -> list[dict]:
                 try:
                     from finkb.parser.quality import analyze_quality
 
+                    report_tables: list = []
+                    if report_path.exists():
+                        try:
+                            report_tables = json.loads(
+                                report_path.read_text(encoding="utf-8")
+                            ).get("tables") or []
+                        except Exception:
+                            report_tables = []
                     quality = analyze_quality(
-                        json.loads(content_list_path.read_text(encoding="utf-8"))
+                        json.loads(content_list_path.read_text(encoding="utf-8")),
+                        tables=report_tables,
                     )
                 except Exception:  # 质量体检失败不影响主检查
                     quality = {}
@@ -2097,9 +2106,16 @@ def collect_corpus(root: Path, pdf_root: Path | None = None) -> list[dict]:
                 "invariants": len(checks) - len(failed),
                 "total_invariants": len(checks),
                 "numbers": len(find_malformed_numbers(logical)),
-                "empty_tables": int(quality.get("empty_table_count") or 0),
+                "empty_tables": int(
+                    quality.get("suspicious_empty_table_count")
+                    if "suspicious_empty_table_count" in quality
+                    else (quality.get("empty_table_count") or 0)
+                ),
+                "placeholder_tables": int(quality.get("placeholder_table_count") or 0),
                 "chart_pages": len(quality.get("chart_pages") or []),
-                "image_only_pages": len(quality.get("image_only_pages") or []),
+                "image_only_pages": len(
+                    quality.get("no_content_pages") or quality.get("image_only_pages") or []
+                ),
                 "failures": [f"{check.name}：{check.detail}" for check in failed],
             }
         )
@@ -2192,14 +2208,15 @@ def _cmd_corpus(args: argparse.Namespace) -> int:
             else "# 语料体检\n\n（没有找到已解析的文档）"
         ),
         "",
-        "| 文档 | 页 | 逻辑表 | 有表头 | 裸表 | 守恒律 | 数字异常 | 扫描页表(OCR) | 空表 | 图表页 | 纯图片页 |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| 文档 | 页 | 逻辑表 | 有表头 | 裸表 | 守恒律 | 数字异常 | 扫描页表(OCR) | 可疑空表 | 续页占位 | 图表页 | 纯图片页 |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for row in rows:
         lines.append(
             f"| `{row['doc']}` | {row['pages']} | {row['logical']} | {row['header']} | "
             f"{row['bare']} | {row['invariants']}/{row['total_invariants']} | {row['numbers']} | "
             f"{row.get('ocr_tables', 0)} | {row.get('empty_tables', 0)} | "
+            f"{row.get('placeholder_tables', 0)} | "
             f"{row.get('chart_pages', 0)} | {row.get('image_only_pages', 0)} |"
         )
     broken = [row for row in rows if row["failures"]]
@@ -2227,18 +2244,25 @@ def _cmd_corpus(args: argparse.Namespace) -> int:
         for row in rows
         if row.get("empty_tables") or row.get("chart_pages") or row.get("image_only_pages")
     ]
-    if quality_rows:
+    total_placeholder = sum(int(row.get("placeholder_tables") or 0) for row in rows)
+    if quality_rows or total_placeholder:
         lines += [
             "",
             "## 解析质量（缺表/缺图/缺页，建议人工核对）",
             "",
-            "> 空表 = MinerU 返回了 table 块但没有表体；图表页 = chart 块无文字；"
-            "纯图片页 = 整页只有图片。这些内容没有进入知识库，详见各文档 `report.json` 的 `quality` 字段。",
+            "> 空表块要分两类：**续页占位**是跨页长表的正常形态（整表数据在起始页的长表里，"
+            "后续页只留空块，**数据没丢**）；**可疑空表**是不属于任何跨页长表的空块，才需要核对。"
+            "图表页 = chart 块无结构文字（文字层兜底只能抽到零散标签/数字）；"
+            "纯图片页 = 整页只有图片，已标记为无内容。详见各文档 `report.json` 的 `quality` 字段。",
+            "",
+            f"全语料空表块：续页占位 **{total_placeholder}** 个、可疑空表 "
+            f"**{sum(int(row.get('empty_tables') or 0) for row in rows)}** 个。",
             "",
         ]
         for row in quality_rows:
             lines.append(
-                f"- `{row['doc']}` — 空表 {row.get('empty_tables', 0)} 张、"
+                f"- `{row['doc']}` — 可疑空表 {row.get('empty_tables', 0)} 张、"
+                f"续页占位 {row.get('placeholder_tables', 0)} 个、"
                 f"图表页 {row.get('chart_pages', 0)} 页、纯图片页 {row.get('image_only_pages', 0)} 页"
             )
     if problems:
