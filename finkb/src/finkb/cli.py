@@ -399,6 +399,51 @@ def run_compare(args: argparse.Namespace) -> int:
     return 1 if payload.get("refused") else 0
 
 
+def run_vision(args: argparse.Namespace) -> int:
+    """``finkb vision``：纯图片页/图表页视觉解读（试点，不写入解析主流程）。"""
+    from finkb.parser.vision import vision_for_document
+
+    parsed_root = Path(args.parsed_root)
+    docs = list(args.doc or [])
+    if args.all:
+        docs = sorted(
+            p.name
+            for p in parsed_root.iterdir()
+            if p.is_dir() and not p.name.startswith("_") and (p / "content_list.json").exists()
+        )
+    if not docs:
+        print("没有指定文档：用 --doc <doc_id> 或 --all", file=sys.stderr)
+        return 2
+
+    done = 0
+    for doc in docs:
+        parsed = parsed_root / doc
+        if not parsed.exists():
+            print(f"跳过 {doc}：目录不存在", file=sys.stderr)
+            continue
+        summary = vision_for_document(
+            parsed,
+            pdf_root=args.pdf_root,
+            dry_run=args.dry_run,
+            model=args.model,
+            limit=args.limit,
+            retry_errors=args.retry_errors,
+        )
+        done += 1
+        if args.json:
+            print(json.dumps(summary, ensure_ascii=False))
+            continue
+        pages = summary.get("pages", [])
+        skipped = sum(1 for page in pages if page.get("skipped"))
+        kinds: dict[str, int] = {}
+        for page in pages:
+            kind = str(page.get("kind"))
+            kinds[kind] = kinds.get(kind, 0) + 1
+        print(f"{doc}: 候选 {summary.get('candidates', 0)} 页，跳过 {skipped} 页，结果 {kinds}")
+    print(f"完成 {done}/{len(docs)} 份")
+    return 0
+
+
 def run_search(args: argparse.Namespace) -> int:
     """``finkb search``：块级混合检索（FTS5 + 向量 + RRF）。"""
     from finkb.search import hybrid
@@ -708,6 +753,26 @@ def build_parser() -> argparse.ArgumentParser:
     graph_cmd.add_argument("--overview", action="store_true", help="显示本体/关系图概览")
     graph_cmd.add_argument("--limit", type=int, default=20)
     graph_cmd.set_defaults(func=run_graph)
+
+    vision_cmd = subparsers.add_parser(
+        "vision", help="图片页/图表页视觉解读（试点，默认不接入解析流程）"
+    )
+    vision_cmd.add_argument("--doc", action="append", help="文档 id，可重复")
+    vision_cmd.add_argument("--all", action="store_true", help="处理 parsed 根目录下全部文档")
+    vision_cmd.add_argument(
+        "--parsed-root", default=str(DEFAULT_DATA_DIR / "parsed"), help="解析产物根目录"
+    )
+    vision_cmd.add_argument(
+        "--pdf-root", help="PDF 原件根目录（缺省依次尝试 data/raw、../raw、raw）"
+    )
+    vision_cmd.add_argument("--dry-run", action="store_true", help="只列候选页，不调用模型")
+    vision_cmd.add_argument("--model", help="覆盖视觉模型名")
+    vision_cmd.add_argument("--limit", type=int, help="每份文档最多处理多少页（联调用）")
+    vision_cmd.add_argument(
+        "--retry-errors", dest="retry_errors", action="store_true", help="只重跑上次失败的页"
+    )
+    vision_cmd.add_argument("--json", action="store_true")
+    vision_cmd.set_defaults(func=run_vision)
 
     eval_cmd = subparsers.add_parser(
         "eval", help="评测：默认 50 题问答；--recall 召回；--full 全套验收"

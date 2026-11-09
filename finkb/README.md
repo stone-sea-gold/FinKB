@@ -232,6 +232,8 @@ python -m finkb.ontology.quality --db data/facts.duckdb      # 本体结构质�
 python -m finkb.fact_engine.data_check --db data/facts.duckdb # 约束求值/实体回填/附注覆盖
 cd .. && .venv/bin/python eval/recall.py --no-dense --min-recall 0.9  # 离线召回 + MRR
 cd .. && .venv/bin/python eval/check_context.py                       # 多轮上下文 12 组
+python -m finkb.cli vision --doc 601668_2025_年报 --dry-run          # 图片/图表页候选（不调模型）
+python -m finkb.cli vision --all --retry-errors                       # 视觉解读试点（结果写 vision_pages.json）
 python scripts/mcp_protocol_check.py                                # MCP stdio 协议 7 链路
 python tools/audit.py corpus --baseline config/corpus-baseline.json --pdf-root ../raw  # 含解析质量列
 ```
@@ -445,12 +447,13 @@ result.stitch.records           # 审计记录（页码序列 + 缝合理由）
 
 | 项 | 结果 |
 |---|---|
-| 测试 | **659 项通过**，离线 |
+| 测试 | **675 项通过**，离线 |
 | 语料 | 32 份 / 17 家公司 / 5,779 页 / 10 类版式 |
 | 逻辑表 | **7,240 张**；有表头 **6,746（93.2%）** |
 | 守恒律 | 32 份全部通过；`config/corpus-baseline.json` 0 退步 |
 | 数值回查 | 文字层页全部命中；扫描页（无文字层）单列 OCR 表并提示人工审查 |
 | 解析质量 | `report.json["quality"]`：空表块按“续页占位/可疑空表”分类（1,080 个全部为占位、0 可疑）；图表页 31 页；纯图片页 15 页标记为无内容（ADR-071） |
+| 视觉解读（试点） | `finkb vision` 对 43 个图片/图表页做分类+抽表：24 图表、9 信息图、5 装饰、3 封底、1 封面、1 其他；34 页抽出 73 张表；0 失败。结果在 `data/parsed/<doc>/vision_pages.json`，**不进事实层** |
 | 原文召回 | 18 份实测 100%：PDF 里的数字没有整表丢失 |
 | L1 事实层 | **32 份唯一库 2,019 条**（0 未匹配）；关系 5,226 条、实体 1,825；金标事实集 72/72 |
 | L2 知识层 | **202 页**（32 摘要 + 121 探针 + 14 实体 + 3 概念 + 30 报告页等）、lint 0 错 0 警；claims 1,578 条 |
