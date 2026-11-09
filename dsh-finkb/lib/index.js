@@ -14,7 +14,6 @@ import path from 'node:path';
 import z from '@deepseek-ai/schemastery';
 import {
   FIELD_TO_ENV,
-  expandHome,
   mergeEnv,
   publicStatus,
   readEnv,
@@ -28,47 +27,17 @@ export const name = 'finkb-settings';
 export const inject = [];
 
 export const Config = z.object({
-  /** 可选：显式指定 FinKB 知识库目录；留空则用 FINKB_HOME 或 ~/.finkb。 */
-  finkbHome: z.string().default(''),
+  // 知识库目录是部署期配置（FINKB_HOME），不放在运行期设置里：
+  // 这个卡片只负责写 .env，改 Key 能热加载，改目录不能（MCP 子进程启动时已固定）。
 });
 
 const MAX_BODY_BYTES = 64 * 1024;
-const SETTINGS_FILE = () =>
-  path.join(process.env.DSH_HOME || path.join(os.homedir(), '.dsh'), 'finkb-settings.json');
 
-function configValue(config, key) {
-  const value = config?.[key];
-  if (value && typeof value.get === 'function') return value.get();
-  return value;
-}
-
-async function readJson(file, fallback) {
-  try {
-    return JSON.parse(await fs.readFile(file, 'utf8'));
-  } catch {
-    return fallback;
-  }
-}
-
-async function readSavedHome() {
-  const saved = await readJson(SETTINGS_FILE(), {});
-  return typeof saved?.finkbHome === 'string' ? saved.finkbHome : '';
-}
-
-async function saveHome(home) {
-  const file = SETTINGS_FILE();
-  await fs.mkdir(path.dirname(file), { recursive: true });
-  await fs.writeFile(file, JSON.stringify({ finkbHome: home }, null, 2) + '\n', 'utf8');
-}
-
-async function currentHome(config) {
-  const saved = await readSavedHome();
-  const home = resolveHome({
-    explicit: saved || configValue(config, 'finkbHome') || '',
-    envHome: process.env.FINKB_HOME || '',
-    homedir: os.homedir(),
-  });
-  return path.resolve(home);
+/** 知识库目录只由部署环境决定：FINKB_HOME > ~/.finkb。 */
+function currentHome() {
+  return path.resolve(
+    resolveHome({ envHome: process.env.FINKB_HOME || '', homedir: os.homedir() }),
+  );
 }
 
 async function envPathFor(home) {
@@ -84,8 +53,8 @@ async function readEnvText(envPath) {
   }
 }
 
-async function statusFor(config) {
-  const home = await currentHome(config);
+async function statusFor() {
+  const home = currentHome();
   const envPath = await envPathFor(home);
   const map = await readEnv(envPath);
   const exists = await fs
@@ -166,7 +135,7 @@ function trustedRequest(req, trustedHosts = []) {
   }
 }
 
-async function handleApi(req, res, config, logger, trustedHosts) {
+async function handleApi(req, res, logger, trustedHosts) {
   if (!trustedRequest(req, trustedHosts)) {
     writeJson(res, 403, { ok: false, message: 'forbidden' });
     return;
@@ -182,16 +151,12 @@ async function handleApi(req, res, config, logger, trustedHosts) {
     const action = body?.action;
 
     if (action === 'status') {
-      writeJson(res, 200, { ok: true, ...(await statusFor(config)) });
+      writeJson(res, 200, { ok: true, ...(await statusFor()) });
       return;
     }
 
     if (action === 'save') {
-      const requestedHome = typeof body.finkbHome === 'string' ? body.finkbHome.trim() : '';
-      const home = requestedHome
-        ? path.resolve(expandHome(requestedHome, os.homedir()))
-        : await currentHome(config);
-      if (requestedHome) await saveHome(home);
+      const home = currentHome();
       const envPath = await envPathFor(home);
       const previous = await readEnvText(envPath);
       const updates = {};
@@ -214,15 +179,15 @@ async function handleApi(req, res, config, logger, trustedHosts) {
   }
 }
 
-function mountApi(wctx, config, logger, trustedHosts) {
+function mountApi(wctx, logger, trustedHosts) {
   return wctx.webServer.register({
     kind: 'prefix',
     path: '/finkb-settings/api',
-    handler: (req, res) => handleApi(req, res, config, logger, trustedHosts),
+    handler: (req, res) => handleApi(req, res, logger, trustedHosts),
   });
 }
 
-export function apply(ctx, config) {
+export function apply(ctx) {
   const logger = ctx.logger('finkb-settings');
   // webStartup 是 DSH 0.2.x 新服务，webRuntime 是旧名；两者取其一，避免重复挂载。
   const candidates = new Map();
@@ -236,7 +201,7 @@ export function apply(ctx, config) {
     dispose = undefined;
     active = next;
     if (next) {
-      dispose = mountApi(next.ctx, config, logger, next.trustedHosts);
+      dispose = mountApi(next.ctx, logger, next.trustedHosts);
       logger.info?.('FinKB 设置接口已挂载：/finkb-settings/api');
     }
   };

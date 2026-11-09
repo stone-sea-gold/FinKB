@@ -33,12 +33,6 @@ window.__ModuleLoader__.load({
 
     const FIELDS = [
       {
-        key: 'finkbHome',
-        label: '知识库目录',
-        hint: 'FinKB 数据目录。留空则用 FINKB_HOME，再退到 ~/.finkb。源码仓库模式通常填 .../reporting/finkb。',
-        placeholder: '例如 /home/me/code/reporting/finkb',
-      },
-      {
         key: 'llmApiKey',
         label: 'LLM API Key',
         secret: true,
@@ -133,7 +127,7 @@ window.__ModuleLoader__.load({
           .then((data) => {
             if (!alive) return;
             setStatus(data);
-            setValues({ finkbHome: data.home, llmBaseUrl: data.values.llmBaseUrl, llmModel: data.values.llmModel });
+            setValues({ llmBaseUrl: data.values.llmBaseUrl, llmModel: data.values.llmModel });
           })
           .catch((error) => {
             if (alive) setMessage('读取状态失败：' + error.message);
@@ -155,12 +149,11 @@ window.__ModuleLoader__.load({
         setBusy(true);
         setMessage('');
         try {
-          const data = await call({ action: 'save', finkbHome: values.finkbHome ?? '', values: secrets });
+          const data = await call({ action: 'save', values: secrets });
           setStatus(data);
           setSecrets({});
           setValues((previous) => ({
             ...previous,
-            finkbHome: data.home,
             llmBaseUrl: data.values.llmBaseUrl,
             llmModel: data.values.llmModel,
           }));
@@ -199,7 +192,7 @@ window.__ModuleLoader__.load({
           h(
             'p',
             { key: 'intro', style: { margin: 0, color: T.label2, fontSize: '13px', lineHeight: 1.6 } },
-            '这里的配置写入 FinKB 的 .env 文件。保存后立即生效：FinKB 每次调用都会重新读取 .env，不需要重启 DSH 或 MCP 进程。',
+            '这里只配置密钥与模型地址，写入 FinKB 的 .env 文件。保存后立即生效：FinKB 每次调用都会重新读取 .env，不需要重启 DSH 或 MCP 进程。知识库目录属于部署期配置，请用环境变量 FINKB_HOME 指定。',
           ),
           status
             ? h(
@@ -218,6 +211,11 @@ window.__ModuleLoader__.load({
                   },
                 },
                 [
+                  h(
+                    'div',
+                    { key: 'h' },
+                    '知识库目录（部署期 FINKB_HOME 决定，运行期不可改）：' + status.home,
+                  ),
                   h('div', { key: 'p' }, '配置文件：' + status.envPath + (status.exists ? '' : '（尚不存在，保存时创建）')),
                   h(
                     'div',

@@ -107,7 +107,6 @@ dsh plugin --profile web add github:<owner>/<repo>#v0.2.0
 
 | 字段 | 写入 `.env` 的键 | 说明 |
 |---|---|---|
-| 知识库目录 | —（写入 `$DSH_HOME/finkb-settings.json`） | 留空则用 `FINKB_HOME`，再退到 `~/.finkb` |
 | LLM API Key | `LLM_API_KEY` | 必填；事实抽取、合成、视觉解读 |
 | LLM Base URL | `LLM_BASE_URL` | 留空用默认值 |
 | LLM 模型 | `LLM_MODEL` | 留空用默认 `deepseek-v4.1-flash` |
@@ -115,6 +114,7 @@ dsh plugin --profile web add github:<owner>/<repo>#v0.2.0
 | MinerU Token | `MINERU_API_TOKEN` | 可选，导入新 PDF 时的高质量解析 |
 
 - **热加载**：保存后不需要重启 DSH 或 MCP 进程。FinKB 每次调用都会重新读取 `$FINKB_HOME/config/.env`，下一次工具调用就生效。
+- **知识库目录不在这里改**：目录由部署环境变量 `FINKB_HOME` 决定（MCP 子进程启动时固定），运行期修改需要重启 DSH。卡片上只显示当前目录，避免“保存成功却没生效”的错位。
 - **留空 = 保持不变**：密钥输入框留空不会清掉已配置的值；输入框占位符显示“已配置/未配置”。
 - **不回传明文**：状态接口只返回“是否已配置”和 Base URL/模型，不返回密钥原文。
 - **为什么不在 shell 里配**：DSH 启动 MCP 子进程时会清洗名字含 `KEY`/`TOKEN`/`SECRET` 的环境变量，所以密钥写文件最稳。
@@ -138,6 +138,7 @@ dsh plugin --profile web add github:<owner>/<repo>#v0.2.0
 ## 常见问题
 
 - **设置页没有「FinKB」**：确认 `finkb-dsh` 已启用且 DSH 是 Web 形态（纯对话部署没有 `webServer`，不挂设置接口）；看 DSH 日志里 `finkb-settings` 是否有报错。
+- **想换知识库目录**：设置页不提供修改；设置环境变量 `FINKB_HOME` 后重启 DSH，卡片会显示新目录。
 - **保存提示失败**：检查 `$DSH_HOME` 可写、知识库目录可写；接口只接受本机同源请求，远程访问时需要在 DSH 的 trusted hosts 里放行。
 - **工具没出现**：说明 `finkb-mcp` 没启动。先单独运行 `finkb-mcp`（或 `FINKB_MCP_BIN=...`）看报错；DSH 日志里会有 MCP 连接失败信息。本包故意设 `failOnStartupError: false`，不阻断 DSH 启动。
 - **工具报“知识库为空”**：`FINKB_HOME` 没设或没建库，按前置条件初始化并导入年报。

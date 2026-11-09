@@ -66,6 +66,8 @@ def test_settings_files_and_endpoint_exist() -> None:
     assert "webServer.register" in server
     assert "settings.section" in client
     assert "label: 'FinKB'" in client
+    # 知识库目录是部署期配置，卡片不再提供运行期修改入口
+    assert "finkbHome" not in client
     assert "LLM_API_KEY" in env
     assert "SILICONFLOW_API_KEY" in env
     assert "MINERU_API_TOKEN" in env

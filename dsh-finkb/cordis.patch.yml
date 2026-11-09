@@ -25,6 +25,4 @@
         failOnStartupError: false
     - id: finkb-settings
       name: 'finkb-dsh'
-      config:
-        # 可选：显式指定 FinKB 知识库目录；留空则用 FINKB_HOME 或 ~/.finkb。
-        finkbHome: ''
+      # 无配置项：知识库目录走部署环境 FINKB_HOME，密钥走设置页。
