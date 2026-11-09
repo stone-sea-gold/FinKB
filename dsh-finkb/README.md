@@ -100,6 +100,7 @@ dsh plugin --profile web add github:<owner>/<repo>#v0.2.0
 
 1. **密钥请写在 `$FINKB_HOME/config/.env`，不要只靠 shell 环境变量。** DSH 启动 MCP 子进程时会清洗继承环境，名字含 `KEY`/`PASSWORD`/`SECRET`/`TOKEN` 的变量（如 `LLM_API_KEY`）会被丢掉；FinKB 会读 `$FINKB_HOME/config/.env`，所以写在文件里最稳。
 2. `FINKB_HOME`、`FINKB_MCP_BIN`、`FINKB_LLM_SYNTH` 不匹配清洗规则，可以放在 shell 环境或 DSH 启动环境里。
+3. 如果 DSH 是从桌面入口启动、环境里没有 `FINKB_HOME`，可以在 profile patch 里给两处配置同一个目录：`mcp-finkb` 的 `env.FINKB_HOME`（Python 服务用）和 `finkb-settings` 的 `config.finkbHome`（设置页显示/写 `.env` 用）。
 
 ## 设置页（密钥卡片）
 

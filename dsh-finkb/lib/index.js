@@ -27,16 +27,22 @@ export const name = 'finkb-settings';
 export const inject = [];
 
 export const Config = z.object({
-  // 知识库目录是部署期配置（FINKB_HOME），不放在运行期设置里：
-  // 这个卡片只负责写 .env，改 Key 能热加载，改目录不能（MCP 子进程启动时已固定）。
+  // 知识库目录是部署期配置：优先 FINKB_HOME，其次这里配置的 finkbHome，
+  // 最后退到 ~/.finkb。卡片只负责写 .env，改 Key 能热加载，改目录不能
+  // （MCP 子进程启动时已固定），所以这个字段只允许从 profile patch 设置。
+  finkbHome: z.string().default(''),
 });
 
 const MAX_BODY_BYTES = 64 * 1024;
 
-/** 知识库目录只由部署环境决定：FINKB_HOME > ~/.finkb。 */
-function currentHome() {
+/** 知识库目录只由部署环境决定：finkbHome 配置 > FINKB_HOME > ~/.finkb。 */
+function currentHome(explicit = '') {
   return path.resolve(
-    resolveHome({ envHome: process.env.FINKB_HOME || '', homedir: os.homedir() }),
+    resolveHome({
+      explicit,
+      envHome: process.env.FINKB_HOME || '',
+      homedir: os.homedir(),
+    }),
   );
 }
 
@@ -53,8 +59,8 @@ async function readEnvText(envPath) {
   }
 }
 
-async function statusFor() {
-  const home = currentHome();
+async function statusFor(explicitHome = '') {
+  const home = currentHome(explicitHome);
   const envPath = await envPathFor(home);
   const map = await readEnv(envPath);
   const exists = await fs
@@ -135,7 +141,7 @@ function trustedRequest(req, trustedHosts = []) {
   }
 }
 
-async function handleApi(req, res, logger, trustedHosts) {
+async function handleApi(req, res, logger, trustedHosts, explicitHome = '') {
   if (!trustedRequest(req, trustedHosts)) {
     writeJson(res, 403, { ok: false, message: 'forbidden' });
     return;
@@ -151,12 +157,12 @@ async function handleApi(req, res, logger, trustedHosts) {
     const action = body?.action;
 
     if (action === 'status') {
-      writeJson(res, 200, { ok: true, ...(await statusFor()) });
+      writeJson(res, 200, { ok: true, ...(await statusFor(explicitHome)) });
       return;
     }
 
     if (action === 'save') {
-      const home = currentHome();
+      const home = currentHome(explicitHome);
       const envPath = await envPathFor(home);
       const previous = await readEnvText(envPath);
       const updates = {};
@@ -179,16 +185,17 @@ async function handleApi(req, res, logger, trustedHosts) {
   }
 }
 
-function mountApi(wctx, logger, trustedHosts) {
+function mountApi(wctx, logger, trustedHosts, explicitHome) {
   return wctx.webServer.register({
     kind: 'prefix',
     path: '/finkb-settings/api',
-    handler: (req, res) => handleApi(req, res, logger, trustedHosts),
+    handler: (req, res) => handleApi(req, res, logger, trustedHosts, explicitHome),
   });
 }
 
-export function apply(ctx) {
+export function apply(ctx, config) {
   const logger = ctx.logger('finkb-settings');
+  const explicitHome = String(config?.finkbHome ?? '');
   // webStartup 是 DSH 0.2.x 新服务，webRuntime 是旧名；两者取其一，避免重复挂载。
   const candidates = new Map();
   let active;
@@ -201,7 +208,7 @@ export function apply(ctx) {
     dispose = undefined;
     active = next;
     if (next) {
-      dispose = mountApi(next.ctx, logger, next.trustedHosts);
+      dispose = mountApi(next.ctx, logger, next.trustedHosts, explicitHome);
       logger.info?.('FinKB 设置接口已挂载：/finkb-settings/api');
     }
   };
