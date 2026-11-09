@@ -176,10 +176,26 @@ finkb status
 
 | 类别 | 工具 |
 | --- | --- |
-| 问答 | `ask`、`query_metric`、`search_documents`、`describe_ontology`、`traverse_relations` |
+| 问答 | `ask`、`compare`、`query_metric`、`search_documents`、`describe_ontology`、`traverse_relations` |
+| 合成/审查 | `evidence`、`verify` |
 | 本地库 | `init_library`、`library_status`、`list_documents`、`add_document`、`remove_document`、`rebuild_index` |
 
 > MCP 客户端通常有超时限制；`add_document` 首次解析/抽取可能较慢，建议先用 CLI 建库，再让 Agent 用问答工具。
+
+## 使用（DSH 插件版）
+
+`dsh-finkb/` 是本仓库的 **DSH 插件发布版**（npm bundle，版本 `finkb-dsh@0.2.0`）：把同一套 MCP 服务、14 个工具、「财报助手」预设和设置页密钥卡片一次性接入 DSH，不复制任何业务逻辑、不带数据。
+
+```bash
+# 先装 Python 端（提供 finkb-mcp），再装 DSH 插件
+pip install finkb
+dsh plugin --profile web add file:/绝对路径/FinKB/dsh-finkb
+export FINKB_MCP_BIN=/绝对路径/.venv/bin/finkb-mcp   # 开发态需要；pip 安装后在 PATH 上可省略
+```
+
+装完后：插件页出现 `finkb-dsh`、会话里多 14 个 `mcp__finkb__*` 工具、预设选择器多「财报助手」、设置页左侧多「FinKB」（填密钥、保存即热加载）。
+
+详见 [`dsh-finkb/README.md`](dsh-finkb/README.md)。
 
 ## 数据目录、备份与迁移
 
