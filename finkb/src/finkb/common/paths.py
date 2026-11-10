@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import sys
@@ -18,7 +19,29 @@ _DEFAULT_HOME = (
     if (PACKAGE_ROOT / "config" / "metric_dict.yaml").exists()
     else Path.home() / ".finkb"
 )
-HOME = Path(os.environ.get("FINKB_HOME") or _DEFAULT_HOME).expanduser().resolve()
+
+
+def _home_from_settings_file() -> Path | None:
+    """宿主（如 DSH 插件）选定的工作区：``{"home": "/.../finkb-data"}``。"""
+    settings_file = os.environ.get("FINKB_SETTINGS_FILE")
+    if not settings_file:
+        return None
+    try:
+        payload = json.loads(Path(settings_file).expanduser().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    raw = str(payload.get("home") or "").strip()
+    if not raw:
+        return None
+    candidate = Path(raw).expanduser()
+    if not candidate.is_absolute():
+        candidate = Path(settings_file).expanduser().parent / candidate
+    return candidate.resolve()
+
+
+HOME = Path(
+    os.environ.get("FINKB_HOME") or _home_from_settings_file() or _DEFAULT_HOME
+).expanduser().resolve()
 
 # 用户库里需要有一份可改的配置模板；只复制缺失项，不覆盖用户改动。
 CONFIG_GLOBS = ("*.yaml", "*.yml")

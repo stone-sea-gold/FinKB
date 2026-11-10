@@ -184,7 +184,7 @@ finkb status
 
 ## 使用（DSH 插件版）
 
-`dsh-finkb/` 是本仓库的 **DSH 插件发布版**（npm bundle，版本 `finkb-dsh@0.2.0`）：把同一套 MCP 服务、14 个工具、「财报助手」预设和设置页密钥卡片一次性接入 DSH，不复制任何业务逻辑、不带数据。
+`dsh-finkb/` 是本仓库的 **DSH 插件发布版**（npm bundle，版本 `finkb-dsh@0.2.1`）：把同一套 MCP 服务、14 个工具、「财报助手」预设和设置页密钥卡片一次性接入 DSH，不复制任何业务逻辑、不带数据。
 
 ```bash
 # 先装 Python 端（提供 finkb-mcp），再装 DSH 插件
@@ -193,7 +193,7 @@ dsh plugin --profile web add file:/绝对路径/FinKB/dsh-finkb
 export FINKB_MCP_BIN=/绝对路径/.venv/bin/finkb-mcp   # 开发态需要；pip 安装后在 PATH 上可省略
 ```
 
-装完后：插件页出现 `finkb-dsh`、会话里多 14 个 `mcp__finkb__*` 工具、预设选择器多「财报助手」、设置页左侧多「FinKB」（填密钥、保存即热加载）。
+装完后：插件页出现 `finkb-dsh`、会话里多 14 个 `mcp__finkb__*` 工具、预设选择器多「财报助手」、设置页左侧多「FinKB」（选择知识库所在工作区、填密钥；密钥保存即热加载）。知识库数据默认收在**所选 DSH 工作区**的 `finkb-data/` 里，第一次使用前建议先建一个干净的工作区。
 
 详见 [`dsh-finkb/README.md`](dsh-finkb/README.md)。
 

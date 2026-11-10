@@ -9,7 +9,7 @@
  * （`LLMConfig.from_env()` 内部 `load_env_file()`），所以保存后下一次工具调用就生效。
  */
 import { promises as fs } from 'node:fs';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import z from '@deepseek-ai/schemastery';
@@ -51,15 +51,33 @@ function pythonFor(configPython) {
 
 const MAX_BODY_BYTES = 64 * 1024;
 
-/** 知识库目录只由部署环境决定：finkbHome 配置 > FINKB_HOME > ~/.finkb。 */
-function currentHome(explicit = '') {
-  return path.resolve(
-    resolveHome({
-      explicit,
-      envHome: process.env.FINKB_HOME || '',
-      homedir: os.homedir(),
-    }),
-  );
+/** DSH 设置文件：记录用户选定的工作区，MCP 子进程也靠它解析 FINKB_HOME。 */
+const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), '.dsh');
+const SETTINGS_FILE =
+  process.env.FINKB_SETTINGS_FILE || path.join(DSH_HOME, 'finkb-settings.json');
+
+async function readSettings() {
+  try {
+    const raw = await fs.readFile(SETTINGS_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+async function writeSettings(value) {
+  await fs.mkdir(path.dirname(SETTINGS_FILE), { recursive: true });
+  await fs.writeFile(SETTINGS_FILE, JSON.stringify(value, null, 2) + '\n', 'utf8');
+}
+
+/** 知识库目录优先级：部署期 finkbHome > FINKB_HOME > 卡片选择 > ~/.finkb。 */
+async function currentHome(explicit = '') {
+  if (explicit) return path.resolve(explicit);
+  if (process.env.FINKB_HOME) return path.resolve(process.env.FINKB_HOME);
+  const settings = await readSettings();
+  if (settings.home) return path.resolve(String(settings.home));
+  return path.resolve(os.homedir(), '.finkb');
 }
 
 async function envPathFor(home) {
@@ -75,15 +93,62 @@ async function readEnvText(envPath) {
   }
 }
 
-async function statusFor(explicitHome = '') {
-  const home = currentHome(explicitHome);
+async function statusFor(explicitHome = '', workspaces = []) {
+  const home = await currentHome(explicitHome);
+  const settings = await readSettings();
   const envPath = await envPathFor(home);
   const map = await readEnv(envPath);
   const exists = await fs
     .access(envPath)
     .then(() => true)
     .catch(() => false);
-  return { ...publicStatus(home, envPath, map, exists), rawDir: path.join(home, 'raw') };
+  const initialized = await fs
+    .access(path.join(home, 'data'))
+    .then(() => true)
+    .catch(() => false);
+  return {
+    ...publicStatus(home, envPath, map, exists),
+    rawDir: path.join(home, 'raw'),
+    settingsFile: SETTINGS_FILE,
+    selectedWorkspacePath: settings.workspacePath || '',
+    selectedHome: settings.home || '',
+    initialized,
+    workspaces,
+  };
+}
+
+function workspaceOptions(registry) {
+  let list = [];
+  try {
+    list = registry?.list?.() ?? [];
+  } catch {
+    return [];
+  }
+  return list
+    .map((entity) => ({
+      id: String(entity?.id ?? ''),
+      path: String(entity?.path ?? ''),
+      title: String(entity?.title ?? '') || path.basename(String(entity?.path ?? '')),
+    }))
+    .filter((entry) => entry.path);
+}
+
+function initLibrary(home, pythonBin) {
+  const python = pythonFor(pythonBin);
+  const result = spawnSync(python, ['-m', 'finkb.library', 'init'], {
+    cwd: home,
+    env: { ...process.env, FINKB_HOME: home, PYTHONUNBUFFERED: '1' },
+    encoding: 'utf8',
+    timeout: 120000,
+  });
+  const output = `${result.stdout || ''}${result.stderr || ''}`.trim();
+  const error = result.error ? String(result.error.message || result.error) : '';
+  return {
+    ok: result.status === 0,
+    output: (output || (error ? '启动 Python 失败：' + error : '')).slice(-4000),
+    exitCode: result.status,
+    error,
+  };
 }
 
 function readBody(req) {
@@ -240,7 +305,7 @@ async function startImport(body, home, pythonBin) {
   return { jobId: id, state: job.state };
 }
 
-async function handleApi(req, res, logger, trustedHosts, explicitHome = '', pythonBin = '') {
+async function handleApi(req, res, logger, trustedHosts, explicitHome = '', pythonBin = '', workspacesProvider = () => []) {
   if (!trustedRequest(req, trustedHosts)) {
     writeJson(res, 403, { ok: false, message: 'forbidden' });
     return;
@@ -256,7 +321,7 @@ async function handleApi(req, res, logger, trustedHosts, explicitHome = '', pyth
     const action = body?.action;
 
     if (action === 'import') {
-      const started = await startImport(body, currentHome(explicitHome), pythonFor(pythonBin));
+      const started = await startImport(body, await currentHome(explicitHome), pythonFor(pythonBin));
       if (started.error) {
         writeJson(res, 400, { ok: false, message: started.error });
         return;
@@ -283,12 +348,64 @@ async function handleApi(req, res, logger, trustedHosts, explicitHome = '', pyth
     }
 
     if (action === 'status') {
-      writeJson(res, 200, { ok: true, ...(await statusFor(explicitHome)) });
+      const workspaces = workspacesProvider();
+      writeJson(res, 200, { ok: true, ...(await statusFor(explicitHome, workspaces)) });
+      return;
+    }
+
+    if (action === 'workspaces') {
+      writeJson(res, 200, { ok: true, workspaces: workspacesProvider() });
+      return;
+    }
+
+    if (action === 'choose') {
+      const workspaces = workspacesProvider();
+      const id = String(body?.workspaceId ?? '').trim();
+      const requested = String(body?.workspacePath ?? '').trim();
+      const chosen = id
+        ? workspaces.find((entry) => entry.id === id)
+        : { path: requested };
+      if (!chosen?.path) {
+        writeJson(res, 400, { ok: false, message: '请选择一个工作区' });
+        return;
+      }
+      const workspacePath = path.resolve(String(chosen.path));
+      try {
+        const stat = await fs.stat(workspacePath);
+        if (!stat.isDirectory()) throw new Error('not a directory');
+      } catch {
+        writeJson(res, 400, { ok: false, message: '工作区目录不存在：' + workspacePath });
+        return;
+      }
+      const home = path.join(workspacePath, 'finkb-data');
+      const settings = await readSettings();
+      await writeSettings({
+        ...settings,
+        workspacePath,
+        home,
+        chosenAt: new Date().toISOString(),
+      });
+      logger?.info?.(`knowledge base -> ${home}`);
+      writeJson(res, 200, { ok: true, ...(await statusFor(explicitHome, workspaces)), restartRequired: true });
+      return;
+    }
+
+    if (action === 'init') {
+      const home = await currentHome(explicitHome);
+      await fs.mkdir(home, { recursive: true });
+      const result = initLibrary(home, pythonFor(pythonBin));
+      writeJson(res, 200, {
+        ok: true,
+        home,
+        initialized: result.ok,
+        output: result.output,
+        message: result.ok ? '知识库目录已初始化：' + home : '初始化失败，请看输出',
+      });
       return;
     }
 
     if (action === 'save') {
-      const home = currentHome(explicitHome);
+      const home = await currentHome(explicitHome);
       const envPath = await envPathFor(home);
       const previous = await readEnvText(envPath);
       const updates = {};
@@ -311,11 +428,12 @@ async function handleApi(req, res, logger, trustedHosts, explicitHome = '', pyth
   }
 }
 
-function mountApi(wctx, logger, trustedHosts, explicitHome, pythonBin) {
+function mountApi(wctx, logger, trustedHosts, explicitHome, pythonBin, workspacesProvider) {
   return wctx.webServer.register({
     kind: 'prefix',
     path: '/finkb-settings/api',
-    handler: (req, res) => handleApi(req, res, logger, trustedHosts, explicitHome, pythonBin),
+    handler: (req, res) =>
+      handleApi(req, res, logger, trustedHosts, explicitHome, pythonBin, workspacesProvider),
   });
 }
 
@@ -327,6 +445,17 @@ export function apply(ctx, config) {
   const candidates = new Map();
   let active;
   let dispose;
+  let workspacesProvider = () => [];
+
+  // 工作区列表来自 DSH 的 workspaceRegistry；纯对话部署没有它时返回空列表。
+  ctx.inject(['workspaceRegistry'], (wctx) => {
+    wctx.effect(() => {
+      workspacesProvider = () => workspaceOptions(wctx.workspaceRegistry);
+      return () => {
+        workspacesProvider = () => [];
+      };
+    });
+  });
 
   const reconcile = () => {
     const next = candidates.get('webStartup') ?? candidates.get('webRuntime');
@@ -335,7 +464,14 @@ export function apply(ctx, config) {
     dispose = undefined;
     active = next;
     if (next) {
-      dispose = mountApi(next.ctx, logger, next.trustedHosts, explicitHome, pythonBin);
+      dispose = mountApi(
+        next.ctx,
+        logger,
+        next.trustedHosts,
+        explicitHome,
+        pythonBin,
+        () => workspacesProvider(),
+      );
       logger.info?.('FinKB 设置接口已挂载：/finkb-settings/api');
     }
   };

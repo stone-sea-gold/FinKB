@@ -91,3 +91,18 @@ def test_client_shows_import_and_key_advice():
     assert "导入年报" in client
     assert "建议填写" in client
     assert "rawDir" in client
+
+
+def test_workspace_selection_contract() -> None:
+    server = _read("lib/index.js")
+    client = _read("lib/client.js")
+    patch = _read("cordis.patch.yml")
+    # Host：从 workspaceRegistry 读工作区、选择后把 home 定为 <workspace>/finkb-data
+    assert "workspaceRegistry" in server
+    assert "action === 'choose'" in server
+    assert "finkb-data" in server
+    # MCP 子进程通过共享设置文件解析知识库目录
+    assert "FINKB_SETTINGS_FILE" in patch
+    # 客户端卡片：工作区选择器 + 初始化按钮
+    assert "选择 DSH 工作区" in client
+    assert "初始化知识库" in client

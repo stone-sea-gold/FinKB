@@ -19,10 +19,14 @@
         # 否则使用 PATH 上的 finkb-mcp（pip / pipx 安装后的默认形态）。
         command: !!js process.env.FINKB_MCP_BIN || 'finkb-mcp'
         args: []
+        # 设置页选定的工作区记在 DSH_HOME/finkb-settings.json；
+        # MCP 子进程启动时按这个文件解析 FINKB_HOME（见 finkb/common/paths.py）。
+        env:
+          FINKB_SETTINGS_FILE: !!js (process.env.DSH_HOME || ((process.env.HOME || '') + '/.dsh')) + '/finkb-settings.json'
         # 合成档（FINKB_LLM_SYNTH=1）最多两次 LLM 调用，默认 60 秒容易断。
         toolCallTimeoutMs: 180000
         # 没装 FinKB 时只记录错误、不阻断 DSH 启动；工具不出现，用户可自查。
         failOnStartupError: false
     - id: finkb-settings
       name: 'finkb-dsh'
-      # 无配置项：知识库目录走部署环境 FINKB_HOME，密钥走设置页。
+      # 无配置项：知识库目录由设置卡片选择（写入 DSH_HOME/finkb-settings.json），密钥也走设置页。

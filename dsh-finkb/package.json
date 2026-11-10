@@ -1,6 +1,6 @@
 {
   "name": "finkb-dsh",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "把本地 FinKB A股年报知识库接入 DSH：14 个 MCP 工具 + 「财报助手」预设 + 设置页密钥卡片",
   "license": "Apache-2.0",
   "type": "module",

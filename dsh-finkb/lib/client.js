@@ -130,6 +130,9 @@ window.__ModuleLoader__.load({
       const [importJob, setImportJob] = React.useState(null);
       const [importBusy, setImportBusy] = React.useState(false);
       const [importMessage, setImportMessage] = React.useState('');
+      const [wsChoice, setWsChoice] = React.useState('');
+      const [wsBusy, setWsBusy] = React.useState(false);
+      const [wsMessage, setWsMessage] = React.useState('');
 
       React.useEffect(() => {
         let alive = true;
@@ -137,6 +140,7 @@ window.__ModuleLoader__.load({
           .then((data) => {
             if (!alive) return;
             setStatus(data);
+            setWsChoice(data.selectedWorkspacePath || '');
             setValues({ llmBaseUrl: data.values.llmBaseUrl, llmModel: data.values.llmModel });
           })
           .catch((error) => {
@@ -182,6 +186,41 @@ window.__ModuleLoader__.load({
           setImportMessage('导入失败：' + error.message);
         } finally {
           setImportBusy(false);
+        }
+      };
+
+      const chooseWorkspace = async () => {
+        const workspacePath = wsChoice || status?.selectedWorkspacePath || '';
+        if (!workspacePath) {
+          setWsMessage('请先选择一个工作区');
+          return;
+        }
+        setWsBusy(true);
+        setWsMessage('');
+        try {
+          const data = await call({ action: 'choose', workspacePath });
+          setStatus(data);
+          setWsMessage('已选择：' + data.home + '。重载插件（或重启 DSH）后 MCP 才会使用新目录；之后点“初始化知识库”。');
+        } catch (error) {
+          setWsMessage('保存工作区失败：' + error.message);
+        } finally {
+          setWsBusy(false);
+        }
+      };
+
+      const initLibrary = async () => {
+        setWsBusy(true);
+        setWsMessage('');
+        try {
+          const data = await call({ action: 'init' });
+          setStatus((previous) =>
+            previous ? { ...previous, home: data.home, initialized: data.initialized } : previous,
+          );
+          setWsMessage(data.message + (data.output ? '\n' + data.output.slice(-800) : ''));
+        } catch (error) {
+          setWsMessage('初始化失败：' + error.message);
+        } finally {
+          setWsBusy(false);
         }
       };
 
@@ -240,7 +279,7 @@ window.__ModuleLoader__.load({
           h(
             'p',
             { key: 'intro', style: { margin: 0, color: T.label2, fontSize: '13px', lineHeight: 1.6 } },
-            '这里只配置密钥与模型地址，写入 FinKB 的 .env 文件。保存后立即生效：FinKB 每次调用都会重新读取 .env，不需要重启 DSH 或 MCP 进程。知识库目录属于部署期配置，请用环境变量 FINKB_HOME 指定。',
+            '这里配置密钥、模型地址与知识库位置。保存密钥后立即生效：FinKB 每次调用都会重新读取 .env，不需要重启 DSH 或 MCP 进程。切换知识库目录后需要重载插件，再点“初始化知识库”。',
           ),
           status
             ? h(
@@ -300,6 +339,94 @@ window.__ModuleLoader__.load({
                   configured.mineruToken ? null : '未填 MinerU Token → 新导入年报的表格/扫描页解析质量明显下降。',
                 ],
               )
+            : null,
+          h('div', { key: 'wh', style: { fontSize: '14px', fontWeight: 700, marginTop: '6px' } }, '知识库位置'),
+          h(
+            'p',
+            { key: 'wd', style: { margin: 0, color: T.label2, fontSize: '13px', lineHeight: 1.6 } },
+            '数据资产（raw/data/config/wiki）放在所选工作区的 finkb-data/ 目录；插件代码仍走 npm/pip，不写进工作区。首次使用建议先选一个干净的工作区。',
+          ),
+          status
+            ? [
+                h(
+                  'div',
+                  { key: 'ws', style: { display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' } },
+                  [
+                    h(
+                      'select',
+                      {
+                        key: 'sel',
+                        value: wsChoice,
+                        onChange: (event) => setWsChoice(event.target.value),
+                        style: { ...inputStyle, width: 'auto', minWidth: '260px', maxWidth: '420px' },
+                      },
+                      [
+                        h('option', { key: '', value: '' }, '— 选择 DSH 工作区 —'),
+                        ...(status.workspaces ?? []).map((workspace) =>
+                          h(
+                            'option',
+                            { key: workspace.id || workspace.path, value: workspace.path },
+                            (workspace.title || workspace.path) + '（' + workspace.path + '）',
+                          ),
+                        ),
+                      ],
+                    ),
+                    h(
+                      'button',
+                      {
+                        key: 'apply',
+                        type: 'button',
+                        disabled: wsBusy || !wsChoice,
+                        onClick: chooseWorkspace,
+                        style: {
+                          height: '32px',
+                          padding: '0 14px',
+                          borderRadius: '8px',
+                          border: '0.5px solid ' + T.border,
+                          background: T.bgNested,
+                          color: T.label,
+                          fontSize: '13px',
+                          cursor: wsBusy ? 'default' : 'pointer',
+                        },
+                      },
+                      wsBusy ? '处理中…' : '使用该工作区',
+                    ),
+                    h(
+                      'button',
+                      {
+                        key: 'init',
+                        type: 'button',
+                        disabled: wsBusy,
+                        onClick: initLibrary,
+                        style: {
+                          height: '32px',
+                          padding: '0 14px',
+                          borderRadius: '8px',
+                          border: '0.5px solid ' + T.border,
+                          background: T.bgNested,
+                          color: T.label,
+                          fontSize: '13px',
+                          cursor: wsBusy ? 'default' : 'pointer',
+                        },
+                      },
+                      '初始化知识库',
+                    ),
+                  ],
+                ),
+                h(
+                  'div',
+                  {
+                    key: 'wmsg',
+                    style: { fontSize: '12px', color: T.label2, lineHeight: 1.6, whiteSpace: 'pre-wrap' },
+                  },
+                  wsMessage ||
+                    ((status.workspaces ?? []).length === 0
+                      ? 'DSH 里还没有工作区：请先在左侧创建工作区，然后回到本页刷新。'
+                      : '当前资产目录：' +
+                        status.home +
+                        (status.selectedWorkspacePath ? '（来自工作区 ' + status.selectedWorkspacePath + '）' : '（尚未选择工作区）')),
+                ),
+              ]
             : null,
           ...FIELDS.map((field) =>
             Field({
